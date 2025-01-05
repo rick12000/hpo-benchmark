@@ -35,4 +35,5 @@ SEARCH_MODEL_TUNING_SPACE: dict[str, dict] = {
         "max_depth": [2, 3, 5, 10],
     },
     GP_NAME: {"kernel": [RBF(), RationalQuadratic()]},
-    KR_NAME: {"alpha": [0.001, 0.1, 1, 10]}}
+    KR_NAME: {"alpha": [0.001, 0.1, 1, 10]},
+}

@@ -64,6 +64,7 @@ def generate_data(
     sparsity=1.0,
     transformer: str = "linear",
     random_state=None,
+    to_array: bool = True,
 ):
     if random_state is not None:
         np.random.seed(random_state)
@@ -74,37 +75,31 @@ def generate_data(
 
     Y = create_signal(X=X, transformer=transformer)
 
-    linear_redundant_features = create_redundant_features(
-        X=X, n_redundant_linear=n_redundant_linear, n_x_features=n_x_features
-    )
-    X = np.hstack([X, linear_redundant_features])
-    uninformative_features = add_uninformative_features(
-        n_redundant_noise=n_redundant_noise, n_samples=n_samples
-    )
-    X = np.hstack([X, uninformative_features])
+    if n_redundant_linear > 0:
+        linear_redundant_features = create_redundant_features(
+            X=X, n_redundant_linear=n_redundant_linear, n_x_features=n_x_features
+        )
+        X = np.hstack([X, linear_redundant_features])
+    if n_redundant_noise > 0:
+        uninformative_features = add_uninformative_features(
+            n_redundant_noise=n_redundant_noise, n_samples=n_samples
+        )
+        X = np.hstack([X, uninformative_features])
 
     # Add noise
     Y = add_noise(Y, noise_level=noise_level)
 
     # Convert to DataFrame for better usability
     X_columns = (
-        [f"X{i+1}" for i in range(n_x_features)]
-        + [f"LinearRedundant{i+1}" for i in range(n_redundant_linear)]
-        + [f"NoiseRedundant{i+1}" for i in range(n_redundant_noise)]
+        [f"X{i + 1}" for i in range(n_x_features)]
+        + [f"LinearRedundant{i + 1}" for i in range(n_redundant_linear)]
+        + [f"NoiseRedundant{i + 1}" for i in range(n_redundant_noise)]
     )
     df_X = pd.DataFrame(X, columns=X_columns)
-    df_Y = pd.DataFrame(Y, columns=[f"Y{i+1}" for i in range(n_y_features)])
+    df_Y = pd.DataFrame(Y, columns=[f"Y{i + 1}" for i in range(n_y_features)])
+
+    if to_array:
+        df_X = df_X.to_numpy()
+        df_Y = df_Y.to_numpy().reshape(-1)
 
     return df_X, df_Y
-
-
-generate_data(
-    n_samples=1000,
-    n_x_features=3,
-    n_y_features=1,
-    noise_level=0.2,
-    n_redundant_linear=2,
-    n_redundant_noise=1,
-    sparsity=1,
-    random_state=1234,
-)

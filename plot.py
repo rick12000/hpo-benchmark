@@ -1,11 +1,10 @@
-import os
-
 import matplotlib
 import matplotlib.pyplot as plt
-import numpy as np
 from datetime import datetime
 
-import pandas as pd
+# from utils import q10, q90
+# import pandas as pd
+# import os
 
 matplotlib.rcParams["mathtext.fontset"] = "stix"
 matplotlib.rcParams["font.family"] = "STIXGeneral"
@@ -20,12 +19,6 @@ color_palette = [
     "tab:purple",
 ]
 marker_type_list = ["+", "x", "D", "o", "s", "h", "P"]
-
-plot_data_path = r"cache\data\2024-12-29_16-40-02\processed_benchmark_data.csv"
-plot_data = pd.read_csv(plot_data_path)
-
-
-import matplotlib.pyplot as plt
 
 
 def plot_benchmark_data(data, plot_path):
@@ -85,7 +78,7 @@ def plot_benchmark_data(data, plot_path):
     fig.legend(handles, labels, loc="upper center", ncol=len(handles), fontsize=10)
     fig.tight_layout()
 
-    my_dpi = 96
+    my_dpi = 500
     for format in ["eps", "png"]:
         plt.savefig(
             f"{plot_path}-{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.{format}",
@@ -96,8 +89,22 @@ def plot_benchmark_data(data, plot_path):
     plt.close()
 
 
-plot_path = f"cache/plots/{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}/"
-if not os.path.exists(plot_path):
-    os.makedirs(plot_path)
-# Call the function to plot the data
-plot_benchmark_data(plot_data, plot_path)
+# plot_data_path = r"cache\data\2025-01-05_00-40-25\incremental_raw_benchmark_data.csv"
+# plot_data = pd.read_csv(plot_data_path)
+
+# plot_data = plot_data.groupby(
+#     ["dataset", "model", "tuner", "runtime"], as_index=False
+# ).agg({"best_performance": ["mean", q10, q90]})
+# plot_data.columns = [
+#     "_".join(col) if isinstance(col, tuple) else col
+#     for col in plot_data.columns
+# ]
+# plot_data.columns = [
+#     col if col[-1] != "_" else col[:-1] for col in plot_data.columns
+# ]
+
+# plot_path = f"cache/plots/{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}/"
+# if not os.path.exists(plot_path):
+#     os.makedirs(plot_path)
+# # Call the function to plot the data
+# plot_benchmark_data(plot_data, plot_path)

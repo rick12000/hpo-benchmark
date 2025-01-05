@@ -1,9 +1,9 @@
 import random
-from typing import Tuple, Optional, Any
 from copy import deepcopy
 
 import numpy as np
 from sklearn.preprocessing import StandardScaler
+
 
 def train_val_split(
     X: np.array,
@@ -12,7 +12,7 @@ def train_val_split(
     normalize: bool = True,
     ordinal: bool = False,
     random_state: int = None,
-) -> Tuple[np.array, np.array, np.array, np.array]:
+) -> tuple[np.array, np.array, np.array, np.array]:
     """
     Split X and y data into training and validation sets.
 
@@ -75,9 +75,8 @@ def train_val_split(
 
     return X_train, y_train, X_val, y_val
 
-def update_model_parameters(
-    model_instance, configuration, random_state
-):
+
+def update_model_parameters(model_instance, configuration, random_state):
     """
     Updates the attributes of an initialized model object.
 
@@ -107,4 +106,3 @@ def update_model_parameters(
     if hasattr(updated_model_instance, "random_state"):
         setattr(updated_model_instance, "random_state", random_state)
     return updated_model_instance
-
