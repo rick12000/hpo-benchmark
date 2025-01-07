@@ -8,10 +8,12 @@ from hyperopt import fmin, tpe, hp, STATUS_OK, Trials, rand
 
 from preprocess import train_val_split, update_model_parameters
 import random
+import numpy as np
+
+from generate import ObjectiveSurfaceGenerator
 
 
-def optuna_objective(model, trial, X, y, train_split, normalize, random_state, params):
-    # TODO: Circle back to iterative calling of trial object below
+def set_optuna_params(trial, params):
     optuna_params = {}
     for param_name, param_values in params.items():
         if "__range_int" in param_name:
@@ -30,6 +32,12 @@ def optuna_objective(model, trial, X, y, train_split, normalize, random_state, p
             optuna_params[param_name] = trial.suggest_categorical(
                 param_name, param_values
             )
+    return optuna_params
+
+
+def optuna_objective(model, trial, X, y, train_split, normalize, random_state, params):
+    # TODO: Circle back to iterative calling of trial object below
+    optuna_params = set_optuna_params(trial=trial, params=params)
 
     model = update_model_parameters(
         model_instance=model, configuration=optuna_params, random_state=None
@@ -85,7 +93,55 @@ def optuna_tune(
     return historical_performance, best_value
 
 
-def confopt_tune(model, X, y, train_split, normalize, timeout, random_state, params):
+def optuna_artificial_objective(
+    trial, params, performance_generator: ObjectiveSurfaceGenerator
+):
+    # TODO: Circle back to iterative calling of trial object below
+    optuna_params = set_optuna_params(trial=trial, params=params)
+
+    return performance_generator.predict(x=np.array(list(optuna_params.values())))
+
+
+def optuna_artificial_tune(n_trials, params, performance_generator, sampler="tpe"):
+    if sampler == "tpe":
+        sampler_object = optuna.samplers.TPESampler()
+    elif sampler == "cma-es":
+        sampler_object = optuna.samplers.CmaEsSampler()
+    # TODO: change direction if doing classif
+    study = optuna.create_study(direction="minimize", sampler=sampler_object)
+    study.optimize(
+        lambda trial: optuna_artificial_objective(
+            trial=trial, params=params, performance_generator=performance_generator
+        ),
+        n_trials=n_trials,
+        n_jobs=1,
+    )
+
+    # TODO: Create data class to set keys for this across tuning functions:
+    historical_performance = pd.DataFrame(
+        [
+            {"end_time": n + 1, "performance": trial.value}
+            for n, trial in enumerate(study.trials)
+        ]
+    )
+
+    best_value = study.best_value
+
+    return historical_performance, best_value
+
+
+def confopt_tune(
+    model,
+    X,
+    y,
+    train_split,
+    normalize,
+    timeout,
+    random_state,
+    params,
+    conformal_search_estimator,
+    confidence_level,
+):
     X_train, y_train, X_val, y_val = train_val_split(
         X=X,
         y=y,
@@ -119,11 +175,11 @@ def confopt_tune(model, X, y, train_split, normalize, timeout, random_state, par
 
     searcher.search(
         runtime_budget=timeout,
-        conformal_search_estimator="qrf",
+        conformal_search_estimator=conformal_search_estimator,
         conformal_learning_rate=0.1,
         n_random_searches=20,
-        confidence_level=0.8,
-        conformal_retraining_frequency=1,
+        confidence_level=confidence_level,
+        conformal_retraining_frequency=5,
         verbose=False,
     )
 
@@ -244,7 +300,9 @@ def tune(
             params=params,
             sampler=sampler,
         )
-    elif tuner == "confopt":
+    elif "confopt" in tuner:
+        _, conformal_search_estimator, confidence_level = tuner.split("-")
+
         historical_performance, best_value = confopt_tune(
             model,
             X=X,
@@ -254,6 +312,8 @@ def tune(
             timeout=timeout,
             random_state=random_state,
             params=params,
+            conformal_search_estimator=conformal_search_estimator,
+            confidence_level=float(confidence_level),
         )
     elif "hyperopt" in tuner:
         if tuner == "hyperopt-tpe":
@@ -268,6 +328,24 @@ def tune(
             normalize=normalize,
             timeout=timeout,
             random_state=random_state,
+            params=params,
+            sampler=sampler,
+        )
+    else:
+        raise ValueError()
+
+    return historical_performance, best_value
+
+
+def tune_artificial(n_trials, performance_generator, tuner: str, params):
+    if "optuna" in tuner:
+        if tuner == "optuna-tpe":
+            sampler = "tpe"
+        elif tuner == "optuna-cmaes":
+            sampler = "cma-es"
+        historical_performance, best_value = optuna_artificial_tune(
+            n_trials=n_trials,
+            performance_generator=performance_generator,
             params=params,
             sampler=sampler,
         )

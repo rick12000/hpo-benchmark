@@ -2,7 +2,7 @@ from sklearn.datasets import fetch_california_housing, load_diabetes
 from sklearn.ensemble import RandomForestRegressor  # GradientBoostingRegressor
 import pandas as pd
 import numpy as np
-from tune import tune
+from tune import tune_artificial
 from datetime import datetime
 from utils import q10, q90
 import os
@@ -10,10 +10,11 @@ import os
 # import json
 import logging
 import optuna
-from generate import generate_data
+from generate import ObjectiveSurfaceGenerator
 from plot import plot_benchmark_data
 
 # from copy import deepcopy
+
 
 cache_path = "cache/"
 if not os.path.exists(cache_path):
@@ -39,10 +40,9 @@ logging.getLogger("hyperopt").setLevel(logging.ERROR)
 logging.getLogger("confopt").setLevel(logging.ERROR)
 optuna.logging.set_verbosity(optuna.logging.ERROR)
 
-train_split = 0.75
 normalize = True
 random_state = 1234
-n_repetitions = 20
+n_repetitions = 100
 
 cali_data = fetch_california_housing(return_X_y=True)
 diabetes_data = load_diabetes(return_X_y=True)
@@ -66,53 +66,17 @@ public_dataset_configs = [
 ]
 
 
-default_toy_data_params = {
-    "n_samples": 10000,
-    "n_x_features": 15,
-    "n_y_features": 1,
-    "noise_level": 0.25,
-    "n_redundant_linear": 0,
-    "n_redundant_noise": 5,
-    "sparsity": 1,
-    "transformer": "linear",
-    "random_state": 1234,
-    "to_array": True,
-}
+generator = ObjectiveSurfaceGenerator(generator="rastrigin")
 
-synthetic_dataset_configs = []
-# noise_level_values = [ 1]
-# for noise_level in noise_level_values:
-#     toy_data_params = deepcopy(default_toy_data_params)
-#     toy_data_params["sparsity"] = noise_level
-
-#     # Call the function using the dictionary unpacking syntax
-#     toy_data = generate_data(**toy_data_params)
-
-#     synthetic_dataset_configs.append(
-#         {
-#             "name": f"TOY_NOISE_{str(noise_level).replace('.', 'dec')}",
-#             "data": toy_data,
-#             "normalize": True,
-#             "evaluation_metric": "mean_squared_error",
-#             "evaluation_metric_direction": "inverse",
-#             "timeout": 30,
-#         }
-#     )
-
-synthetic_dataset_configs = [
+generator_configs = [
     {
-        "name": "TOY",
-        "data": generate_data(**default_toy_data_params),
+        "name": "rastrigin",
+        "data": generator,
         "normalize": True,
-        "evaluation_metric": "mean_squared_error",
         "evaluation_metric_direction": "inverse",
-        "timeout": 120,
+        "n_trials": 100,
     }
 ]
-
-dataset_configs = public_dataset_configs + synthetic_dataset_configs
-# dataset_configs =  synthetic_dataset_configs
-
 model_configs = [
     {
         "model_name": "Random Forest",
@@ -136,19 +100,18 @@ model_configs = [
     #     },
     # },
 ]
-tuners = ["confopt-qgbm-0.1", "optuna-tpe"]
+tuners = ["optuna-tpe", "optuna-cmaes"]
 
 # tuners = ["confopt", "optuna-tpe", "optuna-cmaes", "hyperopt-tpe", "hyperopt-random"]
 
 raw_benchmark_data = pd.DataFrame()
 
 logger.info("Running HPO benchmark...")
-for dataset_config in dataset_configs:
+for dataset_config in generator_configs:
     dataset_name = dataset_config["name"]
     logger.info(f"Dataset: {dataset_name}")
     metric_direction = dataset_config["evaluation_metric_direction"]
-    timeout = dataset_config["timeout"]
-    X, y = dataset_config["data"]
+    n_trials = dataset_config["n_trials"]
     for config in model_configs:
         logger.info(f"Model: {config['model_name']}")
         for tuner in tuners:
@@ -156,20 +119,13 @@ for dataset_config in dataset_configs:
             for repetition in range(n_repetitions):
                 logger.info(f"Repetition: {repetition}")
                 tune_start = datetime.now()
-                historical_performance, best_value = tune(
-                    model=config["model"],
-                    X=X,
-                    y=y,
-                    train_split=train_split,
-                    normalize=normalize,
+                historical_performance, best_value = tune_artificial(
+                    performance_generator=dataset_config["data"],
                     tuner=tuner,
-                    timeout=timeout,
-                    random_state=random_state,
+                    n_trials=n_trials,
                     params=config["params"],
                 )
-                historical_performance["runtime"] = (
-                    historical_performance["end_time"] - tune_start
-                ).dt.seconds
+                historical_performance["runtime"] = historical_performance["end_time"]
 
                 historical_performance["dataset"] = dataset_name
                 historical_performance["model"] = config["model_name"]
@@ -208,7 +164,7 @@ for dataset_config in dataset_configs:
                     {
                         "runtime": np.arange(
                             1,
-                            timeout,
+                            n_trials,
                             1,
                         )
                     }

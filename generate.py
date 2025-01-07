@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 from typing import Literal
+from hashlib import sha256
 
 
 def sparsify_features(X_sparsified: np.array, sparsity: float) -> np.array:
@@ -103,3 +104,33 @@ def generate_data(
         df_Y = df_Y.to_numpy().reshape(-1)
 
     return df_X, df_Y
+
+
+def noisy_rastrigin(x, A=10, noise_seed=42, noise=0.1):
+    # TODO: check if this performs as intended with the random seed hashing:
+    n = len(x)
+    # Use a hash of the input x and the seed to generate a unique state for RNG
+    x_bytes = x.tobytes()
+    combined_bytes = x_bytes + noise_seed.to_bytes(
+        4, "big"
+    )  # combines the bytes of the seed and x
+    hash_value = int.from_bytes(
+        sha256(combined_bytes).digest()[:4], "big"
+    )  # creates a hash and takes the first four bytes.
+    rng = np.random.default_rng(hash_value)
+
+    rastrigin_value = A * n + np.sum(x**2 - A * np.cos(2 * np.pi * x))
+
+    noise = rng.normal(loc=0.0, scale=noise)
+
+    return rastrigin_value + noise
+
+
+class ObjectiveSurfaceGenerator:
+    def __init__(self, generator: str):
+        self.generator = generator
+
+    def predict(self, x):
+        if self.generator == "rastrigin":
+            y = noisy_rastrigin(x=x)
+        return y
