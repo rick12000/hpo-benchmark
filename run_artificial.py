@@ -65,17 +65,42 @@ public_dataset_configs = [
     # },
 ]
 
-
-generator = ObjectiveSurfaceGenerator(generator="rastrigin")
-
 generator_configs = [
+    # {
+    #     "name": "rastrigin",
+    #     "data":  ObjectiveSurfaceGenerator(generator="rastrigin"),
+    #     "normalize": True,
+    #     "evaluation_metric_direction": "inverse",
+    #     "n_trials": 40,
+    # },
+    #     {
+    #     "name": "shekel",
+    #     "data":  ObjectiveSurfaceGenerator(generator="shekel"),
+    #     "normalize": True,
+    #     "evaluation_metric_direction": "inverse",
+    # "n_trials": 40,
+    # },
     {
-        "name": "rastrigin",
-        "data": generator,
+        "name": "weierstrass",
+        "data": ObjectiveSurfaceGenerator(generator="weierstrass"),
         "normalize": True,
         "evaluation_metric_direction": "inverse",
         "n_trials": 100,
-    }
+    },
+    {
+        "name": "griewank",
+        "data": ObjectiveSurfaceGenerator(generator="griewank"),
+        "normalize": True,
+        "evaluation_metric_direction": "inverse",
+        "n_trials": 40,
+    },
+    {
+        "name": "ackley",
+        "data": ObjectiveSurfaceGenerator(generator="ackley"),
+        "normalize": True,
+        "evaluation_metric_direction": "inverse",
+        "n_trials": 200,
+    },
 ]
 model_configs = [
     {
@@ -100,7 +125,7 @@ model_configs = [
     #     },
     # },
 ]
-tuners = ["optuna-tpe", "optuna-cmaes"]
+tuners = ["confopt-qgbm-0.1", "optuna-tpe"]
 
 # tuners = ["confopt", "optuna-tpe", "optuna-cmaes", "hyperopt-tpe", "hyperopt-random"]
 

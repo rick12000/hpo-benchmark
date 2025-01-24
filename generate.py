@@ -106,24 +106,107 @@ def generate_data(
     return df_X, df_Y
 
 
-def noisy_rastrigin(x, A=10, noise_seed=42, noise=0.1):
-    # TODO: check if this performs as intended with the random seed hashing:
+def noisy_rastrigin(x, A=20, noise_seed=42, noise=0.5):
     n = len(x)
-    # Use a hash of the input x and the seed to generate a unique state for RNG
     x_bytes = x.tobytes()
-    combined_bytes = x_bytes + noise_seed.to_bytes(
-        4, "big"
-    )  # combines the bytes of the seed and x
-    hash_value = int.from_bytes(
-        sha256(combined_bytes).digest()[:4], "big"
-    )  # creates a hash and takes the first four bytes.
+    combined_bytes = x_bytes + noise_seed.to_bytes(4, "big")
+    hash_value = int.from_bytes(sha256(combined_bytes).digest()[:4], "big")
     rng = np.random.default_rng(hash_value)
-
     rastrigin_value = A * n + np.sum(x**2 - A * np.cos(2 * np.pi * x))
-
     noise = rng.normal(loc=0.0, scale=noise)
-
     return rastrigin_value + noise
+
+
+def noisy_ackley(x, a=20, b=0.2, c=2 * np.pi, noise_seed=42, noise=0.5):
+    n = len(x)
+    x_bytes = x.tobytes()
+    combined_bytes = x_bytes + noise_seed.to_bytes(4, "big")
+    hash_value = int.from_bytes(sha256(combined_bytes).digest()[:4], "big")
+    rng = np.random.default_rng(hash_value)
+    term1 = -a * np.exp(-b * np.sqrt(np.sum(x**2) / n))
+    term2 = -np.exp(np.sum(np.cos(c * x)) / n)
+    ackley_value = term1 + term2 + a + np.exp(1)
+    noise = rng.normal(loc=0.0, scale=noise)
+    return ackley_value + noise
+
+
+def noisy_griewank(x, noise_seed=42, noise=0.5):
+    n = len(x)
+    x_bytes = x.tobytes()
+    combined_bytes = x_bytes + noise_seed.to_bytes(4, "big")
+    hash_value = int.from_bytes(sha256(combined_bytes).digest()[:4], "big")
+    rng = np.random.default_rng(hash_value)
+    term1 = np.sum(x**2) / 4000
+    term2 = 1
+    for i in range(n):
+        term2 *= np.cos(x[i] / np.sqrt(i + 1))
+    griewank_value = term1 - term2 + 1
+    noise = rng.normal(loc=0.0, scale=noise)
+    return griewank_value + noise
+
+
+def noisy_weierstrass(x, a=0.5, b=3, kmax=20, noise_seed=42, noise=0.5):
+    n = len(x)
+    x_bytes = x.tobytes()
+    combined_bytes = x_bytes + noise_seed.to_bytes(4, "big")
+    hash_value = int.from_bytes(sha256(combined_bytes).digest()[:4], "big")
+    rng = np.random.default_rng(hash_value)
+    weierstrass_value = 0
+    for i in range(n):
+        for k in range(kmax + 1):
+            weierstrass_value += (a**k) * np.cos(2 * np.pi * (b**k) * (x[i] + 0.5))
+        for k in range(kmax + 1):
+            weierstrass_value -= (a**k) * np.cos(2 * np.pi * (b**k) * 0.5)
+    noise = rng.normal(loc=0.0, scale=noise)
+    return weierstrass_value + noise
+
+
+def noisy_shekel(x, m=10, noise_seed=42, noise=0.5):  # m is the number of local minima
+    n = len(x)
+    x_bytes = x.tobytes()
+    combined_bytes = x_bytes + noise_seed.to_bytes(4, "big")
+    hash_value = int.from_bytes(sha256(combined_bytes).digest()[:4], "big")
+    rng = np.random.default_rng(hash_value)
+    A = np.random.rand(m, n) * 10  # random A matrix for each run
+    C = np.random.rand(m) * 10
+    shekel_value = 0
+    for i in range(m):
+        shekel_value -= 1 / (C[i] + np.sum((x - A[i]) ** 2))
+    noise = rng.normal(loc=0.0, scale=noise)
+    return shekel_value + noise
+
+
+def noisy_hartmann6(x, noise_seed=42, noise=0.5):
+    x_bytes = x.tobytes()
+    combined_bytes = x_bytes + noise_seed.to_bytes(4, "big")
+    hash_value = int.from_bytes(sha256(combined_bytes).digest()[:4], "big")
+    rng = np.random.default_rng(hash_value)
+    alpha = [1.0, 1.2, 3.0, 3.2]
+    A = np.array(
+        [
+            [1.0, 1.2, 3.0, 3.2],
+            [3.6, 1.6, 0.7, 3.9],
+            [4.0, 1.6, 0.8, 3.4],
+            [1.6, 0.0, 3.6, 0.8],
+            [1.6, 0.0, 3.6, 0.8],
+        ]
+    )
+    P = np.array(
+        [
+            [0.1312, 0.1696, 0.5569, 0.0124, 0.8283, 0.5894],
+            [0.2329, 0.4135, 0.8307, 0.3736, 0.1004, 0.9991],
+            [0.2348, 0.1451, 0.3522, 0.2883, 0.3047, 0.6650],
+            [0.4047, 0.8828, 0.8732, 0.5743, 0.1091, 0.0381],
+        ]
+    )
+    hartmann6_value = 0
+    for i in range(4):
+        inner_sum = 0
+        for j in range(6):
+            inner_sum += A[i, j] * (x[j] - P[i, j]) ** 2
+        hartmann6_value -= alpha[i] * np.exp(-inner_sum)
+    noise = rng.normal(loc=0.0, scale=noise)
+    return hartmann6_value + noise
 
 
 class ObjectiveSurfaceGenerator:
@@ -133,4 +216,16 @@ class ObjectiveSurfaceGenerator:
     def predict(self, x):
         if self.generator == "rastrigin":
             y = noisy_rastrigin(x=x)
+        elif self.generator == "ackley":
+            y = noisy_ackley(x=x)
+        elif self.generator == "griewank":
+            y = noisy_griewank(x=x)
+        elif self.generator == "weierstrass":
+            y = noisy_weierstrass(x=x)
+        elif self.generator == "shekel":
+            y = noisy_shekel(x=x)
+        elif self.generator == "hartmann6":
+            y = noisy_hartmann6(x=x)
+        else:
+            raise ValueError(f"Unknown generator: {self.generator}")
         return y

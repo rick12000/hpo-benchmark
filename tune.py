@@ -1,7 +1,7 @@
 from sklearn.metrics import mean_squared_error
 import pandas as pd
 
-from confopt.tuning import ConformalSearcher
+from confopt.tuning import ConformalSearcher, ObjectiveConformalSearcher
 import optuna
 
 from hyperopt import fmin, tpe, hp, STATUS_OK, Trials, rand
@@ -128,6 +128,68 @@ def optuna_artificial_tune(n_trials, params, performance_generator, sampler="tpe
     best_value = study.best_value
 
     return historical_performance, best_value
+
+
+def confopt_artificial_objective_function(
+    performance_generator: ObjectiveSurfaceGenerator,
+):
+    def objective_function(configuration):
+        # TODO: check that values always unravels in right order, don't tgink it does for dicts
+        return performance_generator.predict(x=np.array(list(configuration.values())))
+
+    return objective_function
+
+
+def confopt_artificial_tune(
+    params,
+    performance_generator,
+    conformal_search_estimator,
+    confidence_level,
+    max_iter,
+):
+    objective_function_in_scope = confopt_artificial_objective_function(
+        performance_generator=performance_generator
+    )
+
+    confopt_params = {}
+    for param_name, param_values in params.items():
+        if "__range_int" in param_name:
+            confopt_params[param_name.replace("__range_int", "")] = list(
+                range(param_values[0], param_values[1] + 1)
+            )
+        elif "__range_float" in param_name:
+            confopt_params[param_name.replace("__range_float", "")] = [
+                random.uniform(param_values[0], param_values[1]) for _ in range(100)
+            ]
+        else:
+            confopt_params[param_name] = param_values
+
+    searcher = ObjectiveConformalSearcher(
+        objective_function=objective_function_in_scope,
+        search_space=confopt_params,
+        metric_optimization="inverse",
+    )
+
+    searcher.search(
+        max_iter=max_iter,
+        conformal_search_estimator=conformal_search_estimator,
+        conformal_learning_rate=0.1,
+        n_random_searches=15,
+        confidence_level=confidence_level,
+        conformal_retraining_frequency=5,
+        verbose=False,
+    )
+
+    historical_performance = pd.DataFrame(
+        [
+            {"end_time": n + 1, "performance": performance}
+            for n, performance in enumerate(searcher.searched_performances)
+        ]
+    )
+
+    confopt_best_value = searcher.get_best_value()
+
+    return historical_performance, confopt_best_value
 
 
 def confopt_tune(
@@ -349,6 +411,17 @@ def tune_artificial(n_trials, performance_generator, tuner: str, params):
             params=params,
             sampler=sampler,
         )
+    elif "confopt" in tuner:
+        _, conformal_search_estimator, confidence_level = tuner.split("-")
+
+        historical_performance, best_value = confopt_artificial_tune(
+            params=params,
+            performance_generator=performance_generator,
+            conformal_search_estimator=conformal_search_estimator,
+            confidence_level=float(confidence_level),
+            max_iter=n_trials,
+        )
+
     else:
         raise ValueError()
 

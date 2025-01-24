@@ -10,7 +10,8 @@ import os
 # import json
 import logging
 import optuna
-from generate import generate_data
+
+# from generate import generate_data
 from plot import plot_benchmark_data
 
 # from copy import deepcopy
@@ -47,21 +48,21 @@ n_repetitions = 20
 cali_data = fetch_california_housing(return_X_y=True)
 diabetes_data = load_diabetes(return_X_y=True)
 public_dataset_configs = [
-    # {
-    #     "name": "CALI",
-    #     "data": cali_data,
-    #     "normalize": True,
-    #     "evaluation_metric": "mean_squared_error",
-    #     "evaluation_metric_direction": "inverse",
-    #     "timeout": 60*10,
-    # },
+    {
+        "name": "CALI",
+        "data": cali_data,
+        "normalize": True,
+        "evaluation_metric": "mean_squared_error",
+        "evaluation_metric_direction": "inverse",
+        "timeout": 60 * 5,
+    },
     # {
     #     "name": "DIABETES",
     #     "data": diabetes_data,
     #     "normalize": True,
     #     "evaluation_metric": "mean_squared_error",
     #     "evaluation_metric_direction": "inverse",
-    #     "timeout": 30,
+    #     "timeout": 60*3,
     # },
 ]
 
@@ -99,16 +100,16 @@ synthetic_dataset_configs = []
 #         }
 #     )
 
-synthetic_dataset_configs = [
-    {
-        "name": "TOY",
-        "data": generate_data(**default_toy_data_params),
-        "normalize": True,
-        "evaluation_metric": "mean_squared_error",
-        "evaluation_metric_direction": "inverse",
-        "timeout": 120,
-    }
-]
+# synthetic_dataset_configs = [
+#     {
+#         "name": "TOY",
+#         "data": generate_data(**default_toy_data_params),
+#         "normalize": True,
+#         "evaluation_metric": "mean_squared_error",
+#         "evaluation_metric_direction": "inverse",
+#         "timeout": 120,
+#     }
+# ]
 
 dataset_configs = public_dataset_configs + synthetic_dataset_configs
 # dataset_configs =  synthetic_dataset_configs
@@ -136,7 +137,7 @@ model_configs = [
     #     },
     # },
 ]
-tuners = ["confopt-qgbm-0.1", "optuna-tpe"]
+tuners = ["confopt-qgbm-0.9", "confopt-qgbm-0.1", "confopt-qrf-0.1", "optuna-tpe"]
 
 # tuners = ["confopt", "optuna-tpe", "optuna-cmaes", "hyperopt-tpe", "hyperopt-random"]
 
