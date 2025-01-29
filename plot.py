@@ -21,7 +21,9 @@ color_palette = [
 marker_type_list = ["+", "x", "D", "o", "s", "h", "P"]
 
 
-def plot_benchmark_data(data, plot_path):
+def plot_benchmark_data(
+    data, plot_path, y_col="best_performance", add_confidence_intervals=True
+):
     plt.clf()
     # Get unique datasets and models
     datasets = data["dataset"].unique()
@@ -45,23 +47,26 @@ def plot_benchmark_data(data, plot_path):
             subset = data[(data["dataset"] == dataset) & (data["model"] == model)]
 
             # Plot each tuner's data
-            for tuner, tuner_data in subset.groupby("tuner"):
+            for counter, (tuner, tuner_data) in enumerate(subset.groupby("tuner")):
                 ax.plot(
                     tuner_data["runtime"],
-                    tuner_data["best_performance_mean"],
+                    tuner_data[f"{y_col}_mean"],
                     label=f"{tuner}",
                     alpha=0.8,
-                )
-                # Add shaded region for q10 to q90
-                ax.fill_between(
-                    tuner_data["runtime"],
-                    tuner_data["best_performance_q10"],
-                    tuner_data["best_performance_q90"],
-                    alpha=0.2,
+                    color=color_palette[counter],
                 )
 
-            ymin = subset["best_performance_q10"].min()
-            ymax = subset["best_performance_q90"].max()
+                if add_confidence_intervals:
+                    # Add shaded region for q10 to q90
+                    ax.fill_between(
+                        tuner_data["runtime"],
+                        tuner_data[f"{y_col}_q10"],
+                        tuner_data[f"{y_col}_q90"],
+                        alpha=0.2,
+                    )
+
+            ymin = subset[f"{y_col}_q10"].min()
+            ymax = subset[f"{y_col}_q90"].max()
 
             # Add titles and labels
             if i == 0:
@@ -75,7 +80,7 @@ def plot_benchmark_data(data, plot_path):
 
     # Add legend
     handles, labels = ax.get_legend_handles_labels()
-    fig.legend(handles, labels, loc="upper center", ncol=len(handles), fontsize=10)
+    fig.legend(handles, labels, loc="upper center", ncol=3, fontsize=10)
     fig.tight_layout()
 
     my_dpi = 500

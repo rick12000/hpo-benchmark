@@ -3,6 +3,8 @@ import pandas as pd
 from typing import Literal
 from hashlib import sha256
 
+from jahs_bench import Benchmark
+
 
 def sparsify_features(X_sparsified: np.array, sparsity: float) -> np.array:
     # Apply sparsity by randomly zeroing out elements
@@ -213,7 +215,8 @@ class ObjectiveSurfaceGenerator:
     def __init__(self, generator: str):
         self.generator = generator
 
-    def predict(self, x):
+    def predict(self, params):
+        x = np.array(list(params.values()))
         if self.generator == "rastrigin":
             y = noisy_rastrigin(x=x)
         elif self.generator == "ackley":
@@ -229,3 +232,11 @@ class ObjectiveSurfaceGenerator:
         else:
             raise ValueError(f"Unknown generator: {self.generator}")
         return y
+
+
+class Jahs201Generator:
+    def __init__(self, dataset: str, metrics: list[str] = ["valid-acc"]):
+        self.generator = Benchmark(task=dataset, lazy=False, metrics=metrics)
+
+    def predict(self, params):
+        return -self.generator(params)[200]["valid-acc"]

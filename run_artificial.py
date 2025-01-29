@@ -1,5 +1,3 @@
-from sklearn.datasets import fetch_california_housing, load_diabetes
-from sklearn.ensemble import RandomForestRegressor  # GradientBoostingRegressor
 import pandas as pd
 import numpy as np
 from tune import tune_artificial
@@ -10,7 +8,7 @@ import os
 # import json
 import logging
 import optuna
-from generate import ObjectiveSurfaceGenerator
+from generate import Jahs201Generator  # , ObjectiveSurfaceGenerator
 from plot import plot_benchmark_data
 
 # from copy import deepcopy
@@ -42,28 +40,9 @@ optuna.logging.set_verbosity(optuna.logging.ERROR)
 
 normalize = True
 random_state = 1234
-n_repetitions = 100
+n_repetitions = 30
 
-cali_data = fetch_california_housing(return_X_y=True)
-diabetes_data = load_diabetes(return_X_y=True)
-public_dataset_configs = [
-    # {
-    #     "name": "CALI",
-    #     "data": cali_data,
-    #     "normalize": True,
-    #     "evaluation_metric": "mean_squared_error",
-    #     "evaluation_metric_direction": "inverse",
-    #     "timeout": 60*10,
-    # },
-    # {
-    #     "name": "DIABETES",
-    #     "data": diabetes_data,
-    #     "normalize": True,
-    #     "evaluation_metric": "mean_squared_error",
-    #     "evaluation_metric_direction": "inverse",
-    #     "timeout": 30,
-    # },
-]
+conv_trials = 200
 
 generator_configs = [
     # {
@@ -80,52 +59,89 @@ generator_configs = [
     #     "evaluation_metric_direction": "inverse",
     # "n_trials": 40,
     # },
+    # {
+    #     "name": "weierstrass",
+    #     "data": ObjectiveSurfaceGenerator(generator="weierstrass"),
+    #     "normalize": True,
+    #     "evaluation_metric_direction": "inverse",
+    #     "n_trials": 30,
+    # },
+    # {
+    #     "name": "griewank",
+    #     "data": ObjectiveSurfaceGenerator(generator="griewank"),
+    #     "normalize": True,
+    #     "evaluation_metric_direction": "inverse",
+    #     "n_trials": 30,
+    # },
+    # {
+    #     "name": "ackley",
+    #     "data": ObjectiveSurfaceGenerator(generator="ackley"),
+    #     "normalize": True,
+    #     "evaluation_metric_direction": "inverse",
+    #     "n_trials": 100,
+    # },
     {
-        "name": "weierstrass",
-        "data": ObjectiveSurfaceGenerator(generator="weierstrass"),
+        "name": "fashion_mnist",
+        "data": Jahs201Generator(dataset="fashion_mnist"),
         "normalize": True,
         "evaluation_metric_direction": "inverse",
-        "n_trials": 100,
+        "n_trials": conv_trials,
     },
+    # {
+    #     "name": "colorectal_histology",
+    #     "data": Jahs201Generator(dataset="colorectal_histology"),
+    #     "normalize": True,
+    #     "evaluation_metric_direction": "inverse",
+    #     "n_trials": conv_trials,
+    # },
     {
-        "name": "griewank",
-        "data": ObjectiveSurfaceGenerator(generator="griewank"),
+        "name": "cifar10",
+        "data": Jahs201Generator(dataset="cifar10"),
         "normalize": True,
         "evaluation_metric_direction": "inverse",
-        "n_trials": 40,
-    },
-    {
-        "name": "ackley",
-        "data": ObjectiveSurfaceGenerator(generator="ackley"),
-        "normalize": True,
-        "evaluation_metric_direction": "inverse",
-        "n_trials": 200,
+        "n_trials": conv_trials,
     },
 ]
 model_configs = [
-    {
-        "model_name": "Random Forest",
-        "model": RandomForestRegressor(),
-        "params": {
-            "n_estimators__range_int": [10, 400],
-            "min_samples_split__range_float": [0.005, 0.3],
-            "min_samples_leaf__range_float": [0.005, 0.3],
-            "max_features__range_float": [0.1, 1],
-        },
-    },
     # {
-    #     "model_name": "Gradient Boosting Machine",
-    #     "model": GradientBoostingRegressor(),
+    #     "model_name": "RF",
+    #     "model": "RF",
     #     "params": {
-    #         "learning_rate": [0.001, 0.01, 0.1],
-    #         "n_estimators": [10, 30, 50, 100, 150, 200, 300, 400],
-    #         "min_samples_split": [0.005, 0.01, 0.1, 0.2, 0.3],
-    #         "min_samples_leaf": [0.005, 0.01, 0.1, 0.2, 0.3],
-    #         "max_features": [None, 0.8, 0.9, 1],
+    #         "n_estimators__range_int": [10, 400],
+    #         "min_samples_split__range_float": [0.005, 0.3],
+    #         "min_samples_leaf__range_float": [0.005, 0.3],
+    #         "max_features__range_float": [0.1, 1]
     #     },
     # },
+    {
+        "model_name": "CNN",
+        "model": "CNN",
+        "params": {
+            "Activation": ["ReLU", "Hardswish", "Mish"],
+            "LearningRate__range_float": [0.001, 1],
+            "N": [5],
+            "Op1": list(range(5)),
+            "Op2": list(range(5)),
+            "Op3": list(range(5)),
+            "Op4": list(range(5)),
+            "Op5": list(range(5)),
+            "Op6": list(range(5)),
+            "Optimizer": ["SGD"],
+            "Resolution": [1],
+            "TrivialAugment": [True, False],
+            "W": [16],
+            "WeightDecay__range_float": [0.00001, 0.01],
+            "epoch__range_int": [5, 200],
+        },
+    },
 ]
-tuners = ["confopt-qgbm-0.1", "optuna-tpe"]
+tuners = [
+    "confopt-qgbm-0.2",
+    "confopt-qgbm-0.8",
+    # "skopt-gp",
+    # "skopt-forest",
+    "optuna-tpe",
+]
 
 # tuners = ["confopt", "optuna-tpe", "optuna-cmaes", "hyperopt-tpe", "hyperopt-random"]
 
@@ -212,9 +228,20 @@ for dataset_config in generator_configs:
                     f"{data_path}/incremental_raw_benchmark_data.csv", index=False
                 )
 
+ascending = True  # False for accuracy
+raw_benchmark_data["rank"] = raw_benchmark_data.groupby(
+    [
+        "dataset",
+        "model",
+        "repetition",
+        "runtime",
+    ],
+    as_index=False,
+)["best_performance"].rank(method="average", ascending=ascending)
+
 processed_benchmark_data = raw_benchmark_data.groupby(
     ["dataset", "model", "tuner", "runtime"], as_index=False
-).agg({"best_performance": ["mean", q10, q90]})
+).agg({"rank": ["mean", q10, q90]})
 processed_benchmark_data.columns = [
     "_".join(col) if isinstance(col, tuple) else col
     for col in processed_benchmark_data.columns
@@ -239,4 +266,12 @@ plot_path = f"cache/plots/{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}/"
 if not os.path.exists(plot_path):
     os.makedirs(plot_path)
 # Call the function to plot the data
-plot_benchmark_data(processed_benchmark_data, plot_path)
+plot_benchmark_data(
+    processed_benchmark_data, plot_path, y_col="rank", add_confidence_intervals=False
+)
+plot_benchmark_data(
+    processed_benchmark_data,
+    plot_path,
+    y_col="best_performance",
+    add_confidence_intervals=False,
+)

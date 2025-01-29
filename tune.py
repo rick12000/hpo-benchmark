@@ -1,15 +1,17 @@
 from sklearn.metrics import mean_squared_error
 import pandas as pd
 
-from confopt.tuning import ConformalSearcher, ObjectiveConformalSearcher
+# import numpy as np
+import random
 import optuna
-
 from hyperopt import fmin, tpe, hp, STATUS_OK, Trials, rand
 
-from preprocess import train_val_split, update_model_parameters
-import random
-import numpy as np
+# Add scikit-opt import
+from skopt import forest_minimize, gbrt_minimize, gp_minimize
+from skopt.space import Real, Integer, Categorical
 
+from confopt.tuning import ConformalSearcher, ObjectiveConformalSearcher
+from preprocess import train_val_split, update_model_parameters
 from generate import ObjectiveSurfaceGenerator
 
 
@@ -99,7 +101,7 @@ def optuna_artificial_objective(
     # TODO: Circle back to iterative calling of trial object below
     optuna_params = set_optuna_params(trial=trial, params=params)
 
-    return performance_generator.predict(x=np.array(list(optuna_params.values())))
+    return performance_generator.predict(params=optuna_params)
 
 
 def optuna_artificial_tune(n_trials, params, performance_generator, sampler="tpe"):
@@ -134,8 +136,8 @@ def confopt_artificial_objective_function(
     performance_generator: ObjectiveSurfaceGenerator,
 ):
     def objective_function(configuration):
-        # TODO: check that values always unravels in right order, don't tgink it does for dicts
-        return performance_generator.predict(x=np.array(list(configuration.values())))
+        # TODO: check that values always unravels in right order, don't think it does for dicts
+        return performance_generator.predict(params=configuration)
 
     return objective_function
 
@@ -171,12 +173,13 @@ def confopt_artificial_tune(
     )
 
     searcher.search(
+        runtime_budget=1000000,
         max_iter=max_iter,
         conformal_search_estimator=conformal_search_estimator,
         conformal_learning_rate=0.1,
         n_random_searches=15,
         confidence_level=confidence_level,
-        conformal_retraining_frequency=5,
+        conformal_retraining_frequency=1,
         verbose=False,
     )
 
@@ -343,6 +346,185 @@ def hyperopt_tune(
     return historical_performance, hyperopt_best_loss
 
 
+def skopt_objective(model, X, y, train_split, normalize, random_state, params):
+    model = update_model_parameters(
+        model_instance=model, configuration=params, random_state=None
+    )
+
+    X_train, y_train, X_val, y_val = train_val_split(
+        X=X,
+        y=y,
+        train_split=train_split,
+        normalize=normalize,
+        random_state=random_state,
+    )
+
+    model.fit(X=X_train, y=y_train)
+
+    return mean_squared_error(y_true=y_val, y_pred=model.predict(X=X_val))
+
+
+def skopt_tune(
+    model,
+    X,
+    y,
+    train_split,
+    normalize,
+    timeout,
+    random_state,
+    params,
+    method="gp",
+):
+    # Prepare search space for scikit-opt
+    skopt_params_space = []
+    renamed_param_names = []
+
+    for param_name, param_values in params.items():
+        if "__range_int" in param_name:
+            param_key = param_name.replace("__range_int", "")
+            skopt_params_space.append(
+                Integer(param_values[0], param_values[1], name=param_key)
+            )
+        elif "__range_float" in param_name:
+            param_key = param_name.replace("__range_float", "")
+            skopt_params_space.append(
+                Real(param_values[0], param_values[1], name=param_key)
+            )
+        else:
+            param_key = param_name
+            skopt_params_space.append(Categorical(param_values, name=param_key))
+        renamed_param_names.append(param_key)
+
+    # Define objective function for scikit-opt
+    def objective(params_list):
+        # Convert params_list to dict
+        params_dict = {}
+        for param_name, param_value in zip(renamed_param_names, params_list):
+            params_dict[param_name] = param_value
+
+        return skopt_objective(
+            model,
+            X=X,
+            y=y,
+            train_split=train_split,
+            normalize=normalize,
+            random_state=random_state,
+            params=params_dict,
+        )
+
+    # Perform optimization
+    if method == "gp":
+        result = gp_minimize(
+            objective,
+            skopt_params_space,
+            n_calls=100,  # Adjust based on timeout
+            # random_state=random_state
+        )
+    elif method == "forest":
+        result = forest_minimize(
+            objective,
+            skopt_params_space,
+            n_calls=100,  # Adjust based on timeout
+            # random_state=random_state
+        )
+    elif method == "gbrt":
+        result = gbrt_minimize(
+            objective,
+            skopt_params_space,
+            n_calls=100,  # Adjust based on timeout
+            # random_state=random_state
+        )
+    else:
+        raise ValueError(f"Unknown scikit-opt method: {method}")
+
+    # Create historical performance DataFrame
+    historical_performance = pd.DataFrame(
+        [
+            {"end_time": i + 1, "performance": perf}
+            for i, perf in enumerate(result.func_vals)
+        ]
+    )
+
+    # Get best value
+    best_value = result.fun
+
+    return historical_performance, best_value
+
+
+def skopt_artificial_tune(
+    n_trials,
+    performance_generator,
+    params,
+    method="gp",
+):
+    # Prepare search space for scikit-opt
+    skopt_params_space = []
+    renamed_param_names = []
+
+    for param_name, param_values in params.items():
+        if "__range_int" in param_name:
+            param_key = param_name.replace("__range_int", "")
+            skopt_params_space.append(
+                Integer(param_values[0], param_values[1], name=param_key)
+            )
+        elif "__range_float" in param_name:
+            param_key = param_name.replace("__range_float", "")
+            skopt_params_space.append(
+                Real(param_values[0], param_values[1], name=param_key)
+            )
+        else:
+            param_key = param_name
+            skopt_params_space.append(Categorical(param_values, name=param_key))
+        renamed_param_names.append(param_key)
+
+    # Define objective function for scikit-opt
+    def objective(params_list):
+        # Convert params_list to dict
+        params_dict = {}
+        for param_name, param_value in zip(renamed_param_names, params_list):
+            params_dict[param_name] = param_value
+
+        return performance_generator.predict(params=params_dict)
+
+    # Perform optimization
+    if method == "gp":
+        result = gp_minimize(
+            objective,
+            skopt_params_space,
+            n_calls=n_trials,
+            # random_state=42
+        )
+    elif method == "forest":
+        result = forest_minimize(
+            objective,
+            skopt_params_space,
+            n_calls=n_trials,
+            # random_state=42
+        )
+    elif method == "gbrt":
+        result = gbrt_minimize(
+            objective,
+            skopt_params_space,
+            n_calls=n_trials,
+            # random_state=42
+        )
+    else:
+        raise ValueError(f"Unknown scikit-opt method: {method}")
+
+    # Create historical performance DataFrame
+    historical_performance = pd.DataFrame(
+        [
+            {"end_time": i + 1, "performance": perf}
+            for i, perf in enumerate(result.func_vals)
+        ]
+    )
+
+    # Get best value
+    best_value = result.fun
+
+    return historical_performance, best_value
+
+
 def tune(
     model, X, y, train_split, normalize, tuner: str, timeout, random_state, params
 ):
@@ -393,6 +575,25 @@ def tune(
             params=params,
             sampler=sampler,
         )
+    elif "skopt" in tuner:
+        if tuner == "skopt-gp":
+            method = "gp"
+        elif tuner == "skopt-forest":
+            method = "forest"
+        elif tuner == "skopt-gbrt":
+            method = "gbrt"
+
+        historical_performance, best_value = skopt_tune(
+            model,
+            X=X,
+            y=y,
+            train_split=train_split,
+            normalize=normalize,
+            timeout=timeout,
+            random_state=random_state,
+            params=params,
+            method=method,
+        )
     else:
         raise ValueError()
 
@@ -422,6 +623,20 @@ def tune_artificial(n_trials, performance_generator, tuner: str, params):
             max_iter=n_trials,
         )
 
+    elif "skopt" in tuner:
+        if tuner == "skopt-gp":
+            method = "gp"
+        elif tuner == "skopt-forest":
+            method = "forest"
+        elif tuner == "skopt-gbrt":
+            method = "gbrt"
+
+        historical_performance, best_value = skopt_artificial_tune(
+            n_trials=n_trials,
+            performance_generator=performance_generator,
+            params=params,
+            method=method,
+        )
     else:
         raise ValueError()
 
