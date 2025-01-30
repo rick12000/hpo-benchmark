@@ -14,6 +14,8 @@ from confopt.tuning import ConformalSearcher, ObjectiveConformalSearcher
 from preprocess import train_val_split, update_model_parameters
 from generate import ObjectiveSurfaceGenerator
 
+from datetime import datetime, timedelta
+
 
 def set_optuna_params(trial, params):
     optuna_params = {}
@@ -58,15 +60,77 @@ def optuna_objective(model, trial, X, y, train_split, normalize, random_state, p
     return mean_squared_error(y_true=y_val, y_pred=model.predict(X=X_val))
 
 
+def optuna_artificial_objective(
+    trial, params, performance_generator: ObjectiveSurfaceGenerator
+):
+    # TODO: Circle back to iterative calling of trial object below
+    optuna_params = set_optuna_params(trial=trial, params=params)
+
+    return performance_generator.predict(params=optuna_params)
+
+
 def optuna_tune(
-    model, X, y, train_split, normalize, timeout, random_state, params, sampler="tpe"
+    model,
+    X,
+    y,
+    train_split,
+    normalize,
+    timeout,
+    random_state,
+    params,
+    sampler="tpe",
+    warm_start_configs=None,  # New: Dictionary of configurations and losses
 ):
     if sampler == "tpe":
         sampler_object = optuna.samplers.TPESampler()
     elif sampler == "cma-es":
         sampler_object = optuna.samplers.CmaEsSampler()
-    # TODO: change direction if doing classif
     study = optuna.create_study(direction="minimize", sampler=sampler_object)
+
+    # Warm-start the study with prior configurations and losses
+    if warm_start_configs is not None:
+        for config, loss in warm_start_configs:
+            # Transform the keys in the config to match the params dictionary
+            transformed_config = {}
+            for param_name, value in config.items():
+                if "__range_int" in param_name:
+                    param_key = param_name.replace("__range_int", "")
+                elif "__range_float" in param_name:
+                    param_key = param_name.replace("__range_float", "")
+                else:
+                    param_key = param_name
+                transformed_config[param_key] = value
+
+            # Define distributions manually based on the parameter types
+            distributions = {}
+            for param_name, param_values in params.items():
+                if "__range_int" in param_name:
+                    param_key = param_name.replace("__range_int", "")
+                    distributions[
+                        param_key
+                    ] = optuna.distributions.IntUniformDistribution(
+                        low=param_values[0], high=param_values[1]
+                    )
+                elif "__range_float" in param_name:
+                    param_key = param_name.replace("__range_float", "")
+                    distributions[param_key] = optuna.distributions.UniformDistribution(
+                        low=param_values[0], high=param_values[1]
+                    )
+                else:
+                    distributions[
+                        param_name
+                    ] = optuna.distributions.CategoricalDistribution(
+                        choices=param_values
+                    )
+
+            # Create a trial with the warm-start configuration
+            trial = optuna.trial.create_trial(
+                params=transformed_config,
+                distributions=distributions,
+                value=loss,
+            )
+            study.add_trial(trial)
+
     study.optimize(
         lambda trial: optuna_objective(
             model,
@@ -82,35 +146,74 @@ def optuna_tune(
         n_jobs=1,
     )
 
-    # TODO: Create data class to set keys for this across tuning functions:
     historical_performance = pd.DataFrame(
         [
             {"end_time": trial.datetime_complete, "performance": trial.value}
             for trial in study.trials
         ]
     )
-
     best_value = study.best_value
 
     return historical_performance, best_value
 
 
-def optuna_artificial_objective(
-    trial, params, performance_generator: ObjectiveSurfaceGenerator
+def optuna_artificial_tune(
+    n_trials,
+    params,
+    performance_generator,
+    sampler="tpe",
+    warm_start_configs=None,  # New: Dictionary of configurations and losses
 ):
-    # TODO: Circle back to iterative calling of trial object below
-    optuna_params = set_optuna_params(trial=trial, params=params)
-
-    return performance_generator.predict(params=optuna_params)
-
-
-def optuna_artificial_tune(n_trials, params, performance_generator, sampler="tpe"):
     if sampler == "tpe":
         sampler_object = optuna.samplers.TPESampler()
     elif sampler == "cma-es":
         sampler_object = optuna.samplers.CmaEsSampler()
-    # TODO: change direction if doing classif
     study = optuna.create_study(direction="minimize", sampler=sampler_object)
+
+    # Warm-start the study with prior configurations and losses
+    if warm_start_configs is not None:
+        for config, loss in warm_start_configs:
+            # Transform the keys in the config to match the params dictionary
+            transformed_config = {}
+            for param_name, value in config.items():
+                if "__range_int" in param_name:
+                    param_key = param_name.replace("__range_int", "")
+                elif "__range_float" in param_name:
+                    param_key = param_name.replace("__range_float", "")
+                else:
+                    param_key = param_name
+                transformed_config[param_key] = value
+
+            # Define distributions manually based on the parameter types
+            distributions = {}
+            for param_name, param_values in params.items():
+                if "__range_int" in param_name:
+                    param_key = param_name.replace("__range_int", "")
+                    distributions[
+                        param_key
+                    ] = optuna.distributions.IntUniformDistribution(
+                        low=param_values[0], high=param_values[1]
+                    )
+                elif "__range_float" in param_name:
+                    param_key = param_name.replace("__range_float", "")
+                    distributions[param_key] = optuna.distributions.UniformDistribution(
+                        low=param_values[0], high=param_values[1]
+                    )
+                else:
+                    distributions[
+                        param_name
+                    ] = optuna.distributions.CategoricalDistribution(
+                        choices=param_values
+                    )
+
+            # Create a trial with the warm-start configuration
+            trial = optuna.trial.create_trial(
+                params=transformed_config,
+                distributions=distributions,
+                value=loss,
+            )
+            study.add_trial(trial)
+
     study.optimize(
         lambda trial: optuna_artificial_objective(
             trial=trial, params=params, performance_generator=performance_generator
@@ -119,14 +222,12 @@ def optuna_artificial_tune(n_trials, params, performance_generator, sampler="tpe
         n_jobs=1,
     )
 
-    # TODO: Create data class to set keys for this across tuning functions:
     historical_performance = pd.DataFrame(
         [
             {"end_time": n + 1, "performance": trial.value}
             for n, trial in enumerate(study.trials)
         ]
     )
-
     best_value = study.best_value
 
     return historical_performance, best_value
@@ -148,6 +249,7 @@ def confopt_artificial_tune(
     conformal_search_estimator,
     confidence_level,
     max_iter,
+    warm_start_configs,
 ):
     objective_function_in_scope = confopt_artificial_objective_function(
         performance_generator=performance_generator
@@ -161,7 +263,7 @@ def confopt_artificial_tune(
             )
         elif "__range_float" in param_name:
             confopt_params[param_name.replace("__range_float", "")] = [
-                random.uniform(param_values[0], param_values[1]) for _ in range(100)
+                random.uniform(param_values[0], param_values[1]) for _ in range(1000)
             ]
         else:
             confopt_params[param_name] = param_values
@@ -172,12 +274,21 @@ def confopt_artificial_tune(
         metric_optimization="inverse",
     )
 
+    if warm_start_configs is not None:
+        start_time = datetime.now()
+        for i, (config, performance) in enumerate(warm_start_configs):
+            searcher.searched_configurations.append(config)
+            searcher.searched_performances.append(performance)
+
+            timestamp = start_time + timedelta(microseconds=i)
+            searcher.searched_timestamps.append(timestamp)
+
     searcher.search(
         runtime_budget=1000000,
         max_iter=max_iter,
         conformal_search_estimator=conformal_search_estimator,
         conformal_learning_rate=0.1,
-        n_random_searches=15,
+        n_random_searches=10,
         confidence_level=confidence_level,
         conformal_retraining_frequency=1,
         verbose=False,
@@ -206,6 +317,7 @@ def confopt_tune(
     params,
     conformal_search_estimator,
     confidence_level,
+    warm_start_configs,
 ):
     X_train, y_train, X_val, y_val = train_val_split(
         X=X,
@@ -223,7 +335,7 @@ def confopt_tune(
             )
         elif "__range_float" in param_name:
             confopt_params[param_name.replace("__range_float", "")] = [
-                random.uniform(param_values[0], param_values[1]) for _ in range(100)
+                random.uniform(param_values[0], param_values[1]) for _ in range(1000)
             ]
         else:
             confopt_params[param_name] = param_values
@@ -237,6 +349,15 @@ def confopt_tune(
         search_space=confopt_params,
         prediction_type="regression",
     )
+
+    if warm_start_configs is not None:
+        start_time = datetime.now()
+        for i, (config, performance) in enumerate(warm_start_configs):
+            searcher.searched_configurations.append(config)
+            searcher.searched_performances.append(performance)
+
+            timestamp = start_time + timedelta(microseconds=i)
+            searcher.searched_timestamps.append(timestamp)
 
     searcher.search(
         runtime_budget=timeout,
@@ -280,6 +401,14 @@ def hyperopt_objective(model, X, y, train_split, normalize, random_state, params
     return mean_squared_error(y_true=y_val, y_pred=model.predict(X=X_val))
 
 
+def hyperopt_artificial_objective(
+    params, performance_generator: ObjectiveSurfaceGenerator
+):
+    # Use the performance_generator to predict the loss based on the parameters
+    loss = performance_generator.predict(params=params)
+    return {"loss": loss, "status": STATUS_OK}
+
+
 def hyperopt_tune(
     model,
     X,
@@ -290,6 +419,7 @@ def hyperopt_tune(
     random_state,
     params,
     sampler: str = "tpe",
+    warm_start_configs=None,  # New: Dictionary of configurations and losses
 ):
     hyperopt_params = {}
     for param_name, param_values in params.items():
@@ -297,7 +427,6 @@ def hyperopt_tune(
             hyperopt_params[param_name.replace("__range_int", "")] = hp.uniformint(
                 param_name.replace("__range_int", ""), param_values[0], param_values[1]
             )
-
         elif "__range_float" in param_name:
             hyperopt_params[param_name.replace("__range_float", "")] = hp.uniform(
                 param_name.replace("__range_float", ""),
@@ -320,6 +449,17 @@ def hyperopt_tune(
         return {"loss": acc, "status": STATUS_OK}
 
     trials = Trials()
+
+    # Warm-start the trials with prior configurations and losses
+    if warm_start_configs is not None:
+        for config, loss in warm_start_configs:
+            trial = {
+                "misc": {"tid": len(trials), "vals": config},
+                "result": {"loss": loss, "status": STATUS_OK},
+                "state": STATUS_OK,
+            }
+            trials.insert_trial_doc(trial)
+
     if sampler == "tpe":
         sampler_object = tpe.suggest
     elif sampler == "random":
@@ -339,6 +479,68 @@ def hyperopt_tune(
         [
             {"end_time": trial["book_time"], "performance": trial["result"]["loss"]}
             for trial in trials.trials
+        ]
+    )
+    hyperopt_best_loss = min(trial["result"]["loss"] for trial in trials.trials)
+
+    return historical_performance, hyperopt_best_loss
+
+
+def hyperopt_artificial_tune(
+    n_trials,
+    performance_generator,
+    params,
+    sampler: str = "tpe",
+    warm_start_configs=None,  # New: Dictionary of configurations and losses
+):
+    hyperopt_params = {}
+    for param_name, param_values in params.items():
+        if "__range_int" in param_name:
+            hyperopt_params[param_name.replace("__range_int", "")] = hp.uniformint(
+                param_name.replace("__range_int", ""), param_values[0], param_values[1]
+            )
+        elif "__range_float" in param_name:
+            hyperopt_params[param_name.replace("__range_float", "")] = hp.uniform(
+                param_name.replace("__range_float", ""),
+                param_values[0],
+                param_values[1],
+            )
+        else:
+            hyperopt_params[param_name] = hp.choice(param_name, param_values)
+
+    trials = Trials()
+
+    # Warm-start the trials with prior configurations and losses
+    if warm_start_configs is not None:
+        for config, loss in warm_start_configs:
+            trial = {
+                "misc": {"tid": len(trials), "vals": config},
+                "result": {"loss": loss, "status": STATUS_OK},
+                "state": STATUS_OK,
+            }
+            trials.insert_trial_doc(trial)
+
+    if sampler == "tpe":
+        sampler_object = tpe.suggest
+    elif sampler == "random":
+        sampler_object = rand.suggest
+
+    _ = fmin(
+        fn=lambda params: hyperopt_artificial_objective(
+            params=params, performance_generator=performance_generator
+        ),
+        space=hyperopt_params,
+        algo=sampler_object,
+        trials=trials,
+        max_evals=n_trials,
+        show_progressbar=False,
+        verbose=False,
+    )
+
+    historical_performance = pd.DataFrame(
+        [
+            {"end_time": i + 1, "performance": trial["result"]["loss"]}
+            for i, trial in enumerate(trials.trials)
         ]
     )
     hyperopt_best_loss = min(trial["result"]["loss"] for trial in trials.trials)
@@ -374,8 +576,8 @@ def skopt_tune(
     random_state,
     params,
     method="gp",
+    warm_start_configs=None,  # New: Dictionary of configurations and losses
 ):
-    # Prepare search space for scikit-opt
     skopt_params_space = []
     renamed_param_names = []
 
@@ -395,9 +597,7 @@ def skopt_tune(
             skopt_params_space.append(Categorical(param_values, name=param_key))
         renamed_param_names.append(param_key)
 
-    # Define objective function for scikit-opt
     def objective(params_list):
-        # Convert params_list to dict
         params_dict = {}
         for param_name, param_value in zip(renamed_param_names, params_list):
             params_dict[param_name] = param_value
@@ -412,40 +612,47 @@ def skopt_tune(
             params=params_dict,
         )
 
-    # Perform optimization
+    # Warm-start the optimization with prior configurations and losses
+    x0 = []
+    y0 = []
+    if warm_start_configs is not None:
+        for config, loss in warm_start_configs:
+            x0.append([config[param_name] for param_name in renamed_param_names])
+            y0.append(loss)
+
     if method == "gp":
         result = gp_minimize(
             objective,
             skopt_params_space,
             n_calls=100,  # Adjust based on timeout
-            # random_state=random_state
+            x0=x0,  # Warm-start configurations
+            y0=y0,  # Warm-start losses
         )
     elif method == "forest":
         result = forest_minimize(
             objective,
             skopt_params_space,
             n_calls=100,  # Adjust based on timeout
-            # random_state=random_state
+            x0=x0,  # Warm-start configurations
+            y0=y0,  # Warm-start losses
         )
     elif method == "gbrt":
         result = gbrt_minimize(
             objective,
             skopt_params_space,
             n_calls=100,  # Adjust based on timeout
-            # random_state=random_state
+            x0=x0,  # Warm-start configurations
+            y0=y0,  # Warm-start losses
         )
     else:
         raise ValueError(f"Unknown scikit-opt method: {method}")
 
-    # Create historical performance DataFrame
     historical_performance = pd.DataFrame(
         [
             {"end_time": i + 1, "performance": perf}
             for i, perf in enumerate(result.func_vals)
         ]
     )
-
-    # Get best value
     best_value = result.fun
 
     return historical_performance, best_value
@@ -456,8 +663,8 @@ def skopt_artificial_tune(
     performance_generator,
     params,
     method="gp",
+    warm_start_configs=None,  # New: Dictionary of configurations and losses
 ):
-    # Prepare search space for scikit-opt
     skopt_params_space = []
     renamed_param_names = []
 
@@ -477,56 +684,70 @@ def skopt_artificial_tune(
             skopt_params_space.append(Categorical(param_values, name=param_key))
         renamed_param_names.append(param_key)
 
-    # Define objective function for scikit-opt
     def objective(params_list):
-        # Convert params_list to dict
         params_dict = {}
         for param_name, param_value in zip(renamed_param_names, params_list):
             params_dict[param_name] = param_value
 
         return performance_generator.predict(params=params_dict)
 
-    # Perform optimization
+    # Warm-start the optimization with prior configurations and losses
+    x0 = []
+    y0 = []
+    if warm_start_configs is not None:
+        for config, loss in warm_start_configs:
+            x0.append([config[param_name] for param_name in renamed_param_names])
+            y0.append(loss)
+
     if method == "gp":
         result = gp_minimize(
             objective,
             skopt_params_space,
             n_calls=n_trials,
-            # random_state=42
+            x0=x0,  # Warm-start configurations
+            y0=y0,  # Warm-start losses
         )
     elif method == "forest":
         result = forest_minimize(
             objective,
             skopt_params_space,
             n_calls=n_trials,
-            # random_state=42
+            x0=x0,  # Warm-start configurations
+            y0=y0,  # Warm-start losses
         )
     elif method == "gbrt":
         result = gbrt_minimize(
             objective,
             skopt_params_space,
             n_calls=n_trials,
-            # random_state=42
+            x0=x0,  # Warm-start configurations
+            y0=y0,  # Warm-start losses
         )
     else:
         raise ValueError(f"Unknown scikit-opt method: {method}")
 
-    # Create historical performance DataFrame
     historical_performance = pd.DataFrame(
         [
             {"end_time": i + 1, "performance": perf}
             for i, perf in enumerate(result.func_vals)
         ]
     )
-
-    # Get best value
     best_value = result.fun
 
     return historical_performance, best_value
 
 
 def tune(
-    model, X, y, train_split, normalize, tuner: str, timeout, random_state, params
+    model,
+    X,
+    y,
+    train_split,
+    normalize,
+    tuner: str,
+    timeout,
+    random_state,
+    params,
+    warm_start_configs=None,
 ):
     if "optuna" in tuner:
         if tuner == "optuna-tpe":
@@ -543,6 +764,7 @@ def tune(
             random_state=random_state,
             params=params,
             sampler=sampler,
+            warm_start_configs=warm_start_configs,
         )
     elif "confopt" in tuner:
         _, conformal_search_estimator, confidence_level = tuner.split("-")
@@ -558,6 +780,7 @@ def tune(
             params=params,
             conformal_search_estimator=conformal_search_estimator,
             confidence_level=float(confidence_level),
+            warm_start_configs=warm_start_configs,
         )
     elif "hyperopt" in tuner:
         if tuner == "hyperopt-tpe":
@@ -574,6 +797,7 @@ def tune(
             random_state=random_state,
             params=params,
             sampler=sampler,
+            warm_start_configs=warm_start_configs,
         )
     elif "skopt" in tuner:
         if tuner == "skopt-gp":
@@ -593,6 +817,7 @@ def tune(
             random_state=random_state,
             params=params,
             method=method,
+            warm_start_configs=warm_start_configs,
         )
     else:
         raise ValueError()
@@ -600,7 +825,9 @@ def tune(
     return historical_performance, best_value
 
 
-def tune_artificial(n_trials, performance_generator, tuner: str, params):
+def tune_artificial(
+    n_trials, performance_generator, tuner: str, params, warm_start_configs=None
+):
     if "optuna" in tuner:
         if tuner == "optuna-tpe":
             sampler = "tpe"
@@ -611,6 +838,7 @@ def tune_artificial(n_trials, performance_generator, tuner: str, params):
             performance_generator=performance_generator,
             params=params,
             sampler=sampler,
+            warm_start_configs=warm_start_configs,
         )
     elif "confopt" in tuner:
         _, conformal_search_estimator, confidence_level = tuner.split("-")
@@ -621,8 +849,20 @@ def tune_artificial(n_trials, performance_generator, tuner: str, params):
             conformal_search_estimator=conformal_search_estimator,
             confidence_level=float(confidence_level),
             max_iter=n_trials,
+            warm_start_configs=warm_start_configs,
         )
-
+    elif "hyperopt" in tuner:
+        if tuner == "hyperopt-tpe":
+            sampler = "tpe"
+        elif tuner == "hyperopt-random":
+            sampler = "random"
+        historical_performance, best_value = hyperopt_artificial_tune(
+            n_trials=n_trials,
+            performance_generator=performance_generator,
+            params=params,
+            sampler=sampler,
+            warm_start_configs=warm_start_configs,
+        )
     elif "skopt" in tuner:
         if tuner == "skopt-gp":
             method = "gp"
@@ -636,8 +876,9 @@ def tune_artificial(n_trials, performance_generator, tuner: str, params):
             performance_generator=performance_generator,
             params=params,
             method=method,
+            warm_start_configs=warm_start_configs,
         )
     else:
-        raise ValueError()
+        raise ValueError(f"Unknown tuner: {tuner}")
 
     return historical_performance, best_value

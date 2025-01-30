@@ -4,6 +4,7 @@ from tune import tune_artificial
 from datetime import datetime
 from utils import q10, q90
 import os
+import random
 
 # import json
 import logging
@@ -40,9 +41,69 @@ optuna.logging.set_verbosity(optuna.logging.ERROR)
 
 normalize = True
 random_state = 1234
-n_repetitions = 30
+n_repetitions = 5
 
-conv_trials = 200
+conv_trials = 100
+
+
+params = {
+    "Activation": ["ReLU", "Hardswish", "Mish"],
+    "LearningRate__range_float": [0.001, 1],
+    "N": [5],
+    "Op1": list(range(5)),
+    "Op2": list(range(5)),
+    "Op3": list(range(5)),
+    "Op4": list(range(5)),
+    "Op5": list(range(5)),
+    "Op6": list(range(5)),
+    "Optimizer": ["SGD"],
+    "Resolution": [1],
+    "TrivialAugment": [True, False],
+    "W": [16],
+    "WeightDecay__range_float": [0.00001, 0.01],
+    "epoch__range_int": [5, 200],
+}
+
+confopt_params = {}
+for param_name, param_values in params.items():
+    # if "__range_int" in param_name:
+    #     confopt_params[param_name.replace("__range_int", "")] = list(
+    #         range(param_values[0], param_values[1] + 1)
+    #     )
+    # elif "__range_float" in param_name:
+    #     confopt_params[param_name.replace("__range_float", "")] = [
+    #         random.uniform(param_values[0], param_values[1]) for _ in range(1000)
+    #     ]
+    # else:
+    confopt_params[param_name] = param_values
+
+
+def generate_hyperparameter_combinations(confopt_params, n_combinations):
+    combinations = []
+    for _ in range(n_combinations):
+        combination = {}
+        for param_name, param_values in confopt_params.items():
+            combination[param_name] = random.choice(param_values)
+        combinations.append(combination)
+    return combinations
+
+
+# Generate 10 hyperparameter combinations
+hyperparameter_combinations = generate_hyperparameter_combinations(
+    confopt_params, n_combinations=20
+)
+
+generator = Jahs201Generator(dataset="colorectal_histology")
+
+cifar_10_warm_configs = []
+for param in hyperparameter_combinations:
+    clean_param = {}
+    for param_name, param_value in param.items():
+        clean_param[
+            param_name.replace("__range_float", "").replace("__range_int", "")
+        ] = param_value
+    performance = generator.predict(clean_param)
+    cifar_10_warm_configs.append((clean_param, performance))
 
 generator_configs = [
     # {
@@ -80,27 +141,30 @@ generator_configs = [
     #     "evaluation_metric_direction": "inverse",
     #     "n_trials": 100,
     # },
-    {
-        "name": "fashion_mnist",
-        "data": Jahs201Generator(dataset="fashion_mnist"),
-        "normalize": True,
-        "evaluation_metric_direction": "inverse",
-        "n_trials": conv_trials,
-    },
     # {
-    #     "name": "colorectal_histology",
-    #     "data": Jahs201Generator(dataset="colorectal_histology"),
+    #     "name": "fashion_mnist",
+    #     "data": Jahs201Generator(dataset="fashion_mnist"),
     #     "normalize": True,
     #     "evaluation_metric_direction": "inverse",
     #     "n_trials": conv_trials,
+    #     "warm_start_configs": cifar_10_warm_configs
     # },
     {
-        "name": "cifar10",
-        "data": Jahs201Generator(dataset="cifar10"),
+        "name": "colorectal_histology",
+        "data": Jahs201Generator(dataset="colorectal_histology"),
         "normalize": True,
         "evaluation_metric_direction": "inverse",
         "n_trials": conv_trials,
+        "warm_start_configs": cifar_10_warm_configs,
     },
+    # {
+    #     "name": "cifar10",
+    #     "data": Jahs201Generator(dataset="cifar10"),
+    #     "normalize": True,
+    #     "evaluation_metric_direction": "inverse",
+    #     "n_trials": conv_trials,
+    #     "warm_start_configs": cifar_10_warm_configs
+    # },
 ]
 model_configs = [
     # {
@@ -135,11 +199,16 @@ model_configs = [
         },
     },
 ]
+
 tuners = [
-    "confopt-qgbm-0.2",
-    "confopt-qgbm-0.8",
+    # "confopt-rf-0.8",
+    # "confopt-gbm-0.8",
+    "confopt-qgbm-0.9",
+    "confopt-qgbm-0.1",
     # "skopt-gp",
     # "skopt-forest",
+    # "hyperopt-random",
+    # "hyperopt-tpe",
     "optuna-tpe",
 ]
 
@@ -150,6 +219,7 @@ raw_benchmark_data = pd.DataFrame()
 logger.info("Running HPO benchmark...")
 for dataset_config in generator_configs:
     dataset_name = dataset_config["name"]
+    warm_starts = dataset_config["warm_start_configs"]
     logger.info(f"Dataset: {dataset_name}")
     metric_direction = dataset_config["evaluation_metric_direction"]
     n_trials = dataset_config["n_trials"]
@@ -165,6 +235,7 @@ for dataset_config in generator_configs:
                     tuner=tuner,
                     n_trials=n_trials,
                     params=config["params"],
+                    warm_start_configs=warm_starts,
                 )
                 historical_performance["runtime"] = historical_performance["end_time"]
 
@@ -241,7 +312,7 @@ raw_benchmark_data["rank"] = raw_benchmark_data.groupby(
 
 processed_benchmark_data = raw_benchmark_data.groupby(
     ["dataset", "model", "tuner", "runtime"], as_index=False
-).agg({"rank": ["mean", q10, q90]})
+).agg({"rank": ["mean", q10, q90], "best_performance": ["mean", q10, q90]})
 processed_benchmark_data.columns = [
     "_".join(col) if isinstance(col, tuple) else col
     for col in processed_benchmark_data.columns
@@ -273,5 +344,5 @@ plot_benchmark_data(
     processed_benchmark_data,
     plot_path,
     y_col="best_performance",
-    add_confidence_intervals=False,
+    add_confidence_intervals=True,
 )
