@@ -6,7 +6,7 @@ import os
 import xgboost as xgb
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.datasets import fetch_california_housing, load_diabetes
+from sklearn.datasets import load_diabetes  # fetch_california_housing
 import random
 
 # import json
@@ -28,6 +28,19 @@ from itertools import combinations
 from sklearn.feature_selection import mutual_info_regression
 
 from statsmodels.stats.outliers_influence import variance_inflation_factor
+
+# from sklearn.metrics import mean_squared_error
+from preprocess import train_val_split
+
+
+def generate_hyperparameter_combinations(confopt_params, n_combinations):
+    combinations = []
+    for _ in range(n_combinations):
+        combination = {}
+        for param_name, param_values in confopt_params.items():
+            combination[param_name] = random.choice(param_values)
+        combinations.append(combination)
+    return combinations
 
 
 def get_sparsity(X):
@@ -267,10 +280,10 @@ default_toy_data_params = {
 }
 
 dataset_configs = []
-noise_level_values = [0, 0.1, 1, 5]
-sparsity_level_values = [0.1, 1]
-n_x_features_values = [5, 30]
-n_samples_values = [500, 100]
+noise_level_values = [0, 0.1, 0.5, 5]
+sparsity_level_values = [0.01, 0.1, 1]
+n_x_features_values = [2, 10, 20]
+n_samples_values = [1000]
 for noise_level in noise_level_values:
     for sparsity_level in sparsity_level_values:
         for n_x_features in n_x_features_values:
@@ -348,8 +361,8 @@ for params in params_combinations:
         }
     )
 
-model_configs = random.sample(model_configs, k=10)
-tuners = ["confopt-qgbm-0.9", "optuna-tpe", "hyperopt-random", "optuna-cmaes"]
+model_configs = random.sample(model_configs, k=8)
+tuners = ["confopt-qgbm-0.9", "optuna-tpe"]
 
 # tuners = ["confopt", "optuna-tpe", "optuna-cmaes", "hyperopt-tpe", "hyperopt-random"]
 
@@ -379,8 +392,37 @@ for dataset_config in dataset_configs:
     metric_direction = dataset_config["evaluation_metric_direction"]
     timeout = dataset_config["timeout"]
     X, y = dataset_config["data"]
+    X_train, y_train, X_val, y_val = train_val_split(
+        X=X,
+        y=y,
+        train_split=train_split,
+        normalize=normalize,
+        random_state=1234,
+    )
     for config in model_configs:
         logger.info(f"Model: {config['model_name']}")
+
+        warm_starts_per_repetition = []
+        for _ in range(n_repetitions):
+            # Generate 10 hyperparameter combinations
+            hyperparameter_combinations = generate_hyperparameter_combinations(
+                dataset_config["params"], n_combinations=dataset_config["n_warm_starts"]
+            )
+
+            warm_starts = []
+            for param in hyperparameter_combinations:
+                clean_param = {}
+                for param_name, param_value in param.items():
+                    clean_param[
+                        param_name.replace("__range_float", "").replace(
+                            "__range_int", ""
+                        )
+                    ] = param_value
+                performance = dataset_config["data"].predict(clean_param)
+                warm_starts.append((clean_param, performance))
+
+            warm_starts_per_repetition.append(warm_starts)
+
         for tuner in tuners:
             logger.info(f"Tuner: {tuner}")
             for repetition in range(n_repetitions):
@@ -396,6 +438,7 @@ for dataset_config in dataset_configs:
                     timeout=timeout,
                     random_state=random_state,
                     params=config["params"],
+                    warm_start_configs=warm_starts_per_repetition[repetition],
                 )
                 historical_performance["runtime"] = (
                     historical_performance["end_time"] - tune_start
@@ -558,6 +601,15 @@ processed_benchmark_data["rank_group"] = (
     .agg("-".join, axis=1)
 )
 
+# TODO: TEMP
+group_check = processed_benchmark_data.groupby(["rank_group"], as_index=False)[
+    "rank"
+].count()
+bad_groups = group_check[group_check["rank"] != len(tuners)]["rank_group"].unique()
+processed_benchmark_data = processed_benchmark_data[
+    ~(processed_benchmark_data["rank_group"].isin(bad_groups))
+]
+
 processed_benchmark_data["prediction_rank"] = processed_benchmark_data.groupby(
     [
         "dataset",
@@ -651,17 +703,17 @@ ranker.get_feature_importances(feature_names=feature_names + ["tuner"])
 
 #########
 
-cali_data = fetch_california_housing(return_X_y=True)
+# cali_data = fetch_california_housing(return_X_y=True)
 diabetes_data = load_diabetes(return_X_y=True)
 public_dataset_configs = [
-    {
-        "name": "CALI",
-        "data": cali_data,
-        "normalize": True,
-        "evaluation_metric": "mean_squared_error",
-        "evaluation_metric_direction": "inverse",
-        "timeout": 60 * 2,
-    },
+    # {
+    #     "name": "CALI",
+    #     "data": cali_data,
+    #     "normalize": True,
+    #     "evaluation_metric": "mean_squared_error",
+    #     "evaluation_metric_direction": "inverse",
+    #     "timeout": 60 * 2,
+    # },
     {
         "name": "DIABETES",
         "data": diabetes_data,

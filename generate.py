@@ -108,7 +108,7 @@ def generate_data(
     return df_X, df_Y
 
 
-def noisy_rastrigin(x, A=20, noise_seed=42, noise=0.5):
+def noisy_rastrigin(x, A=20, noise_seed=42, noise=0):
     n = len(x)
     x_bytes = x.tobytes()
     combined_bytes = x_bytes + noise_seed.to_bytes(4, "big")
@@ -119,7 +119,7 @@ def noisy_rastrigin(x, A=20, noise_seed=42, noise=0.5):
     return rastrigin_value + noise
 
 
-def noisy_ackley(x, a=20, b=0.2, c=2 * np.pi, noise_seed=42, noise=0.5):
+def noisy_ackley(x, a=20, b=0.2, c=2 * np.pi, noise_seed=42, noise=0):
     n = len(x)
     x_bytes = x.tobytes()
     combined_bytes = x_bytes + noise_seed.to_bytes(4, "big")
@@ -132,7 +132,7 @@ def noisy_ackley(x, a=20, b=0.2, c=2 * np.pi, noise_seed=42, noise=0.5):
     return ackley_value + noise
 
 
-def noisy_griewank(x, noise_seed=42, noise=0.5):
+def noisy_griewank(x, noise_seed=42, noise=0):
     n = len(x)
     x_bytes = x.tobytes()
     combined_bytes = x_bytes + noise_seed.to_bytes(4, "big")
@@ -147,7 +147,7 @@ def noisy_griewank(x, noise_seed=42, noise=0.5):
     return griewank_value + noise
 
 
-def noisy_weierstrass(x, a=0.5, b=3, kmax=20, noise_seed=42, noise=0.5):
+def noisy_weierstrass(x, a=0.5, b=3, kmax=20, noise_seed=42, noise=0):
     n = len(x)
     x_bytes = x.tobytes()
     combined_bytes = x_bytes + noise_seed.to_bytes(4, "big")
@@ -163,7 +163,7 @@ def noisy_weierstrass(x, a=0.5, b=3, kmax=20, noise_seed=42, noise=0.5):
     return weierstrass_value + noise
 
 
-def noisy_shekel(x, m=10, noise_seed=42, noise=0.5):  # m is the number of local minima
+def noisy_shekel(x, m=10, noise_seed=42, noise=0):  # m is the number of local minima
     n = len(x)
     x_bytes = x.tobytes()
     combined_bytes = x_bytes + noise_seed.to_bytes(4, "big")
@@ -175,10 +175,10 @@ def noisy_shekel(x, m=10, noise_seed=42, noise=0.5):  # m is the number of local
     for i in range(m):
         shekel_value -= 1 / (C[i] + np.sum((x - A[i]) ** 2))
     noise = rng.normal(loc=0.0, scale=noise)
-    return shekel_value + noise
+    return -(shekel_value + noise)
 
 
-def noisy_hartmann6(x, noise_seed=42, noise=0.5):
+def noisy_hartmann6(x, noise_seed=42, noise=0):
     x_bytes = x.tobytes()
     combined_bytes = x_bytes + noise_seed.to_bytes(4, "big")
     hash_value = int.from_bytes(sha256(combined_bytes).digest()[:4], "big")
@@ -208,7 +208,7 @@ def noisy_hartmann6(x, noise_seed=42, noise=0.5):
             inner_sum += A[i, j] * (x[j] - P[i, j]) ** 2
         hartmann6_value -= alpha[i] * np.exp(-inner_sum)
     noise = rng.normal(loc=0.0, scale=noise)
-    return hartmann6_value + noise
+    return -(hartmann6_value + noise)
 
 
 class ObjectiveSurfaceGenerator:
