@@ -85,14 +85,16 @@ def generate_hyperparameter_combinations(confopt_params, n_combinations, random_
         combination = {}
         for param_name, param_values in confopt_params.items():
             if "__range_int" in param_name:
-                combination[param_name.replace("__range_int", "")] = list(
-                    range(param_values[0], param_values[1] + 1)
+                combination[param_name.replace("__range_int", "")] = random.choice(
+                    list(range(param_values[0], param_values[1] + 1))
                 )
             elif "__range_float" in param_name:
-                combination[param_name.replace("__range_float", "")] = [
-                    random.uniform(param_values[0], param_values[1])
-                    for _ in range(1000)
-                ]
+                combination[param_name.replace("__range_float", "")] = random.choice(
+                    [
+                        random.uniform(param_values[0], param_values[1])
+                        for _ in range(1000)
+                    ]
+                )
             else:
                 combination[param_name] = param_values
         combinations.append(combination)
