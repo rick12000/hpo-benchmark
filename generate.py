@@ -5,6 +5,12 @@ from hashlib import sha256
 
 from jahs_bench import Benchmark
 
+from yahpo_gym import local_config
+from yahpo_gym import benchmark_set
+
+local_config.init_config()
+local_config.set_data_path("yahpo_bench_data")
+
 
 def sparsify_features(X_sparsified: np.array, sparsity: float) -> np.array:
     # Apply sparsity by randomly zeroing out elements
@@ -240,3 +246,21 @@ class Jahs201Generator:
 
     def predict(self, params):
         return -self.generator(params)[200]["valid-acc"]
+
+
+class YahpoGenerator:
+    def __init__(self, dataset: str):
+        self.generator = benchmark_set.BenchmarkSet(dataset)
+        # self.generator.set_instance(self.generator.instances[0])
+
+    def predict(self, params):
+        return -self.generator.objective_function(params)[0]["val_accuracy"]
+
+
+# class Jahs201Generator:
+#     def __init__(self, dataset: str, metrics: list[str] = ["valid-acc", "runtime"]):
+#         self.generator = Benchmark(task=dataset, lazy=False, metrics=metrics)
+
+#     def predict(self, params):
+#         response = self.generator(params)[200]
+#         return -response["valid-acc"], response["runtime"]

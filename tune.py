@@ -43,7 +43,7 @@ def optuna_objective(model, trial, X, y, train_split, normalize, random_state, p
     optuna_params = set_optuna_params(trial=trial, params=params)
 
     model = update_model_parameters(
-        model_instance=model, configuration=optuna_params, random_state=None
+        model_instance=model, configuration=optuna_params, random_state=random_state
     )
 
     X_train, y_train, X_val, y_val = train_val_split(
@@ -74,11 +74,12 @@ def optuna_tune(
     y,
     train_split,
     normalize,
-    timeout,
     random_state,
     params,
     sampler="tpe",
     warm_start_configs=None,  # New: Dictionary of configurations and losses
+    timeout=None,
+    n_iterations=None,
 ):
     if sampler == "tpe":
         sampler_object = optuna.samplers.TPESampler(seed=random_state)
@@ -142,6 +143,7 @@ def optuna_tune(
             params=params,
         ),
         timeout=timeout,
+        n_trials=n_iterations,
         n_jobs=1,
     )
 
@@ -264,7 +266,7 @@ def confopt_artificial_tune(
             )
         elif "__range_float" in param_name:
             confopt_params[param_name.replace("__range_float", "")] = [
-                random.uniform(param_values[0], param_values[1]) for _ in range(1000)
+                random.uniform(param_values[0], param_values[1]) for _ in range(10000)
             ]
         else:
             confopt_params[param_name] = param_values
@@ -314,12 +316,13 @@ def confopt_tune(
     y,
     train_split,
     normalize,
-    timeout,
     random_state,
     params,
     conformal_search_estimator,
     confidence_level,
     warm_start_configs,
+    timeout=None,
+    n_iterations=None,
 ):
     X_train, y_train, X_val, y_val = train_val_split(
         X=X,
@@ -337,7 +340,7 @@ def confopt_tune(
             )
         elif "__range_float" in param_name:
             confopt_params[param_name.replace("__range_float", "")] = [
-                random.uniform(param_values[0], param_values[1]) for _ in range(1000)
+                random.uniform(param_values[0], param_values[1]) for _ in range(10000)
             ]
         else:
             confopt_params[param_name] = param_values
@@ -362,7 +365,6 @@ def confopt_tune(
             searcher.searched_timestamps.append(timestamp)
 
     searcher.search(
-        runtime_budget=timeout,
         conformal_search_estimator=conformal_search_estimator,
         conformal_learning_rate=0.1,
         n_random_searches=20,
@@ -370,6 +372,8 @@ def confopt_tune(
         conformal_retraining_frequency=5,
         verbose=False,
         random_state=random_state,
+        runtime_budget=timeout,
+        max_iter=n_iterations,
     )
 
     historical_performance = pd.DataFrame(
@@ -387,7 +391,7 @@ def confopt_tune(
 
 def skopt_objective(model, X, y, train_split, normalize, random_state, params):
     model = update_model_parameters(
-        model_instance=model, configuration=params, random_state=None
+        model_instance=model, configuration=params, random_state=random_state
     )
 
     X_train, y_train, X_val, y_val = train_val_split(
@@ -409,11 +413,12 @@ def skopt_tune(
     y,
     train_split,
     normalize,
-    timeout,
     random_state,
     params,
     method="gp",
     warm_start_configs=None,  # New: Dictionary of configurations and losses
+    timeout=None,
+    n_iterations=None,
 ):
     skopt_params_space = []
     renamed_param_names = []
@@ -461,7 +466,7 @@ def skopt_tune(
         result = gp_minimize(
             objective,
             skopt_params_space,
-            n_calls=100,  # Adjust based on timeout
+            n_calls=n_iterations,  # Adjust based on timeout
             x0=x0,  # Warm-start configurations
             y0=y0,  # Warm-start losses
             random_state=random_state,
@@ -470,7 +475,7 @@ def skopt_tune(
         result = forest_minimize(
             objective,
             skopt_params_space,
-            n_calls=100,  # Adjust based on timeout
+            n_calls=n_iterations,  # Adjust based on timeout
             x0=x0,  # Warm-start configurations
             y0=y0,  # Warm-start losses
             random_state=random_state,
@@ -479,7 +484,7 @@ def skopt_tune(
         result = gbrt_minimize(
             objective,
             skopt_params_space,
-            n_calls=100,  # Adjust based on timeout
+            n_calls=n_iterations,  # Adjust based on timeout
             x0=x0,  # Warm-start configurations
             y0=y0,  # Warm-start losses
             random_state=random_state,
@@ -588,11 +593,16 @@ def tune(
     train_split,
     normalize,
     tuner: str,
-    timeout,
     random_state,
     params,
     warm_start_configs=None,
+    n_iterations=None,
+    timeout=None,
 ):
+    if (n_iterations is None and timeout is None) or (
+        n_iterations is not None and timeout is not None
+    ):
+        raise ValueError()
     if "optuna" in tuner:
         if tuner == "optuna-tpe":
             sampler = "tpe"
@@ -604,11 +614,12 @@ def tune(
             y=y,
             train_split=train_split,
             normalize=normalize,
-            timeout=timeout,
             random_state=random_state,
             params=params,
             sampler=sampler,
             warm_start_configs=warm_start_configs,
+            n_iterations=n_iterations,
+            timeout=timeout,
         )
     elif "confopt" in tuner:
         _, conformal_search_estimator, confidence_level = tuner.split("-")
@@ -619,12 +630,13 @@ def tune(
             y=y,
             train_split=train_split,
             normalize=normalize,
-            timeout=timeout,
             random_state=random_state,
             params=params,
             conformal_search_estimator=conformal_search_estimator,
             confidence_level=float(confidence_level),
             warm_start_configs=warm_start_configs,
+            n_iterations=n_iterations,
+            timeout=timeout,
         )
     elif "skopt" in tuner:
         if tuner == "skopt-gp":
@@ -640,11 +652,12 @@ def tune(
             y=y,
             train_split=train_split,
             normalize=normalize,
-            timeout=timeout,
             random_state=random_state,
             params=params,
             method=method,
             warm_start_configs=warm_start_configs,
+            n_iterations=n_iterations,
+            timeout=timeout,
         )
     else:
         raise ValueError()

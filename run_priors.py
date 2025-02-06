@@ -6,7 +6,6 @@ import os
 import xgboost as xgb
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.datasets import load_diabetes  # fetch_california_housing
 import random
 
 # import json
@@ -29,16 +28,52 @@ from sklearn.feature_selection import mutual_info_regression
 
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 
-# from sklearn.metrics import mean_squared_error
-from preprocess import train_val_split
+from sklearn.metrics import mean_squared_error
+from preprocess import train_val_split, update_model_parameters
+
+from ucimlrepo import fetch_ucirepo  # , list_available_datasets
+from sklearn.preprocessing import OneHotEncoder
 
 
-def generate_hyperparameter_combinations(confopt_params, n_combinations):
+def calculate_sparsity(x):
+    # Count the number of zero elements
+    num_zeros = np.count_nonzero(x == 0)
+
+    # Total number of elements in the array
+    total_elements = x.size
+
+    # Calculate sparsity
+    sparsity = num_zeros / total_elements
+    return sparsity
+
+
+# list_available_datasets()
+
+random_state = 1234
+
+random.seed(random_state)
+np.random.seed(random_state)
+
+
+def generate_hyperparameter_combinations(confopt_params, n_combinations, random_state):
+    random.seed(random_state)
     combinations = []
     for _ in range(n_combinations):
         combination = {}
         for param_name, param_values in confopt_params.items():
-            combination[param_name] = random.choice(param_values)
+            if "__range_int" in param_name:
+                combination[param_name.replace("__range_int", "")] = random.choice(
+                    list(range(param_values[0], param_values[1] + 1))
+                )
+            elif "__range_float" in param_name:
+                combination[param_name.replace("__range_float", "")] = random.choice(
+                    [
+                        random.uniform(param_values[0], param_values[1])
+                        for _ in range(1000)
+                    ]
+                )
+            else:
+                combination[param_name] = random.choice(param_values)
         combinations.append(combination)
     return combinations
 
@@ -296,6 +331,7 @@ for noise_level in noise_level_values:
 
                 # Call the function using the dictionary unpacking syntax
                 toy_data = generate_data(**toy_data_params)
+                sparsity = calculate_sparsity(toy_data[0])
                 mutual_information = total_mutual_information(X=toy_data[0])
                 vif = calculate_vif(X=toy_data[0])
                 y_skew = skew(toy_data[1])
@@ -315,25 +351,101 @@ for noise_level in noise_level_values:
                         "synthetic_params": toy_data_params,
                         "data_attributes": {
                             "mutual_information": mutual_information,
+                            "sparsity": sparsity,
                             "vif": vif,
                             "y_skew": y_skew,
                             "y_kurtosis": y_kurtosis,
                             "y_rel_std": y_rel_std,
                             "avg_corr": avg_corr,
                             "max_corr": max_corr,
+                            "n_x_features": n_x_features,
+                            "n_samples": n_samples,
                         },
                         "normalize": True,
+                        "n_warm_starts": 5,
                         "evaluation_metric": "mean_squared_error",
                         "evaluation_metric_direction": "inverse",
-                        "timeout": 60 * 2,
+                        # "n_iterations": 20
+                        "timeout": 40,
                     }
                 )
+
+uci_dataset_ids = [1, 162]  # 9, 275, 320
+
+
+for id in uci_dataset_ids:
+    logger.info(f"UCI ID {id}")
+    dataset = fetch_ucirepo(id=id)
+
+    X = dataset.data.features
+    X = X.fillna(0)
+    y = dataset.data.targets
+
+    categorical_cols = X.select_dtypes(include=["object", "category"]).columns
+
+    # One-hot encode categorical features
+    if len(categorical_cols) > 0:
+        encoder = OneHotEncoder(
+            sparse=False, drop="first"
+        )  # drop='first' to avoid multicollinearity
+        X_encoded = encoder.fit_transform(X[categorical_cols])
+
+        # Drop original categorical columns and concatenate encoded ones
+        X = X.drop(categorical_cols, axis=1)
+        X = np.hstack([X, X_encoded])
+
+    # X=X.to_numpy()
+    y = y.to_numpy().flatten()
+    sparsity = calculate_sparsity(X)
+    mutual_information = total_mutual_information(X=X)
+    vif = calculate_vif(X=X)
+    y_skew = skew(y)
+    y_kurtosis = kurtosis(y)
+    y_rel_std = np.std(y) / np.mean(y)
+    corrs = []
+    for i in range(X.shape[1]):
+        corr = spearmanr(X[:, i], y)[0]
+        corrs.append(abs(corr))
+    avg_corr = np.mean(np.array(corrs))
+    max_corr = max(corrs)
+    n_x_features = X.shape[1]
+    n_samples = len(X)
+
+    dataset_configs.append(
+        {
+            "name": f"{id}_uci",
+            "data": (X, y),
+            "synthetic_params": None,
+            "data_attributes": {
+                "mutual_information": mutual_information,
+                "sparsity": sparsity,
+                "vif": vif,
+                "y_skew": y_skew,
+                "y_kurtosis": y_kurtosis,
+                "y_rel_std": y_rel_std,
+                "avg_corr": avg_corr,
+                "max_corr": max_corr,
+                "n_x_features": n_x_features,
+                "n_samples": n_samples,
+            },
+            "normalize": True,
+            "n_warm_starts": 5,
+            "evaluation_metric": "mean_squared_error",
+            "evaluation_metric_direction": "inverse",
+            # "n_iterations": 20
+            "timeout": 60,
+        }
+    )
+
+dataset_configs = dataset_configs[::-1]
+
+
 param_sample_space = {
-    "n_estimators__range_int": [10, 400],
+    "n_estimators__range_int": [10, 200],
     "min_samples_split__range_float": [0.005, 0.3],
     "min_samples_leaf__range_float": [0.005, 0.3],
     # "max_features__range_float": [0.1, 1],
-    # "max_features": ["sqrt", "log2", None],
+    "max_features": ["sqrt", "log2", None],
     "bootstrap": [True, False],
 }
 params_combinations = generate_param_combinations(param_sample_space=param_sample_space)
@@ -360,9 +472,26 @@ for params in params_combinations:
             },
         }
     )
+min_n_combinations = 20
+filtered_model_configs = []
+for config in model_configs:
+    param_lens = []
+    for param in config["params"].values():
+        param_lens.append(len(param))
+    combos = 1
+    for length in param_lens:
+        combos = combos * length
+    if combos > min_n_combinations:
+        filtered_model_configs.append(config)
 
-model_configs = random.sample(model_configs, k=8)
-tuners = ["confopt-qgbm-0.9", "optuna-tpe"]
+
+# filtered_model_configs = random.sample(filtered_model_configs, k=8)
+tuners = [
+    "confopt-ql-0.8",
+    "confopt-qgbm-0.8",
+    "optuna-tpe",
+    # "skopt-gp"
+]
 
 # tuners = ["confopt", "optuna-tpe", "optuna-cmaes", "hyperopt-tpe", "hyperopt-random"]
 
@@ -390,6 +519,7 @@ for dataset_config in dataset_configs:
     dataset_name = dataset_config["name"]
     logger.info(f"Dataset: {dataset_name}")
     metric_direction = dataset_config["evaluation_metric_direction"]
+    # n_iterations = dataset_config["n_iterations"]
     timeout = dataset_config["timeout"]
     X, y = dataset_config["data"]
     X_train, y_train, X_val, y_val = train_val_split(
@@ -399,14 +529,24 @@ for dataset_config in dataset_configs:
         normalize=normalize,
         random_state=1234,
     )
-    for config in model_configs:
+    for config in filtered_model_configs:
         logger.info(f"Model: {config['model_name']}")
 
         warm_starts_per_repetition = []
-        for _ in range(n_repetitions):
+        for repetition in range(n_repetitions):
             # Generate 10 hyperparameter combinations
             hyperparameter_combinations = generate_hyperparameter_combinations(
-                dataset_config["params"], n_combinations=dataset_config["n_warm_starts"]
+                config["params"],
+                n_combinations=dataset_config["n_warm_starts"],
+                random_state=random_state,
+            )
+
+            X_train, y_train, X_val, y_val = train_val_split(
+                X=X,
+                y=y,
+                train_split=train_split,
+                normalize=normalize,
+                random_state=repetition,
             )
 
             warm_starts = []
@@ -418,7 +558,19 @@ for dataset_config in dataset_configs:
                             "__range_int", ""
                         )
                     ] = param_value
-                performance = dataset_config["data"].predict(clean_param)
+
+                model = update_model_parameters(
+                    model_instance=deepcopy(config["model"]),
+                    configuration=clean_param,
+                    random_state=repetition,
+                )
+
+                model.fit(X=X_train, y=y_train)
+
+                performance = mean_squared_error(
+                    y_true=y_val, y_pred=model.predict(X=X_val)
+                )
+
                 warm_starts.append((clean_param, performance))
 
             warm_starts_per_repetition.append(warm_starts)
@@ -436,7 +588,8 @@ for dataset_config in dataset_configs:
                     normalize=normalize,
                     tuner=tuner,
                     timeout=timeout,
-                    random_state=random_state,
+                    # n_iterations=n_iterations,
+                    random_state=repetition,
                     params=config["params"],
                     warm_start_configs=warm_starts_per_repetition[repetition],
                 )
@@ -445,18 +598,15 @@ for dataset_config in dataset_configs:
                 ).dt.seconds
 
                 historical_performance["dataset"] = dataset_name
-                historical_performance["sparsity"] = dataset_config["synthetic_params"][
+                historical_performance["sparsity"] = dataset_config["data_attributes"][
                     "sparsity"
                 ]
-                historical_performance["noise_level"] = dataset_config[
-                    "synthetic_params"
-                ]["noise_level"]
                 historical_performance["n_x_features"] = dataset_config[
-                    "synthetic_params"
+                    "data_attributes"
                 ]["n_x_features"]
-                historical_performance["n_samples"] = dataset_config[
-                    "synthetic_params"
-                ]["n_samples"]
+                historical_performance["n_samples"] = dataset_config["data_attributes"][
+                    "n_samples"
+                ]
                 historical_performance["mutual_information"] = dataset_config[
                     "data_attributes"
                 ]["mutual_information"]
@@ -538,6 +688,7 @@ for dataset_config in dataset_configs:
                     {
                         "runtime": np.arange(
                             1,
+                            # n_iterations,
                             timeout,
                             1,
                         )
@@ -561,6 +712,10 @@ for dataset_config in dataset_configs:
                     f"{data_path}/incremental_raw_benchmark_data.csv", index=False
                 )
 
+runtime_extended_feature_names = feature_names + ["runtime"]
+ranking_groupers = ["model", "dataset"]
+
+
 # Apply ranks within each repetition and tuner:
 ascending = True  # False for accuracy
 raw_benchmark_data["rank"] = raw_benchmark_data.groupby(
@@ -568,22 +723,23 @@ raw_benchmark_data["rank"] = raw_benchmark_data.groupby(
         "dataset",
         "model",
         "repetition",
-        "runtime",
     ]
-    + feature_names,
+    + runtime_extended_feature_names,
     as_index=False,
 )["best_performance"].rank(method="average", ascending=ascending)
 
 # Calculate average time weighted rank across repetitions and time steps:
-processed_benchmark_data = raw_benchmark_data.groupby(
-    [
-        "dataset",
-        "model",
-        "tuner",
-    ]
-    + feature_names,
-    as_index=False,
-).agg({"rank": "mean"})
+# processed_benchmark_data = raw_benchmark_data.groupby(
+#     [
+#         "dataset",
+#         "model",
+#         "tuner",
+#     ]
+#     + feature_names,
+#     as_index=False,
+# ).agg({"rank": "mean"})
+
+processed_benchmark_data = raw_benchmark_data.copy()
 
 # data_path = cache_path + f"data/{run_start}"
 # if not os.path.exists(data_path):
@@ -593,13 +749,12 @@ processed_benchmark_data = raw_benchmark_data.groupby(
 # )
 # raw_benchmark_data.to_csv(f"{data_path}/data_attribute_raw_data.csv", index=False)
 
-
-# Assumes only one model is benchmarked at a time:
 processed_benchmark_data["rank_group"] = (
-    processed_benchmark_data[feature_names + ["dataset"]]
+    processed_benchmark_data[runtime_extended_feature_names + ranking_groupers]
     .astype(str)
     .agg("-".join, axis=1)
 )
+
 
 # TODO: TEMP
 group_check = processed_benchmark_data.groupby(["rank_group"], as_index=False)[
@@ -610,18 +765,22 @@ processed_benchmark_data = processed_benchmark_data[
     ~(processed_benchmark_data["rank_group"].isin(bad_groups))
 ]
 
+# temp:
+# processed_benchmark_data= processed_benchmark_data[processed_benchmark_data["tuner"]!="confopt-ql-0.8"]
+# processed_benchmark_data = processed_benchmark_data[processed_benchmark_data["dataset"]!="162_uci"]
+
+
 processed_benchmark_data["prediction_rank"] = processed_benchmark_data.groupby(
-    [
-        "dataset",
-        "model",
-    ]
-    + feature_names,
+    ranking_groupers + runtime_extended_feature_names,
     as_index=False,
 )["rank"].rank(method="average", ascending=ascending)
 
+
 # Initialize cross-validation parameters
-n_splits = 10
-splitter = GroupShuffleSplit(test_size=0.1, n_splits=n_splits, random_state=None)
+n_splits = 3
+splitter = GroupShuffleSplit(
+    test_size=1 / n_splits, n_splits=n_splits, random_state=None
+)
 
 # Arrays to store precision at 1 for each split
 naive_precisions = []
@@ -635,7 +794,9 @@ for train_inds, test_inds in splitter.split(
     benchmark_data_train = benchmark_data_train.sort_values(
         by=["rank_group"]
     ).reset_index()
-    benchmark_data_train_X = benchmark_data_train[feature_names + ["tuner"]]
+    benchmark_data_train_X = benchmark_data_train[
+        runtime_extended_feature_names + ["tuner"]
+    ]
     benchmark_data_train_X = pd.concat(
         [
             benchmark_data_train_X,
@@ -647,7 +808,9 @@ for train_inds, test_inds in splitter.split(
 
     benchmark_data_val = processed_benchmark_data.iloc[test_inds]
     benchmark_data_val = benchmark_data_val.sort_values(by=["rank_group"]).reset_index()
-    benchmark_data_val_X = benchmark_data_val[feature_names + ["tuner"]]
+    benchmark_data_val_X = benchmark_data_val[
+        runtime_extended_feature_names + ["tuner"]
+    ]
     benchmark_data_val_X = pd.concat(
         [
             benchmark_data_val_X,
@@ -658,9 +821,11 @@ for train_inds, test_inds in splitter.split(
     benchmark_data_val_y = benchmark_data_val["prediction_rank"]
 
     ranker = RankerXGBoost(
-        learning_rate=0.01, max_depth=None, num_boost_round=1000, random_state=1234
+        learning_rate=0.1, max_depth=None, num_boost_round=1000, random_state=1234
     )
-    groups = [len(tuners)] * len(benchmark_data_train["rank_group"].unique())
+    groups = [len(processed_benchmark_data["tuner"].unique())] * len(
+        benchmark_data_train["rank_group"].unique()
+    )
     ranker.fit(
         benchmark_data_train_X.to_numpy(), benchmark_data_train_y.to_numpy(), groups
     )
@@ -699,88 +864,78 @@ print(
 )
 
 
-ranker.get_feature_importances(feature_names=feature_names + ["tuner"])
+ranker.get_feature_importances(feature_names=runtime_extended_feature_names + ["tuner"])
 
-#########
 
-# cali_data = fetch_california_housing(return_X_y=True)
-diabetes_data = load_diabetes(return_X_y=True)
-public_dataset_configs = [
-    # {
-    #     "name": "CALI",
-    #     "data": cali_data,
-    #     "normalize": True,
-    #     "evaluation_metric": "mean_squared_error",
-    #     "evaluation_metric_direction": "inverse",
-    #     "timeout": 60 * 2,
-    # },
-    {
-        "name": "DIABETES",
-        "data": diabetes_data,
-        "normalize": True,
-        "evaluation_metric": "mean_squared_error",
-        "evaluation_metric_direction": "inverse",
-        "timeout": 60,
-    },
+benchmark_data_train = processed_benchmark_data[
+    ~(processed_benchmark_data["dataset"].isin(["162_uci", "1_uci"]))
+]
+benchmark_data_val = processed_benchmark_data[
+    processed_benchmark_data["dataset"].isin(["162_uci", "1_uci"])
 ]
 
-public_prediction_set = []
-for dataset_config in public_dataset_configs:
-    data = dataset_config["data"]
-    mutual_information = total_mutual_information(X=data[0])
-    vif = calculate_vif(X=data[0])
-    y_skew = skew(data[1])
-    y_kurtosis = kurtosis(data[1])
-    y_rel_std = np.std(data[1]) / np.mean(data[1])
-    corrs = []
-    for i in range(data[0].shape[1]):
-        corr = spearmanr(data[0][:, i], data[1])[0]
-        corrs.append(abs(corr))
-    avg_corr = np.mean(np.array(corrs))
-    max_corr = max(corrs)
-    sparsity = get_sparsity(data[0])
 
-    # TODO: hard coded:
-    params = model_configs[2]
-    n_params = len(params) + 1
-    n_int_params = sum([1 if "int" in x else 0 for x in list(params.keys())])
-    n_float_params = sum([1 if "float" in x else 0 for x in list(params.keys())])
-    n_categorical_params = sum(
-        [1 if ("int" not in x and "float" not in x) else 0 for x in list(params.keys())]
-    )
-
-    for tuner in tuners:
-        public_prediction_set.append(
-            {
-                "sparsity": sparsity,
-                "n_x_features": data[0].shape[1],
-                "n_samples": len(data[0]),
-                "mutual_information": mutual_information,
-                "vif": vif,
-                "y_skew": y_skew,
-                "y_kurtosis": y_kurtosis,
-                "y_rel_std": y_rel_std,
-                "avg_corr": avg_corr,
-                "max_corr": max_corr,
-                "n_params": n_params,
-                "n_int_params": n_int_params,
-                "n_float_params": n_float_params,
-                "n_categorical_params": n_categorical_params,
-                "tuner": tuner,
-            }
-        )
-
-df_public_prediction_set = pd.DataFrame(public_prediction_set)[
-    feature_names + ["tuner"]
+benchmark_data_train = benchmark_data_train.sort_values(by=["rank_group"]).reset_index()
+benchmark_data_train_X = benchmark_data_train[
+    runtime_extended_feature_names + ["tuner"]
 ]
-df_public_prediction_set = pd.concat(
+benchmark_data_train_X = pd.concat(
     [
-        df_public_prediction_set,
-        pd.get_dummies(df_public_prediction_set["tuner"]).astype(int),
+        benchmark_data_train_X,
+        pd.get_dummies(benchmark_data_train["tuner"]).astype(int),
     ],
     axis=1,
 ).drop(["tuner"], axis=1)
+benchmark_data_train_y = benchmark_data_train["prediction_rank"]
 
+benchmark_data_val = benchmark_data_val.sort_values(by=["rank_group"]).reset_index()
+benchmark_data_val_X = benchmark_data_val[runtime_extended_feature_names + ["tuner"]]
+benchmark_data_val_X = pd.concat(
+    [
+        benchmark_data_val_X,
+        pd.get_dummies(benchmark_data_val_X["tuner"]).astype(int),
+    ],
+    axis=1,
+).drop(["tuner"], axis=1)
+benchmark_data_val_y = benchmark_data_val["prediction_rank"]
 
-public_y_pred = ranker.predict(df_public_prediction_set.to_numpy())
-print(public_y_pred)
+ranker = RankerXGBoost(
+    learning_rate=0.1, max_depth=None, num_boost_round=1000, random_state=1234
+)
+groups = [len(processed_benchmark_data["tuner"].unique())] * len(
+    benchmark_data_train["rank_group"].unique()
+)
+ranker.fit(benchmark_data_train_X.to_numpy(), benchmark_data_train_y.to_numpy(), groups)
+y_pred = ranker.predict(benchmark_data_val_X.to_numpy())
+
+prediction_set = benchmark_data_val[["rank_group", "tuner", "prediction_rank"]]
+prediction_set["predicted_rank"] = y_pred
+
+# Get the most common rank order
+most_common_order = get_most_common_rank_order(benchmark_data_val)
+
+# Create the naive prediction set
+naive_prediction_set = naive_ranker_predict(
+    benchmark_data_val[["rank_group", "tuner", "prediction_rank"]],
+    most_common_order,
+)
+
+# Calculate Precision@k for the naive ranker
+naive_precision_at_1 = calculate_average_precision_at_k(df=naive_prediction_set, k=1)
+
+# Compare with the XGBoost ranker
+xgboost_precision_at_1 = calculate_average_precision_at_k(df=prediction_set, k=1)
+
+naive_precisions.append(naive_precision_at_1)
+xgboost_precisions.append(xgboost_precision_at_1)
+
+naive_predictions_mean = np.mean(np.array(naive_precisions))
+naive_predictions_std = np.std(np.array(naive_precisions))
+print(f"Naive predictions mean: {naive_predictions_mean}, std: {naive_predictions_std}")
+xgboost_precisions_mean = np.mean(np.array(xgboost_precisions))
+xgboost_precisions_std = np.std(np.array(xgboost_precisions))
+print(
+    f"XGBoost predictions mean: {xgboost_precisions_mean}, std: {xgboost_precisions_std}"
+)
+
+ranker.get_feature_importances(feature_names=runtime_extended_feature_names + ["tuner"])

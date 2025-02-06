@@ -1,6 +1,7 @@
 # Repo specific:
 /cache
 /jahs_bench_data
+/yahpo_bench_data
 
 # General:
 .DS_Store

@@ -10,10 +10,77 @@ import time
 # import json
 import logging
 import optuna
-from generate import ObjectiveSurfaceGenerator  # Jahs201Generator
+from generate import Jahs201Generator  # ObjectiveSurfaceGenerator, YahpoGenerator
 from plot import plot_benchmark_data
+import ast
 
 # from copy import deepcopy
+
+
+def parse_config_space(s):
+    config_dict = {}
+    for line in s.split("\n"):
+        line = line.strip()
+        if not line or line in {"Configuration space object:", "Hyperparameters:"}:
+            continue
+
+        # Custom parser to handle commas inside brackets/braces
+        parts = []
+        current = []
+        in_bracket = False
+        bracket_chars = {"[", "{"}
+
+        for char in line:
+            if char in bracket_chars:
+                in_bracket = True
+            elif char in {"]", "}"}:
+                in_bracket = False
+
+            if char == "," and not in_bracket:
+                parts.append("".join(current).strip())
+                current = []
+            else:
+                current.append(char)
+        if current:
+            parts.append("".join(current).strip())
+
+        if not parts:
+            continue
+
+        name = parts[0]
+        param_type = None
+        choices = None
+        range_values = None
+        value = None
+
+        for part in parts[1:]:
+            if part.startswith("Type: "):
+                param_type = part.split(": ")[1]
+            elif part.startswith("Choices: "):
+                choices_str = part.split(": ")[1].strip()
+                # Convert curly braces to list format
+                if choices_str.startswith("{"):
+                    choices_str = f"[{choices_str[1:-1]}]"
+                choices = ast.literal_eval(choices_str)
+            elif part.startswith("Range: "):
+                range_str = part.split(": ")[1].strip("[]")
+                range_values = [x.strip() for x in range_str.split(",")]
+            elif part.startswith("Value: "):
+                value = ast.literal_eval(part.split(": ")[1])
+
+        # Handle parameter types
+        if param_type == "Categorical":
+            config_dict[name] = choices
+        elif param_type in ("UniformInteger", "UniformFloat"):
+            suffix = "__range_int" if "Integer" in param_type else "__range_float"
+            converter = int if "Integer" in param_type else float
+            config_dict[f"{name}{suffix}"] = [converter(x) for x in range_values]
+        elif param_type == "Constant":
+            config_dict[name] = [value]
+
+    config_dict["OpenML_task_id"] = [str(config_dict["OpenML_task_id"][0])]
+
+    return config_dict
 
 
 cache_path = "cache/"
@@ -42,12 +109,12 @@ optuna.logging.set_verbosity(optuna.logging.ERROR)
 
 normalize = True
 random_state = 1234
-n_repetitions = 30
+n_repetitions = 50
 
 random.seed(random_state)
 np.random.seed(random_state)
 
-conv_trials = 100
+conv_trials = 75
 
 synthetic_params = {
     "param1__range_float": [0, 100],
@@ -96,22 +163,22 @@ def generate_hyperparameter_combinations(confopt_params, n_combinations, random_
                     ]
                 )
             else:
-                combination[param_name] = param_values
+                combination[param_name] = random.choice(param_values)
         combinations.append(combination)
     return combinations
 
 
 generator_configs = [
-    {
-        "name": "rastrigin",
-        "data": ObjectiveSurfaceGenerator(generator="rastrigin"),
-        "normalize": True,
-        "evaluation_metric_direction": "inverse",
-        "n_trials": 200,
-        "n_warm_starts": 5,
-        "params": synthetic_params,
-        "model_name": "Synthetic",
-    },
+    # {
+    #     "name": "rastrigin",
+    #     "data": ObjectiveSurfaceGenerator(generator="rastrigin"),
+    #     "normalize": True,
+    #     "evaluation_metric_direction": "inverse",
+    #     "n_trials": 100,
+    #     "n_warm_starts": 5,
+    #     "params": synthetic_params,
+    #     "model_name": "Synthetic",
+    # },
     #     {
     #     "name": "shekel",
     #     "data":  ObjectiveSurfaceGenerator(generator="shekel"),
@@ -152,45 +219,62 @@ generator_configs = [
     #     "params":synthetic_params,
     #     "model_name": "Synthetic",
     # },
+    {
+        "name": "cifar10",
+        "data": Jahs201Generator(dataset="cifar10"),
+        "normalize": True,
+        "evaluation_metric_direction": "inverse",
+        "n_warm_starts": 10,
+        "n_trials": conv_trials,
+        "model_name": "CNN",
+        "params": cnn_params,
+    },
+    {
+        "name": "fashion_mnist",
+        "data": Jahs201Generator(dataset="fashion_mnist"),
+        "normalize": True,
+        "evaluation_metric_direction": "inverse",
+        "n_warm_starts": 10,
+        "n_trials": conv_trials,
+        "model_name": "CNN",
+        "params": cnn_params,
+    },
+    {
+        "name": "colorectal_histology",
+        "data": Jahs201Generator(dataset="colorectal_histology"),
+        "normalize": True,
+        "evaluation_metric_direction": "inverse",
+        "n_warm_starts": 10,
+        "n_trials": conv_trials,
+        "model_name": "CNN",
+        "params": cnn_params,
+    },
     # {
-    #     "name": "cifar10",
-    #     "data": Jahs201Generator(dataset="cifar10"),
-    #     "normalize": True,
-    #     "evaluation_metric_direction": "inverse",
-    #     "n_warm_starts":10,
-    #     "n_trials": conv_trials,
-    #     "model_name": "CNN",
-    #     "params": cnn_params,    },
-    # {
-    #     "name": "fashion_mnist",
-    #     "data": Jahs201Generator(dataset="fashion_mnist"),
+    #     "name": "lcbench",
+    #     "data": YahpoGenerator(dataset="lcbench"),
     #     "normalize": True,
     #     "evaluation_metric_direction": "inverse",
     #     "n_warm_starts": 10,
     #     "n_trials": conv_trials,
-    #     "model_name": "CNN",
-    #     "params": cnn_params,
+    #     "model_name": "",
+    #     "params": parse_config_space(
+    #         str(
+    #             YahpoGenerator(dataset="lcbench").generator.get_opt_space(
+    #                 drop_fidelity_params=False
+    #             )
+    #         )
+    #     ),
     # },
-    # {
-    #     "name": "colorectal_histology",
-    #     "data": Jahs201Generator(dataset="colorectal_histology"),
-    #     "normalize": True,
-    #     "evaluation_metric_direction": "inverse",
-    #     "n_warm_starts":10,
-    #     "n_trials": conv_trials,
-    #     "model_name": "CNN",
-    #     "params": cnn_params,    },
 ]
 
+
 tuners = [
-    #  "skopt-gp",
-    # "confopt-rf-0.2",
-    "confopt-gp-0.8",
-    # "confopt-rf-0.8",
-    # "confopt-gbm-0.8",
-    # "confopt-qgbm-0.8",
-    # "confopt-qgbm-0.1",
-    # "skopt-forest",
+    "skopt-forest",
+    "skopt-gp",
+    "confopt-rf-0.8",
+    "confopt-qgbm-0.8",
+    # "confopt-ql-0.2",
+    "confopt-ql-0.8",
     "optuna-tpe",
 ]
 
@@ -223,8 +307,6 @@ for dataset_config in generator_configs:
             warm_starts.append((clean_param, performance))
 
         warm_starts_per_repetition.append(warm_starts)
-
-    print(warm_starts_per_repetition)
 
     logger.info(f"Model: {dataset_config['model_name']}")
     for tuner in tuners:
