@@ -4,6 +4,7 @@ import pandas as pd
 # import numpy as np
 import random
 import optuna
+import time
 
 # Add scikit-opt import
 from skopt import forest_minimize, gbrt_minimize, gp_minimize
@@ -77,7 +78,7 @@ def optuna_tune(
     random_state,
     params,
     sampler="tpe",
-    warm_start_configs=None,  # New: Dictionary of configurations and losses
+    warm_start_configs=None,
     timeout=None,
     n_iterations=None,
 ):
@@ -87,10 +88,8 @@ def optuna_tune(
         sampler_object = optuna.samplers.CmaEsSampler(seed=random_state)
     study = optuna.create_study(direction="minimize", sampler=sampler_object)
 
-    # Warm-start the study with prior configurations and losses
     if warm_start_configs is not None:
         for config, loss in warm_start_configs:
-            # Transform the keys in the config to match the params dictionary
             transformed_config = {}
             for param_name, value in config.items():
                 if "__range_int" in param_name:
@@ -101,7 +100,6 @@ def optuna_tune(
                     param_key = param_name
                 transformed_config[param_key] = value
 
-            # Define distributions manually based on the parameter types
             distributions = {}
             for param_name, param_values in params.items():
                 if "__range_int" in param_name:
@@ -123,7 +121,6 @@ def optuna_tune(
                         choices=param_values
                     )
 
-            # Create a trial with the warm-start configuration
             trial = optuna.trial.create_trial(
                 params=transformed_config,
                 distributions=distributions,
@@ -149,8 +146,13 @@ def optuna_tune(
 
     historical_performance = pd.DataFrame(
         [
-            {"end_time": trial.datetime_complete, "performance": trial.value}
-            for trial in study.trials
+            {
+                "end_time": trial.datetime_complete,
+                "performance": trial.value,
+                "configurations": trial.params,
+                "iteration": iteration,
+            }
+            for iteration, trial in enumerate(study.trials)
         ]
     )
     best_value = study.best_value
@@ -159,12 +161,13 @@ def optuna_tune(
 
 
 def optuna_artificial_tune(
-    n_trials,
     params,
     performance_generator,
     sampler="tpe",
     random_state=None,
-    warm_start_configs=None,  # New: Dictionary of configurations and losses
+    warm_start_configs=None,
+    n_trials=None,
+    timeout=None,
 ):
     if sampler == "tpe":
         sampler_object = optuna.samplers.TPESampler(seed=random_state)
@@ -172,10 +175,8 @@ def optuna_artificial_tune(
         sampler_object = optuna.samplers.CmaEsSampler(seed=random_state)
     study = optuna.create_study(direction="minimize", sampler=sampler_object)
 
-    # Warm-start the study with prior configurations and losses
     if warm_start_configs is not None:
         for config, loss in warm_start_configs:
-            # Transform the keys in the config to match the params dictionary
             transformed_config = {}
             for param_name, value in config.items():
                 if "__range_int" in param_name:
@@ -186,7 +187,6 @@ def optuna_artificial_tune(
                     param_key = param_name
                 transformed_config[param_key] = value
 
-            # Define distributions manually based on the parameter types
             distributions = {}
             for param_name, param_values in params.items():
                 if "__range_int" in param_name:
@@ -208,7 +208,6 @@ def optuna_artificial_tune(
                         choices=param_values
                     )
 
-            # Create a trial with the warm-start configuration
             trial = optuna.trial.create_trial(
                 params=transformed_config,
                 distributions=distributions,
@@ -221,13 +220,19 @@ def optuna_artificial_tune(
             trial=trial, params=params, performance_generator=performance_generator
         ),
         n_trials=n_trials,
+        timeout=timeout,
         n_jobs=1,
     )
 
     historical_performance = pd.DataFrame(
         [
-            {"end_time": n + 1, "performance": trial.value}
-            for n, trial in enumerate(study.trials)
+            {
+                "end_time": trial.datetime_complete,
+                "performance": trial.value,
+                "configurations": trial.params,
+                "iteration": iteration,
+            }
+            for iteration, trial in enumerate(study.trials)
         ]
     )
     best_value = study.best_value
@@ -251,6 +256,7 @@ def confopt_artificial_tune(
     conformal_search_estimator,
     confidence_level,
     max_iter,
+    timeout,
     warm_start_configs,
     random_state=None,
 ):
@@ -287,7 +293,7 @@ def confopt_artificial_tune(
             searcher.searched_timestamps.append(timestamp)
 
     searcher.search(
-        runtime_budget=1000000,
+        runtime_budget=timeout,
         max_iter=max_iter,
         conformal_search_estimator=conformal_search_estimator,
         conformal_learning_rate=0.1,
@@ -300,8 +306,19 @@ def confopt_artificial_tune(
 
     historical_performance = pd.DataFrame(
         [
-            {"end_time": n + 1, "performance": performance}
-            for n, performance in enumerate(searcher.searched_performances)
+            {
+                "end_time": timestamp,
+                "performance": performance,
+                "configurations": config,
+                "iteration": iteration,
+            }
+            for iteration, (timestamp, performance, config) in enumerate(
+                zip(
+                    searcher.searched_timestamps,
+                    searcher.searched_performances,
+                    searcher.searched_configurations,
+                )
+            )
         ]
     )
 
@@ -378,9 +395,18 @@ def confopt_tune(
 
     historical_performance = pd.DataFrame(
         [
-            {"end_time": timestamp, "performance": performance}
-            for timestamp, performance in zip(
-                searcher.searched_timestamps, searcher.searched_performances
+            {
+                "end_time": timestamp,
+                "performance": performance,
+                "configurations": config,
+                "iteration": iteration,
+            }
+            for iteration, (timestamp, performance, config) in enumerate(
+                zip(
+                    searcher.searched_timestamps,
+                    searcher.searched_performances,
+                    searcher.searched_configurations,
+                )
             )
         ]
     )
@@ -416,7 +442,7 @@ def skopt_tune(
     random_state,
     params,
     method="gp",
-    warm_start_configs=None,  # New: Dictionary of configurations and losses
+    warm_start_configs=None,
     timeout=None,
     n_iterations=None,
 ):
@@ -439,12 +465,15 @@ def skopt_tune(
             skopt_params_space.append(Categorical(param_values, name=param_key))
         renamed_param_names.append(param_key)
 
+    runtimes = []
+
     def objective(params_list):
+        start_time = time.time()
         params_dict = {}
         for param_name, param_value in zip(renamed_param_names, params_list):
             params_dict[param_name] = param_value
 
-        return skopt_objective(
+        performance = skopt_objective(
             model,
             X=X,
             y=y,
@@ -454,7 +483,13 @@ def skopt_tune(
             params=params_dict,
         )
 
-    # Warm-start the optimization with prior configurations and losses
+        # End timer and calculate runtime
+        end_time = time.time()
+        runtime = end_time - start_time
+        runtimes.append(runtime)
+
+        return performance
+
     x0 = []
     y0 = []
     if warm_start_configs is not None:
@@ -466,27 +501,27 @@ def skopt_tune(
         result = gp_minimize(
             objective,
             skopt_params_space,
-            n_calls=n_iterations,  # Adjust based on timeout
-            x0=x0,  # Warm-start configurations
-            y0=y0,  # Warm-start losses
+            n_calls=n_iterations,
+            x0=x0,
+            y0=y0,
             random_state=random_state,
         )
     elif method == "forest":
         result = forest_minimize(
             objective,
             skopt_params_space,
-            n_calls=n_iterations,  # Adjust based on timeout
-            x0=x0,  # Warm-start configurations
-            y0=y0,  # Warm-start losses
+            n_calls=n_iterations,
+            x0=x0,
+            y0=y0,
             random_state=random_state,
         )
     elif method == "gbrt":
         result = gbrt_minimize(
             objective,
             skopt_params_space,
-            n_calls=n_iterations,  # Adjust based on timeout
-            x0=x0,  # Warm-start configurations
-            y0=y0,  # Warm-start losses
+            n_calls=n_iterations,
+            x0=x0,
+            y0=y0,
             random_state=random_state,
         )
     else:
@@ -494,8 +529,15 @@ def skopt_tune(
 
     historical_performance = pd.DataFrame(
         [
-            {"end_time": i + 1, "performance": perf}
-            for i, perf in enumerate(result.func_vals)
+            {
+                "end_time": runtime,
+                "performance": perf,
+                "iteration": iteration,
+                "configurations": dict(zip(renamed_param_names, params_list)),
+            }
+            for iteration, (perf, params_list, runtime) in enumerate(
+                zip(result.func_vals, result.x_iters, runtimes)
+            )
         ]
     )
     best_value = result.fun
@@ -504,12 +546,13 @@ def skopt_tune(
 
 
 def skopt_artificial_tune(
-    n_trials,
     performance_generator,
     params,
     method="gp",
-    warm_start_configs=None,  # New: Dictionary of configurations and losses
+    warm_start_configs=None,
     random_state=None,
+    n_trials=None,
+    timeout=None,
 ):
     skopt_params_space = []
     renamed_param_names = []
@@ -530,14 +573,27 @@ def skopt_artificial_tune(
             skopt_params_space.append(Categorical(param_values, name=param_key))
         renamed_param_names.append(param_key)
 
+    # Track runtime for each trial
+    runtimes = []
+
     def objective(params_list):
+        # Start timer
+        start_time = time.time()
+
+        # Evaluate the objective function
         params_dict = {}
         for param_name, param_value in zip(renamed_param_names, params_list):
             params_dict[param_name] = param_value
 
-        return performance_generator.predict(params=params_dict)
+        performance = performance_generator.predict(params=params_dict)
 
-    # Warm-start the optimization with prior configurations and losses
+        # End timer and calculate runtime
+        end_time = time.time()
+        runtime = end_time - start_time
+        runtimes.append(runtime)
+
+        return performance
+
     x0 = []
     y0 = []
     if warm_start_configs is not None:
@@ -550,8 +606,8 @@ def skopt_artificial_tune(
             objective,
             skopt_params_space,
             n_calls=n_trials,
-            x0=x0,  # Warm-start configurations
-            y0=y0,  # Warm-start losses
+            x0=x0,
+            y0=y0,
             random_state=random_state,
         )
     elif method == "forest":
@@ -559,8 +615,8 @@ def skopt_artificial_tune(
             objective,
             skopt_params_space,
             n_calls=n_trials,
-            x0=x0,  # Warm-start configurations
-            y0=y0,  # Warm-start losses
+            x0=x0,
+            y0=y0,
             random_state=random_state,
         )
     elif method == "gbrt":
@@ -568,17 +624,25 @@ def skopt_artificial_tune(
             objective,
             skopt_params_space,
             n_calls=n_trials,
-            x0=x0,  # Warm-start configurations
-            y0=y0,  # Warm-start losses
+            x0=x0,
+            y0=y0,
             random_state=random_state,
         )
     else:
         raise ValueError(f"Unknown scikit-opt method: {method}")
 
+    # Add runtime to the historical performance DataFrame
     historical_performance = pd.DataFrame(
         [
-            {"end_time": i + 1, "performance": perf}
-            for i, perf in enumerate(result.func_vals)
+            {
+                "end_time": runtime,
+                "performance": perf,
+                "iteration": iteration,
+                "configurations": dict(zip(renamed_param_names, params_list)),
+            }
+            for iteration, (perf, params_list, runtime) in enumerate(
+                zip(result.func_vals, result.x_iters, runtimes)
+            )
         ]
     )
     best_value = result.fun
@@ -666,12 +730,13 @@ def tune(
 
 
 def tune_artificial(
-    n_trials,
     performance_generator,
     tuner: str,
     params,
     warm_start_configs=None,
     random_state=None,
+    n_trials=None,
+    timeout=None,
 ):
     if "optuna" in tuner:
         if tuner == "optuna-tpe":
@@ -685,6 +750,7 @@ def tune_artificial(
             sampler=sampler,
             warm_start_configs=warm_start_configs,
             random_state=random_state,
+            timeout=timeout,
         )
     elif "confopt" in tuner:
         _, conformal_search_estimator, confidence_level = tuner.split("-")
@@ -695,6 +761,7 @@ def tune_artificial(
             conformal_search_estimator=conformal_search_estimator,
             confidence_level=float(confidence_level),
             max_iter=n_trials,
+            timeout=timeout,
             warm_start_configs=warm_start_configs,
             random_state=random_state,
         )
@@ -713,6 +780,7 @@ def tune_artificial(
             method=method,
             warm_start_configs=warm_start_configs,
             random_state=random_state,
+            timeout=timeout,
         )
     else:
         raise ValueError(f"Unknown tuner: {tuner}")

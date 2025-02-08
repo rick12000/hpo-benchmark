@@ -366,7 +366,7 @@ for noise_level in noise_level_values:
                         "evaluation_metric": "mean_squared_error",
                         "evaluation_metric_direction": "inverse",
                         # "n_iterations": 20
-                        "timeout": 40,
+                        "timeout": 90,
                     }
                 )
 
@@ -433,7 +433,7 @@ for id in uci_dataset_ids:
             "evaluation_metric": "mean_squared_error",
             "evaluation_metric_direction": "inverse",
             # "n_iterations": 20
-            "timeout": 60,
+            "timeout": 90,
         }
     )
 
@@ -487,7 +487,7 @@ for config in model_configs:
 
 # filtered_model_configs = random.sample(filtered_model_configs, k=8)
 tuners = [
-    "confopt-ql-0.8",
+    # "confopt-ql-0.8",
     "confopt-qgbm-0.8",
     "optuna-tpe",
     # "skopt-gp"

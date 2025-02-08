@@ -22,7 +22,11 @@ marker_type_list = ["+", "x", "D", "o", "s", "h", "P"]
 
 
 def plot_benchmark_data(
-    data, plot_path, y_col="best_performance", add_confidence_intervals=True
+    data,
+    plot_path,
+    x_col="runtime",
+    y_col="best_performance",
+    add_confidence_intervals=True,
 ):
     plt.clf()
     # Get unique datasets and models
@@ -49,7 +53,7 @@ def plot_benchmark_data(
             # Plot each tuner's data
             for counter, (tuner, tuner_data) in enumerate(subset.groupby("tuner")):
                 ax.plot(
-                    tuner_data["runtime"],
+                    tuner_data[x_col],
                     tuner_data[f"{y_col}_mean"],
                     label=f"{tuner}",
                     alpha=0.8,
@@ -59,7 +63,7 @@ def plot_benchmark_data(
                 if add_confidence_intervals:
                     # Add shaded region for q10 to q90
                     ax.fill_between(
-                        tuner_data["runtime"],
+                        tuner_data[x_col],
                         tuner_data[f"{y_col}_q10"],
                         tuner_data[f"{y_col}_q90"],
                         alpha=0.2,

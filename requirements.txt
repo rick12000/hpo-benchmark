@@ -7,3 +7,4 @@ hyperopt
 scikit-optimize
 numpy==1.26.4
 statsmodels
+syne-tune[basic]

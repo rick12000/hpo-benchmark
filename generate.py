@@ -239,13 +239,19 @@ class ObjectiveSurfaceGenerator:
             raise ValueError(f"Unknown generator: {self.generator}")
         return y
 
+    def predict_runtime(self, params):
+        return 0
+
 
 class Jahs201Generator:
-    def __init__(self, dataset: str, metrics: list[str] = ["valid-acc"]):
+    def __init__(self, dataset: str, metrics: list[str] = ["valid-acc", "runtime"]):
         self.generator = Benchmark(task=dataset, lazy=False, metrics=metrics)
 
     def predict(self, params):
         return -self.generator(params)[200]["valid-acc"]
+
+    def predict_runtime(self, params):
+        return self.generator(params)[200]["runtime"]
 
 
 class YahpoGenerator:
@@ -255,6 +261,11 @@ class YahpoGenerator:
 
     def predict(self, params):
         return -self.generator.objective_function(params)[0]["val_accuracy"]
+
+    def predict_runtime(self, params):
+        # TODO: Check unit of time
+        print(self.generator.objective_function(params)[0])
+        return self.generator.objective_function(params)[0]["time"]
 
 
 # class Jahs201Generator:
