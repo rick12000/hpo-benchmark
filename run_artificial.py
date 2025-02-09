@@ -10,9 +10,11 @@ import time
 # import json
 import logging
 import optuna
-from generate import YahpoGenerator  # ,Jahs201Generator, ObjectiveSurfaceGenerator
+from generate import Jahs201Generator  # YahpoGenerator, ObjectiveSurfaceGenerator
 from plot import plot_benchmark_data
 import ast
+
+os.environ["SYNETUNE_FOLDER"] = "cache/syne-tune"
 
 
 def run_plots(data, x_col, plot_path):
@@ -247,7 +249,7 @@ optuna.logging.set_verbosity(optuna.logging.ERROR)
 
 normalize = True
 random_state = 1234
-n_repetitions = 2
+n_repetitions = 20
 
 random.seed(random_state)
 np.random.seed(random_state)
@@ -313,10 +315,11 @@ generator_configs = [
     #     "data": ObjectiveSurfaceGenerator(generator="rastrigin"),
     #     "normalize": True,
     #     "evaluation_metric_direction": "inverse",
-    #     "n_trials": 100,
+    #     "n_trials": 15,
     #     "n_warm_starts": 5,
     #     "params": synthetic_params,
     #     "model_name": "Synthetic",
+    #     "timeout": None
     # },
     #     {
     #     "name": "shekel",
@@ -358,66 +361,67 @@ generator_configs = [
     #     "params":synthetic_params,
     #     "model_name": "Synthetic",
     # },
-    # {
-    #     "name": "cifar10",
-    #     "data": Jahs201Generator(dataset="cifar10"),
-    #     "normalize": True,
-    #     "evaluation_metric_direction": "inverse",
-    #     "n_warm_starts": 10,
-    #     "n_trials": conv_trials,
-    #     "timeout": conv_timeout,
-    #     "model_name": "CNN",
-    #     "params": cnn_params,
-    # },
-    # {
-    #     "name": "fashion_mnist",
-    #     "data": Jahs201Generator(dataset="fashion_mnist"),
-    #     "normalize": True,
-    #     "evaluation_metric_direction": "inverse",
-    #     "n_warm_starts": 10,
-    #     "n_trials": conv_trials,
-    #     "timeout": conv_timeout,
-    #     "model_name": "CNN",
-    #     "params": cnn_params,
-    # },
-    # {
-    #     "name": "colorectal_histology",
-    #     "data": Jahs201Generator(dataset="colorectal_histology"),
-    #     "normalize": True,
-    #     "evaluation_metric_direction": "inverse",
-    #     "n_warm_starts": 10,
-    #     "n_trials": conv_trials,
-    #     "timeout": conv_timeout,
-    #     "model_name": "CNN",
-    #     "params": cnn_params,
-    # },
     {
-        "name": "lcbench",
-        "data": YahpoGenerator(dataset="lcbench"),
+        "name": "cifar10",
+        "data": Jahs201Generator(dataset="cifar10"),
         "normalize": True,
         "evaluation_metric_direction": "inverse",
         "n_warm_starts": 10,
         "n_trials": conv_trials,
         "timeout": conv_timeout,
-        "model_name": "",
-        "params": parse_config_space(
-            str(
-                YahpoGenerator(dataset="lcbench").generator.get_opt_space(
-                    drop_fidelity_params=False
-                )
-            )
-        ),
+        "model_name": "CNN",
+        "params": cnn_params,
     },
+    {
+        "name": "fashion_mnist",
+        "data": Jahs201Generator(dataset="fashion_mnist"),
+        "normalize": True,
+        "evaluation_metric_direction": "inverse",
+        "n_warm_starts": 10,
+        "n_trials": conv_trials,
+        "timeout": conv_timeout,
+        "model_name": "CNN",
+        "params": cnn_params,
+    },
+    {
+        "name": "colorectal_histology",
+        "data": Jahs201Generator(dataset="colorectal_histology"),
+        "normalize": True,
+        "evaluation_metric_direction": "inverse",
+        "n_warm_starts": 10,
+        "n_trials": conv_trials,
+        "timeout": conv_timeout,
+        "model_name": "CNN",
+        "params": cnn_params,
+    },
+    # {
+    #     "name": "lcbench",
+    #     "data": YahpoGenerator(dataset="lcbench"),
+    #     "normalize": True,
+    #     "evaluation_metric_direction": "inverse",
+    #     "n_warm_starts": 10,
+    #     "n_trials": conv_trials,
+    #     "timeout": conv_timeout,
+    #     "model_name": "",
+    #     "params": parse_config_space(
+    #         str(
+    #             YahpoGenerator(dataset="lcbench").generator.get_opt_space(
+    #                 drop_fidelity_params=False
+    #             )
+    #         )
+    #     ),
+    # },
 ]
 
 
 tuners = [
     # "skopt-forest",
     # "skopt-gp",
-    "confopt-rf-0.8",
-    "confopt-qgbm-0.8",
+    # "confopt-rf-0.8",
     # "confopt-ql-0.2",
-    "confopt-ql-0.8",
+    # "confopt-ql-0.8",
+    "syne-cqr",
+    "confopt-qgbm-0.8",
     "optuna-tpe",
 ]
 

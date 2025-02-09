@@ -222,7 +222,9 @@ class ObjectiveSurfaceGenerator:
         self.generator = generator
 
     def predict(self, params):
-        x = np.array(list(params.values()))
+        # x = np.array(list(params.values()))
+        x = np.array(list(params.values()), dtype=float)
+
         if self.generator == "rastrigin":
             y = noisy_rastrigin(x=x)
         elif self.generator == "ackley":
