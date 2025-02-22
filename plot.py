@@ -17,7 +17,20 @@ color_palette = [
     "tab:pink",
     "tab:brown",
     "tab:purple",
+    "tab:green",
+    "tab:cyan",
+    "tab:olive",
+    "tab:yellow",
+    "tab:magenta",
+    "black",
+    "teal",
+    "gold",
+    "deepskyblue",
+    "crimson",
+    "lime",
+    "darkorchid",
 ]
+
 marker_type_list = ["+", "x", "D", "o", "s", "h", "P"]
 
 

@@ -10,7 +10,7 @@ import time
 # import json
 import logging
 import optuna
-from generate import Jahs201Generator  # YahpoGenerator, ObjectiveSurfaceGenerator
+from generate import ObjectiveSurfaceGenerator  # Jahs201Generator, YahpoGenerator
 from plot import plot_benchmark_data
 import ast
 
@@ -249,13 +249,14 @@ optuna.logging.set_verbosity(optuna.logging.ERROR)
 
 normalize = True
 random_state = 1234
-n_repetitions = 20
+n_repetitions = 1
 
 random.seed(random_state)
 np.random.seed(random_state)
 
 conv_trials = 50
 conv_timeout = None
+n_warm_starts = 10
 
 synthetic_params = {
     "param1__range_float": [0, 100],
@@ -310,24 +311,24 @@ def generate_hyperparameter_combinations(confopt_params, n_combinations, random_
 
 
 generator_configs = [
-    # {
-    #     "name": "rastrigin",
-    #     "data": ObjectiveSurfaceGenerator(generator="rastrigin"),
-    #     "normalize": True,
-    #     "evaluation_metric_direction": "inverse",
-    #     "n_trials": 15,
-    #     "n_warm_starts": 5,
-    #     "params": synthetic_params,
-    #     "model_name": "Synthetic",
-    #     "timeout": None
-    # },
+    {
+        "name": "rastrigin",
+        "data": ObjectiveSurfaceGenerator(generator="rastrigin"),
+        "normalize": True,
+        "evaluation_metric_direction": "inverse",
+        "n_trials": 40,
+        "n_warm_starts": n_warm_starts,
+        "params": synthetic_params,
+        "model_name": "Synthetic",
+        "timeout": None,
+    },
     #     {
     #     "name": "shekel",
     #     "data":  ObjectiveSurfaceGenerator(generator="shekel"),
     #     "normalize": True,
     #     "evaluation_metric_direction": "inverse",
     #     "n_trials": 100,
-    #     "n_warm_starts":5,
+    #     "n_warm_starts":n_warm_starts,
     #     "params":synthetic_params,
     #     "model_name": "Synthetic",
     # },
@@ -337,7 +338,7 @@ generator_configs = [
     #     "normalize": True,
     #     "evaluation_metric_direction": "inverse",
     # "n_trials": 100,
-    #     "n_warm_starts":5,
+    #     "n_warm_starts":n_warm_starts,
     #     "params":synthetic_params,
     #     "model_name": "Synthetic",
     # },
@@ -347,7 +348,7 @@ generator_configs = [
     #     "normalize": True,
     #     "evaluation_metric_direction": "inverse",
     # "n_trials": 100,
-    #     "n_warm_starts":5,
+    #     "n_warm_starts":n_warm_starts,
     #     "params":synthetic_params,
     #     "model_name": "Synthetic",
     # },
@@ -357,49 +358,49 @@ generator_configs = [
     #     "normalize": True,
     #     "evaluation_metric_direction": "inverse",
     #     "n_trials": 100,
-    #     "n_warm_starts":5,
+    #     "n_warm_starts":n_warm_starts,
     #     "params":synthetic_params,
     #     "model_name": "Synthetic",
     # },
-    {
-        "name": "cifar10",
-        "data": Jahs201Generator(dataset="cifar10"),
-        "normalize": True,
-        "evaluation_metric_direction": "inverse",
-        "n_warm_starts": 10,
-        "n_trials": conv_trials,
-        "timeout": conv_timeout,
-        "model_name": "CNN",
-        "params": cnn_params,
-    },
-    {
-        "name": "fashion_mnist",
-        "data": Jahs201Generator(dataset="fashion_mnist"),
-        "normalize": True,
-        "evaluation_metric_direction": "inverse",
-        "n_warm_starts": 10,
-        "n_trials": conv_trials,
-        "timeout": conv_timeout,
-        "model_name": "CNN",
-        "params": cnn_params,
-    },
-    {
-        "name": "colorectal_histology",
-        "data": Jahs201Generator(dataset="colorectal_histology"),
-        "normalize": True,
-        "evaluation_metric_direction": "inverse",
-        "n_warm_starts": 10,
-        "n_trials": conv_trials,
-        "timeout": conv_timeout,
-        "model_name": "CNN",
-        "params": cnn_params,
-    },
+    # {
+    #     "name": "cifar10",
+    #     "data": Jahs201Generator(dataset="cifar10"),
+    #     "normalize": True,
+    #     "evaluation_metric_direction": "inverse",
+    #     "n_warm_starts": n_warm_starts,
+    #     "n_trials": conv_trials,
+    #     "timeout": conv_timeout,
+    #     "model_name": "CNN",
+    #     "params": cnn_params,
+    # },
+    # {
+    #     "name": "fashion_mnist",
+    #     "data": Jahs201Generator(dataset="fashion_mnist"),
+    #     "normalize": True,
+    #     "evaluation_metric_direction": "inverse",
+    #     "n_warm_starts": n_warm_starts,
+    #     "n_trials": conv_trials,
+    #     "timeout": conv_timeout,
+    #     "model_name": "CNN",
+    #     "params": cnn_params,
+    # },
+    # {
+    #     "name": "colorectal_histology",
+    #     "data": Jahs201Generator(dataset="colorectal_histology"),
+    #     "normalize": True,
+    #     "evaluation_metric_direction": "inverse",
+    #     "n_warm_starts": n_warm_starts,
+    #     "n_trials": conv_trials,
+    #     "timeout": conv_timeout,
+    #     "model_name": "CNN",
+    #     "params": cnn_params,
+    # },
     # {
     #     "name": "lcbench",
     #     "data": YahpoGenerator(dataset="lcbench"),
     #     "normalize": True,
     #     "evaluation_metric_direction": "inverse",
-    #     "n_warm_starts": 10,
+    #     "n_warm_starts": n_warm_starts,
     #     "n_trials": conv_trials,
     #     "timeout": conv_timeout,
     #     "model_name": "",
@@ -415,13 +416,16 @@ generator_configs = [
 
 
 tuners = [
-    # "skopt-forest",
-    # "skopt-gp",
-    # "confopt-rf-0.8",
-    # "confopt-ql-0.2",
-    # "confopt-ql-0.8",
-    "syne-cqr",
-    "confopt-qgbm-0.8",
+    # # "syne-cqr",
+    # "confopt-thompson-0-dtaci",
+    # "confopt-ucb-0.9-dtaci",
+    # "confopt-ucb-0.5-dtaci",
+    # "confopt-thompson-0-aci",
+    "confopt-ucb-0.9-aci",
+    # "confopt-ucb-0.5-aci",
+    "confopt-thompson-0-none",
+    # "confopt-ucb-0.9-none",
+    # "confopt-ucb-0.5-none",
     "optuna-tpe",
 ]
 
@@ -436,12 +440,12 @@ for dataset_config in generator_configs:
     timeout = dataset_config["timeout"]
 
     warm_starts_per_repetition = []
-    for _ in range(n_repetitions):
+    for repetition in range(n_repetitions):
         # Generate 10 hyperparameter combinations
         hyperparameter_combinations = generate_hyperparameter_combinations(
             dataset_config["params"],
             n_combinations=dataset_config["n_warm_starts"],
-            random_state=random_state,
+            random_state=repetition,
         )
 
         warm_starts = []
@@ -509,7 +513,6 @@ if not os.path.exists(data_path):
 raw_benchmark_data.to_csv(f"{data_path}/raw_benchmark_data.csv", index=False)
 
 grouping_columns = ["dataset", "model", "tuner", "repetition"]
-
 
 processed_benchmark_data = process_and_rank_benchmark_data(
     raw_benchmark_data=raw_benchmark_data,
