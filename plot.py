@@ -44,7 +44,7 @@ def plot_benchmark_data(
     plt.clf()
     # Get unique datasets and models
     datasets = data["dataset"].unique()
-    models = data["model"].unique()
+    models = ["PLACEHOLDER"]
 
     # Set up the grid of plots (datasets as rows, models as columns)
     fig, axes = plt.subplots(
@@ -61,7 +61,7 @@ def plot_benchmark_data(
     for i, dataset in enumerate(datasets):
         for j, model in enumerate(models):
             ax = axes[i][j]
-            subset = data[(data["dataset"] == dataset) & (data["model"] == model)]
+            subset = data[(data["dataset"] == dataset)]
 
             # Plot each tuner's data
             for counter, (tuner, tuner_data) in enumerate(subset.groupby("tuner")):

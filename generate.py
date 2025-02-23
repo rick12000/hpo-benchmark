@@ -146,7 +146,6 @@ class YahpoGenerator(ObjectiveMetricGenerator):
 
     def predict_runtime(self, configuration: dict[str, Union[str, int, float, bool]]):
         # TODO: Check unit of time
-        print(self.generator.objective_function(configuration)[0])
         return self.generator.objective_function(configuration)[0]["time"]
 
 

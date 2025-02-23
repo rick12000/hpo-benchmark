@@ -1,20 +1,22 @@
-from pydantic import BaseModel, ConfigDict
-from typing import Union, Literal
+from pydantic import BaseModel, ConfigDict, root_validator
+from typing import Union, Literal, Optional
 from optuna.samplers._base import BaseSampler
 from confopt.estimation import (
     MultiFitQuantileConformalSearcher,
     SingleFitQuantileConformalSearcher,
     LocallyWeightedConformalSearcher,
+    UCBSampler,
+    # ThompsonSampler,
 )
+from optuna.samplers import TPESampler  # , RandomSampler, GPSampler, CmaEsSampler
 
-QGBM_NAME: str = "qgbm"
-QRF_NAME: str = "qrf"
-KR_NAME: str = "kr"
-GP_NAME: str = "gp"
-GBM_NAME: str = "gbm"
-KNN_NAME: str = "knn"
-RF_NAME: str = "rf"
-DNN_NAME: str = "dnn"
+from generate import ObjectiveMetricGenerator
+
+
+N_REPETITIONS_PER_TUNER_CONFIG = 3
+N_TRIALS = 40
+TIMEOUT = None
+N_WARM_STARTS = 10
 
 
 class TunerConfig(BaseModel):
@@ -46,3 +48,133 @@ class IntRange(BaseModel):
 class CategoricalRange(BaseModel):
     type: str = "categorical"
     choices: list[Union[str, int, bool]]
+
+
+class ExperimentConfig(BaseModel):
+    search_space: dict[str, Union[IntRange, FloatRange, CategoricalRange]]
+    generator: ObjectiveMetricGenerator
+    tuning_configurations: list[TunerConfig]
+    n_warm_starts: int
+    benchmark_identifier: str
+    dataset_identifier: str
+    n_trials: Optional[int] = None
+    timeout: Optional[float] = None
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    @root_validator(pre=True)
+    def check_timeout_or_n_trials(cls, values):
+        if values.get("n_trials") is None and values.get("timeout") is None:
+            raise ValueError(
+                "At least one of 'n_trials' or 'timeout' must be specified."
+            )
+        return values
+
+
+JAHS201_SEARCH_SPACE = {
+    "Activation": CategoricalRange(
+        type="categorical", choices=["ReLU", "Hardswish", "Mish"]
+    ),
+    "LearningRate": FloatRange(type="float", lower=0.001, upper=1),
+    "N": CategoricalRange(type="categorical", choices=[5]),
+    "Op1": CategoricalRange(type="categorical", choices=list(range(5))),
+    "Op2": CategoricalRange(type="categorical", choices=list(range(5))),
+    "Op3": CategoricalRange(type="categorical", choices=list(range(5))),
+    "Op4": CategoricalRange(type="categorical", choices=list(range(5))),
+    "Op5": CategoricalRange(type="categorical", choices=list(range(5))),
+    "Op6": CategoricalRange(type="categorical", choices=list(range(5))),
+    "Optimizer": CategoricalRange(type="categorical", choices=["SGD"]),
+    "Resolution": CategoricalRange(type="categorical", choices=[1]),
+    "TrivialAugment": CategoricalRange(type="categorical", choices=[True, False]),
+    "W": CategoricalRange(type="categorical", choices=[16]),
+    "WeightDecay": FloatRange(type="float", lower=0.00001, upper=0.01),
+    "epoch": IntRange(type="int", lower=5, upper=200),
+}
+
+
+n_synthetic_params = 10
+BLACK_BOX_SEARCH_SPACE = {}
+for n in range(n_synthetic_params):
+    BLACK_BOX_SEARCH_SPACE[f"param{n}"] = FloatRange(type="float", lower=0, upper=100)
+
+
+DEFAULT_TUNING_CONFIGURATIONS = [
+    # TunerConfig(
+    #     tuner="optuna",
+    #     sampler=CmaEsSampler(),
+    #     config_identifier="CMA-ES",
+    # ),
+    TunerConfig(
+        tuner="optuna",
+        sampler=TPESampler(),
+        config_identifier="TPE",
+    ),
+    # TunerConfig(
+    #     tuner="optuna",
+    #     sampler=GPSampler(),
+    #     config_identifier="GP",
+    # ),
+    # TunerConfig(
+    #     tuner="optuna",
+    #     sampler=RandomSampler(),
+    #     config_identifier="RS",
+    # ),
+    TunerConfig(
+        tuner="confopt",
+        sampler=MultiFitQuantileConformalSearcher(
+            quantile_estimator_architecture="qgbm",
+            sampler=UCBSampler(interval_width=0.9, adapter_framework=None),
+        ),
+        config_identifier="QGBM UCB",
+    ),
+    # TunerConfig(
+    #     tuner="confopt",
+    #     sampler=MultiFitQuantileConformalSearcher(quantile_estimator_architecture="qgbm",sampler=UCBSampler(interval_width=0.9,adapter_framework="ACI")),
+    #     config_identifier="ACI-QGBM UCB",
+    # ),
+    # TunerConfig(
+    #     tuner="confopt",
+    #     sampler=MultiFitQuantileConformalSearcher(quantile_estimator_architecture="qgbm",sampler=UCBSampler(interval_width=0.9,adapter_framework="DtACI")),
+    #     config_identifier="DtACI-QGBM UCB",
+    # ),
+    # TunerConfig(
+    #     tuner="confopt",
+    #     sampler=SingleFitQuantileConformalSearcher(
+    #         quantile_estimator_architecture="qrf",
+    #         sampler=UCBSampler(interval_width=0.9, adapter_framework=None),
+    #     ),
+    #     config_identifier="QRF UCB",
+    # ),
+    # TunerConfig(
+    #     tuner="confopt",
+    #     sampler=SingleFitQuantileConformalSearcher(quantile_estimator_architecture="qrf",sampler=ThompsonSampler(n_quantiles=10, enable_optimistic_sampling=True)),
+    #     config_identifier="QRF OBS",
+    # ),
+    # TunerConfig(
+    #     tuner="confopt",
+    #     sampler=LocallyWeightedConformalSearcher(point_estimator_architecture="gbm", variance_estimator_architecture="gbm",sampler=ThompsonSampler(n_quantiles=4, enable_optimistic_sampling=False)),
+    #     config_identifier="GBM TS",
+    # ),
+    TunerConfig(
+        tuner="confopt",
+        sampler=SingleFitQuantileConformalSearcher(
+            quantile_estimator_architecture="qknn",
+            sampler=UCBSampler(interval_width=0.9, adapter_framework=None),
+        ),
+        config_identifier="QKNN UCB",
+    ),
+    # TunerConfig(
+    #     tuner="confopt",
+    #     sampler=LocallyWeightedConformalSearcher(
+    #         point_estimator_architecture="gbm",
+    #         variance_estimator_architecture="gbm",
+    #         sampler=UCBSampler(c=5, interval_width=0.2, adapter_framework="ACI"),
+    #     ),
+    #     config_identifier="GBM UCB",
+    # ),
+    # TunerConfig(
+    #     tuner="skopt",
+    #     sampler="gbrt",
+    #     config_identifier="GBRT",
+    # ),
+]

@@ -4,9 +4,22 @@ from tune import tune
 from datetime import datetime
 from utils import q10, q90
 import os
+from copy import deepcopy
 import random
 import time
-from config import TunerConfig, IntRange, CategoricalRange, FloatRange
+from config import (
+    IntRange,
+    CategoricalRange,
+    FloatRange,
+    ExperimentConfig,
+    DEFAULT_TUNING_CONFIGURATIONS,
+    # JAHS201_SEARCH_SPACE,
+    BLACK_BOX_SEARCH_SPACE,
+    N_REPETITIONS_PER_TUNER_CONFIG,
+    N_TRIALS,
+    N_WARM_STARTS,
+    TIMEOUT,
+)
 from typing import Union, Optional
 
 import logging
@@ -14,47 +27,86 @@ import optuna
 from generate import BlackBoxGenerator  # , Jahs201Generator, YahpoGenerator
 from plot import plot_benchmark_data
 import ast
-from optuna.samplers import TPESampler  # , RandomSampler, GPSampler, CmaEsSampler
-
-# from confopt.estimation import (
-#     # MultiFitQuantileConformalSearcher,
-#     SingleFitQuantileConformalSearcher,
-#     LocallyWeightedConformalSearcher,
-#     UCBSampler,
-#     # ThompsonSampler,
-# )
+from generate import ObjectiveMetricGenerator
 
 os.environ["SYNETUNE_FOLDER"] = "cache/syne-tune"
 
 
-def run_plots(data, x_col, plot_path):
-    plot_benchmark_data(
-        data,
-        plot_path,
-        x_col=x_col,
-        y_col="rank",
-        add_confidence_intervals=False,
+def generate_hyperparameter_combinations(
+    params: dict[str, Union[IntRange, FloatRange, CategoricalRange]],
+    n_combinations: int,
+    random_state: Optional[int] = None,
+):
+    random.seed(random_state)
+    combinations = []
+    for _ in range(n_combinations):
+        combination = {}
+        for param_name, param_values in params.items():
+            if param_values.type == "int":
+                combination[param_name] = random.choice(
+                    list(range(param_values.lower, param_values.upper + 1))
+                )
+            elif param_values.type == "float":
+                combination[param_name] = random.choice(
+                    [
+                        random.uniform(param_values.lower, param_values.upper)
+                        for _ in range(1000)
+                    ]
+                )
+            elif param_values.type == "categorical":
+                combination[param_name] = random.choice(param_values.choices)
+            else:
+                raise ValueError()
+        combinations.append(combination)
+    return combinations
+
+
+def run_plots(data, x_col, y_cols, plot_path):
+    for y_col in y_cols:
+        plot_benchmark_data(
+            data,
+            plot_path,
+            x_col=x_col,
+            y_col=y_col,
+            add_confidence_intervals=True,
+        )
+        time.sleep(2)
+
+
+def add_runtime(
+    experiment_log: pd.DataFrame, performance_generator: ObjectiveMetricGenerator
+):
+    experiment_log_copy = experiment_log.copy()
+    experiment_log_copy["generator_runtime"] = experiment_log_copy[
+        "configurations"
+    ].apply(lambda x: performance_generator.predict_runtime(x))
+    experiment_log_copy["generator_runtime"] = experiment_log_copy[
+        "generator_runtime"
+    ].cumsum()
+
+    experiment_log_copy["runtime"] = (
+        experiment_log_copy["end_time"] - tune_start
+    ).dt.seconds
+    experiment_log_copy["runtime"] = (
+        experiment_log_copy["runtime"] + experiment_log_copy["generator_runtime"]
     )
-    time.sleep(2)
-    plot_benchmark_data(
-        data,
-        plot_path,
-        x_col=x_col,
-        y_col="best_performance",
-        add_confidence_intervals=True,
-    )
+
+    return experiment_log_copy
 
 
 def process_benchmark_data(
     raw_benchmark_data,
-    experiment_aggregators=["dataset", "model", "tuner"],
+    experiment_aggregators=["dataset", "tuner"],
+    metrics=["rank", "best_performance"],
     budget_unit="runtime",
 ):
 
-    # Group and aggregate the data
+    aggregations = {}
+    for metric in metrics:
+        aggregations[metric] = ["mean", q10, q90]
     processed_benchmark_data = raw_benchmark_data.groupby(
         experiment_aggregators + [budget_unit], as_index=False
-    ).agg({"rank": ["mean", q10, q90], "best_performance": ["mean", q10, q90]})
+    ).agg(aggregations)
 
     # Flatten the multi-level column names
     processed_benchmark_data.columns = [
@@ -70,37 +122,64 @@ def process_benchmark_data(
     return processed_benchmark_data
 
 
-def process_and_rank_benchmark_data(
-    raw_benchmark_data, grouping_columns, budget_unit, ascending=True
+def accumulate_breaches(
+    experiment_log,
+    grouping_columns,
+    budget_unit,
+    breach_col: str = "breach_status",
+    rolling_breach_count: int = 10,
 ):
+    sorted_experiment_log = experiment_log.sort_values(
+        by=grouping_columns + [budget_unit],
+        ascending=True,
+    ).reset_index(drop=True)
+    sorted_experiment_log["cumulative_breach_rate"] = (
+        sorted_experiment_log.groupby(grouping_columns)[breach_col]
+        .expanding()
+        .mean()
+        .reset_index(level=grouping_columns, drop=True)
+    )
 
-    # Step 2: Sort the aggregated data
-    processed_benchmark_data = raw_benchmark_data.sort_values(
+    sorted_experiment_log["rolling_breach_rate"] = (
+        sorted_experiment_log.groupby(grouping_columns)[breach_col]
+        .rolling(window=rolling_breach_count)
+        .mean()
+        .reset_index(level=grouping_columns, drop=True)
+    )
+
+    return sorted_experiment_log
+
+
+def accumulate_and_rank_performances(
+    experiment_log,
+    grouping_columns,
+    budget_unit,
+    rank_ascending=True,
+    performance_col: str = "performance",
+    tuner_col: str = "tuner",
+):
+    sorted_experiment_log = experiment_log.sort_values(
         by=grouping_columns + [budget_unit],
         ascending=True,
     ).reset_index(drop=True)
 
-    # Step 3: Calculate best performance using cumulative aggregation
-    processed_benchmark_data["best_performance"] = processed_benchmark_data.groupby(
+    sorted_experiment_log["best_performance"] = sorted_experiment_log.groupby(
         grouping_columns
-    )["performance"].transform("cummin")
+    )[performance_col].transform("cummin")
 
-    # Step 4: Rank the best performance
-    processed_benchmark_data["rank"] = processed_benchmark_data.groupby(
-        [
-            "dataset",
-            "model",
-        ]
-        + [budget_unit],
+    ranking_columns = deepcopy(grouping_columns)
+    ranking_columns.remove(tuner_col)
+    sorted_experiment_log["rank"] = sorted_experiment_log.groupby(
+        ranking_columns + [budget_unit],
         as_index=False,
-    )["best_performance"].rank(method="average", ascending=ascending)
+    )["best_performance"].rank(method="average", ascending=rank_ascending)
 
-    return processed_benchmark_data
+    return sorted_experiment_log
 
 
 def time_discretize_benchmark_data(
     historical_performance,
-    groupby_columns=["dataset", "model", "tuner", "repetition", "runtime"],
+    groupby_columns=["dataset", "tuner", "repetition", "runtime"],
     performance_column="performance",
     runtime_column="runtime",
 ):
@@ -167,7 +246,7 @@ def time_discretize_benchmark_data(
     return historical_performance_filled
 
 
-def parse_config_space(s):
+def parse_config_space(s, openml_id: str):
     config_dict = {}
     for line in s.split("\n"):
         line = line.strip()
@@ -220,15 +299,19 @@ def parse_config_space(s):
 
         # Handle parameter types
         if param_type == "Categorical":
-            config_dict[name] = choices
-        elif param_type in ("UniformInteger", "UniformFloat"):
-            suffix = "__range_int" if "Integer" in param_type else "__range_float"
-            converter = int if "Integer" in param_type else float
-            config_dict[f"{name}{suffix}"] = [converter(x) for x in range_values]
+            config_dict[name] = CategoricalRange(choices=choices)
+        elif param_type == "UniformInteger":
+            values = [int(x) for x in range_values]
+            config_dict[name] = IntRange(type="int", lower=values[0], upper=values[1])
+        elif param_type == "UniformFloat":
+            values = [float(x) for x in range_values]
+            config_dict[name] = FloatRange(
+                type="float", lower=values[0], upper=values[1]
+            )
         elif param_type == "Constant":
-            config_dict[name] = [value]
+            config_dict[name] = CategoricalRange(choices=[value])
 
-    config_dict["OpenML_task_id"] = [str(config_dict["OpenML_task_id"][0])]
+    config_dict["OpenML_task_id"] = CategoricalRange(choices=[openml_id])
 
     return config_dict
 
@@ -264,313 +347,113 @@ formatter = logging.Formatter("%(asctime)s %(levelname)-8s %(message)s")
 console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
 
-
-normalize = True
 random_state = 1234
-n_repetitions = 10
-
 random.seed(random_state)
 np.random.seed(random_state)
 
-conv_trials = 40
-conv_timeout = None
-n_warm_starts = 10
 
-n_synthetic_params = 10
-synthetic_params = {}
-for n in range(n_synthetic_params):
-    synthetic_params[f"param{n}"] = FloatRange(type="float", lower=0, upper=100)
-
-cnn_params = {
-    "Activation": CategoricalRange(
-        type="categorical", choices=["ReLU", "Hardswish", "Mish"]
-    ),
-    "LearningRate": FloatRange(type="float", lower=0.001, upper=1),
-    "N": CategoricalRange(type="categorical", choices=[5]),
-    "Op1": CategoricalRange(type="categorical", choices=list(range(5))),
-    "Op2": CategoricalRange(type="categorical", choices=list(range(5))),
-    "Op3": CategoricalRange(type="categorical", choices=list(range(5))),
-    "Op4": CategoricalRange(type="categorical", choices=list(range(5))),
-    "Op5": CategoricalRange(type="categorical", choices=list(range(5))),
-    "Op6": CategoricalRange(type="categorical", choices=list(range(5))),
-    "Optimizer": CategoricalRange(type="categorical", choices=["SGD"]),
-    "Resolution": CategoricalRange(type="categorical", choices=[1]),
-    "TrivialAugment": CategoricalRange(type="categorical", choices=[True, False]),
-    "W": CategoricalRange(type="categorical", choices=[16]),
-    "WeightDecay": FloatRange(type="float", lower=0.00001, upper=0.01),
-    "epoch": IntRange(type="int", lower=5, upper=200),
-}
+experiment_configs: list[ExperimentConfig] = []
+# openml_ids = ["3945", "7593", "34539", "126025", "126026", "126029", "146212", "167104", "167149", "167152", "167161", "167168", "167181", "167184", "167185", "167190", "167200", "167201", "168329", "168330", "168331", "168335", "168868", "168908", "168910", "189354", "189862", "189865", "189866", "189873", "189905", "189906", "189908", "189909"]
+# for openml_id in openml_ids:
+#     logger.info(f"Setting up lcbench datasource ID {openml_id}...")
+#     search_space = parse_config_space(
+#                 s=str(
+#                     YahpoGenerator(dataset="lcbench").generator.get_opt_space(
+#                         drop_fidelity_params=False
+#                     )
+#                 ), openml_id=openml_id
+#             )
+#     experiment_configs.append(ExperimentConfig(
+#         search_space=search_space,
+#         generator=YahpoGenerator(dataset="lcbench"),
+#         tuning_configurations=DEFAULT_TUNING_CONFIGURATIONS,
+#         n_warm_starts=N_WARM_STARTS,
+#         n_trials= N_TRIALS,
+#         timeout=TIMEOUT,
+#         benchmark_identifier="lcbench",
+#         dataset_identifier=openml_id
+#         )
+#     )
 
 
-def generate_hyperparameter_combinations(
-    params: dict[str, Union[IntRange, FloatRange, CategoricalRange]],
-    n_combinations: int,
-    random_state: Optional[int] = None,
-):
-    random.seed(random_state)
-    combinations = []
-    for _ in range(n_combinations):
-        combination = {}
-        for param_name, param_values in params.items():
-            if param_values.type == "int":
-                combination[param_name] = random.choice(
-                    list(range(param_values.lower, param_values.upper + 1))
-                )
-            elif param_values.type == "float":
-                combination[param_name] = random.choice(
-                    [
-                        random.uniform(param_values.lower, param_values.upper)
-                        for _ in range(1000)
-                    ]
-                )
-            elif param_values.type == "categorical":
-                combination[param_name] = random.choice(param_values.choices)
-            else:
-                raise ValueError()
-        combinations.append(combination)
-    return combinations
+black_box_functions = ["rastrigin", "shekel", "weierstrass", "griewank", "ackley"]
+# TODO TEMP
+black_box_functions = ["rastrigin"]
+for function in black_box_functions:
+    experiment_configs.append(
+        ExperimentConfig(
+            search_space=BLACK_BOX_SEARCH_SPACE,
+            generator=BlackBoxGenerator(generator=function),
+            tuning_configurations=DEFAULT_TUNING_CONFIGURATIONS,
+            n_warm_starts=N_WARM_STARTS,
+            n_trials=N_TRIALS,
+            timeout=TIMEOUT,
+            benchmark_identifier="blackbox",
+            dataset_identifier=function,
+        )
+    )
 
 
-generator_configs = [
-    {
-        "name": "rastrigin",
-        "data": BlackBoxGenerator(generator="rastrigin"),
-        "normalize": True,
-        "evaluation_metric_direction": "inverse",
-        "n_trials": conv_trials,
-        "n_warm_starts": n_warm_starts,
-        "params": synthetic_params,
-        "model_name": "Synthetic",
-        "timeout": None,
-    },
-    #     {
-    #     "name": "shekel",
-    #     "data":  ObjectiveSurfaceGenerator(generator="shekel"),
-    #     "normalize": True,
-    #     "evaluation_metric_direction": "inverse",
-    #     "n_trials": 100,
-    #     "n_warm_starts":n_warm_starts,
-    #     "params":synthetic_params,
-    #     "model_name": "Synthetic",
-    # },
-    #         {
-    #     "name": "weierstrass",
-    #     "data":  ObjectiveSurfaceGenerator(generator="weierstrass"),
-    #     "normalize": True,
-    #     "evaluation_metric_direction": "inverse",
-    # "n_trials": 100,
-    #     "n_warm_starts":n_warm_starts,
-    #     "params":synthetic_params,
-    #     "model_name": "Synthetic",
-    # },
-    #         {
-    #     "name": "griewank",
-    #     "data":  ObjectiveSurfaceGenerator(generator="griewank"),
-    #     "normalize": True,
-    #     "evaluation_metric_direction": "inverse",
-    # "n_trials": 100,
-    #     "n_warm_starts":n_warm_starts,
-    #     "params":synthetic_params,
-    #     "model_name": "Synthetic",
-    # },
-    #         {
-    #     "name": "ackley",
-    #     "data":  ObjectiveSurfaceGenerator(generator="ackley"),
-    #     "normalize": True,
-    #     "evaluation_metric_direction": "inverse",
-    #     "n_trials": 100,
-    #     "n_warm_starts":n_warm_starts,
-    #     "params":synthetic_params,
-    #     "model_name": "Synthetic",
-    # },
-    # {
-    #     "name": "cifar10",
-    #     "data": Jahs201Generator(dataset="cifar10"),
-    #     "normalize": True,
-    #     "evaluation_metric_direction": "inverse",
-    #     "n_warm_starts": n_warm_starts,
-    #     "n_trials": conv_trials,
-    #     "timeout": conv_timeout,
-    #     "model_name": "CNN",
-    #     "params": cnn_params,
-    # },
-    # {
-    #     "name": "fashion_mnist",
-    #     "data": Jahs201Generator(dataset="fashion_mnist"),
-    #     "normalize": True,
-    #     "evaluation_metric_direction": "inverse",
-    #     "n_warm_starts": n_warm_starts,
-    #     "n_trials": conv_trials,
-    #     "timeout": conv_timeout,
-    #     "model_name": "CNN",
-    #     "params": cnn_params,
-    # },
-    # {
-    #     "name": "colorectal_histology",
-    #     "data": Jahs201Generator(dataset="colorectal_histology"),
-    #     "normalize": True,
-    #     "evaluation_metric_direction": "inverse",
-    #     "n_warm_starts": n_warm_starts,
-    #     "n_trials": conv_trials,
-    #     "timeout": conv_timeout,
-    #     "model_name": "CNN",
-    #     "params": cnn_params,
-    # },
-    # {
-    #     "name": "lcbench",
-    #     "data": YahpoGenerator(dataset="lcbench"),
-    #     "normalize": True,
-    #     "evaluation_metric_direction": "inverse",
-    #     "n_warm_starts": n_warm_starts,
-    #     "n_trials": conv_trials,
-    #     "timeout": conv_timeout,
-    #     "model_name": "",
-    #     "params": parse_config_space(
-    #         str(
-    #             YahpoGenerator(dataset="lcbench").generator.get_opt_space(
-    #                 drop_fidelity_params=False
-    #             )
-    #         )
-    #     ),
-    # },
-]
-
-n_startup_trials = 0
-tuners = [
-    # TunerConfig(
-    #     tuner="optuna",
-    #     sampler=CmaEsSampler(n_startup_trials=n_startup_trials),
-    #     config_identifier="CMA-ES",
-    # ),
-    TunerConfig(
-        tuner="optuna",
-        sampler=TPESampler(n_startup_trials=n_startup_trials),
-        config_identifier="TPE",
-    ),
-    # TunerConfig(
-    #     tuner="optuna",
-    #     sampler=GPSampler(n_startup_trials=n_startup_trials),
-    #     config_identifier="GP",
-    # ),
-    # TunerConfig(
-    #     tuner="optuna",
-    #     sampler=RandomSampler(),
-    #     config_identifier="RS",
-    # ),
-    # TunerConfig(
-    #     tuner="confopt",
-    #     sampler=MultiFitQuantileConformalSearcher(quantile_estimator_architecture="qgbm",sampler=UCBSampler(interval_width=0.9,adapter_framework=None)),
-    #     config_identifier="QGBM UCB",
-    # ),
-    # TunerConfig(
-    #     tuner="confopt",
-    #     sampler=MultiFitQuantileConformalSearcher(quantile_estimator_architecture="qgbm",sampler=UCBSampler(interval_width=0.9,adapter_framework="ACI")),
-    #     config_identifier="ACI-QGBM UCB",
-    # ),
-    # TunerConfig(
-    #     tuner="confopt",
-    #     sampler=MultiFitQuantileConformalSearcher(quantile_estimator_architecture="qgbm",sampler=UCBSampler(interval_width=0.9,adapter_framework="DtACI")),
-    #     config_identifier="DtACI-QGBM UCB",
-    # ),
-    # TunerConfig(
-    #     tuner="confopt",
-    #     sampler=SingleFitQuantileConformalSearcher(
-    #         quantile_estimator_architecture="qrf",
-    #         sampler=UCBSampler(interval_width=0.9, adapter_framework=None),
-    #     ),
-    #     config_identifier="QRF UCB",
-    # ),
-    # TunerConfig(
-    #     tuner="confopt",
-    #     sampler=SingleFitQuantileConformalSearcher(quantile_estimator_architecture="qrf",sampler=ThompsonSampler(n_quantiles=10, enable_optimistic_sampling=True)),
-    #     config_identifier="QRF OBS",
-    # ),
-    # TunerConfig(
-    #     tuner="confopt",
-    #     sampler=LocallyWeightedConformalSearcher(point_estimator_architecture="gbm", variance_estimator_architecture="gbm",sampler=ThompsonSampler(n_quantiles=4, enable_optimistic_sampling=False)),
-    #     config_identifier="GBM TS",
-    # ),
-    # TunerConfig(
-    #     tuner="confopt",
-    #     sampler=SingleFitQuantileConformalSearcher(
-    #         quantile_estimator_architecture="qknn",
-    #         sampler=UCBSampler(interval_width=0.9, adapter_framework=None),
-    #     ),
-    #     config_identifier="QKNN UCB",
-    # ),
-    # TunerConfig(
-    #     tuner="confopt",
-    #     sampler=LocallyWeightedConformalSearcher(
-    #         point_estimator_architecture="gbm",
-    #         variance_estimator_architecture="gbm",
-    #         sampler=UCBSampler(interval_width=0.9, adapter_framework=None),
-    #     ),
-    #     config_identifier="GBM UCB",
-    # ),
-    TunerConfig(
-        tuner="skopt",
-        sampler="gbrt",
-        config_identifier="GBRT",
-    ),
-]
+# jahs_201_datasets = ["cifar10", "fashion_mnist", "colorectal_histology"]
+# for dataset in jahs_201_datasets:
+#     experiment_configs.append(ExperimentConfig(
+#         search_space=JAHS201_SEARCH_SPACE,
+#         generator= Jahs201Generator(dataset=dataset),
+#         tuning_configurations=DEFAULT_TUNING_CONFIGURATIONS,
+#         n_warm_starts=N_WARM_STARTS,
+#         n_trials= N_TRIALS,
+#         timeout=TIMEOUT,
+#         benchmark_identifier="JAHS-201",
+#         dataset_identifier=dataset
+#         )
+#     )
 
 raw_benchmark_data = pd.DataFrame()
 
 logger.info("Running HPO benchmark...")
-for dataset_config in generator_configs:
-    dataset_name = dataset_config["name"]
+for experiment_config in experiment_configs:
+    dataset_name = experiment_config.dataset_identifier
     logger.info(f"Dataset: {dataset_name}")
-    metric_direction = dataset_config["evaluation_metric_direction"]
-    n_trials = dataset_config["n_trials"]
-    timeout = dataset_config["timeout"]
 
     warm_starts_per_repetition = []
-    for repetition in range(n_repetitions):
+    for repetition in range(N_REPETITIONS_PER_TUNER_CONFIG):
         # Generate 10 hyperparameter combinations
         hyperparameter_combinations = generate_hyperparameter_combinations(
-            dataset_config["params"],
-            n_combinations=dataset_config["n_warm_starts"],
+            params=experiment_config.search_space,
+            n_combinations=experiment_config.n_warm_starts,
             random_state=repetition,
         )
 
         warm_starts = []
         for combination in hyperparameter_combinations:
-            performance = dataset_config["data"].predict(combination)
+            performance = experiment_config.generator.predict(combination)
             warm_starts.append((combination, performance))
         warm_starts_per_repetition.append(warm_starts)
 
-    logger.info(f"Model: {dataset_config['model_name']}")
-    for tuner in tuners:
+    for tuner in experiment_config.tuning_configurations:
         logger.info(f"Tuner: {tuner}")
-        for repetition in range(n_repetitions):
+        for repetition in range(N_REPETITIONS_PER_TUNER_CONFIG):
             logger.info(f"Repetition: {repetition}")
             tune_start = datetime.now()
             historical_performance, best_value = tune(
-                performance_generator=dataset_config["data"],
+                performance_generator=experiment_config.generator,
                 tuner_config=tuner,
-                n_trials=n_trials,
-                timeout=timeout,
-                params=dataset_config["params"],
+                n_trials=experiment_config.n_trials,
+                timeout=experiment_config.timeout,
+                params=experiment_config.search_space,
                 warm_start_configs=warm_starts_per_repetition[repetition],
                 random_state=repetition,
             )
-            historical_performance["generator_runtime"] = historical_performance[
-                "configurations"
-            ].apply(lambda x: dataset_config["data"].predict_runtime(x))
-            historical_performance["generator_runtime"] = historical_performance[
-                "generator_runtime"
-            ].cumsum()
 
-            historical_performance["runtime"] = (
-                historical_performance["end_time"] - tune_start
-            ).dt.seconds
-            historical_performance["runtime"] = (
-                historical_performance["runtime"]
-                + historical_performance["generator_runtime"]
+            historical_performance = add_runtime(
+                experiment_log=historical_performance,
+                performance_generator=experiment_config.generator,
             )
 
+            historical_performance[
+                "benchmark_identifier"
+            ] = experiment_config.benchmark_identifier
             historical_performance["dataset"] = dataset_name
-            historical_performance["model"] = dataset_config["model_name"]
             historical_performance["tuner"] = tuner.config_identifier
             historical_performance["repetition"] = repetition + 1
 
@@ -591,10 +474,18 @@ if not os.path.exists(data_path):
     os.makedirs(data_path)
 raw_benchmark_data.to_csv(f"{data_path}/raw_benchmark_data.csv", index=False)
 
-grouping_columns = ["dataset", "model", "tuner", "repetition"]
+grouping_columns = ["benchmark_identifier", "dataset", "tuner", "repetition"]
+flattening_columns = deepcopy(grouping_columns)
+flattening_columns.remove("repetition")
 
-processed_benchmark_data = process_and_rank_benchmark_data(
-    raw_benchmark_data=raw_benchmark_data,
+processed_benchmark_data = accumulate_and_rank_performances(
+    experiment_log=raw_benchmark_data,
+    grouping_columns=grouping_columns,
+    budget_unit="iteration",
+)
+
+processed_benchmark_data = accumulate_breaches(
+    experiment_log=processed_benchmark_data,
     grouping_columns=grouping_columns,
     budget_unit="iteration",
 )
@@ -602,21 +493,22 @@ processed_benchmark_data = process_and_rank_benchmark_data(
 time_discretized_benchmark_data = time_discretize_benchmark_data(
     historical_performance=raw_benchmark_data
 )
-time_discretized_benchmark_data = process_and_rank_benchmark_data(
-    raw_benchmark_data=time_discretized_benchmark_data,
+time_discretized_benchmark_data = accumulate_and_rank_performances(
+    experiment_log=time_discretized_benchmark_data,
     grouping_columns=grouping_columns,
     budget_unit="runtime",
 )
-
-
+metrics = ["rank", "best_performance", "cumulative_breach_rate", "rolling_breach_rate"]
 processed_benchmark_data = process_benchmark_data(
     raw_benchmark_data=processed_benchmark_data,
-    experiment_aggregators=["dataset", "model", "tuner"],
+    experiment_aggregators=flattening_columns,
+    metrics=metrics,
     budget_unit="iteration",
 )
 time_discretized_benchmark_data = process_benchmark_data(
     raw_benchmark_data=time_discretized_benchmark_data,
-    experiment_aggregators=["dataset", "model", "tuner"],
+    experiment_aggregators=flattening_columns,
+    metrics=["rank", "best_performance"],
     budget_unit="runtime",
 )
 
@@ -626,6 +518,21 @@ if not os.path.exists(plot_path):
     os.makedirs(plot_path)
 
 
-run_plots(data=processed_benchmark_data, x_col="iteration", plot_path=plot_path)
+run_plots(
+    data=processed_benchmark_data,
+    x_col="iteration",
+    y_cols=[
+        "rank",
+        "best_performance",
+        "cumulative_breach_rate",
+        "rolling_breach_rate",
+    ],
+    plot_path=plot_path,
+)
 time.sleep(2)
-run_plots(data=time_discretized_benchmark_data, x_col="runtime", plot_path=plot_path)
+run_plots(
+    data=time_discretized_benchmark_data,
+    x_col="runtime",
+    y_cols=["rank", "best_performance"],
+    plot_path=plot_path,
+)
