@@ -10,3 +10,4 @@ statsmodels
 syne-tune[basic]
 huggingface_hub
 ucimlrepo
+cmaes

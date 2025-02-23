@@ -1,18 +1,27 @@
 import pandas as pd
 import numpy as np
-from tune import tune_artificial
+from tune import tune
 from datetime import datetime
 from utils import q10, q90
 import os
 import random
 import time
+from config import TunerConfig
 
 # import json
 import logging
 import optuna
-from generate import ObjectiveSurfaceGenerator  # Jahs201Generator, YahpoGenerator
+from generate import ObjectiveSurfaceGenerator  # , Jahs201Generator, YahpoGenerator
 from plot import plot_benchmark_data
 import ast
+from optuna.samplers import TPESampler  # , RandomSampler, GPSampler, CmaEsSampler
+from confopt.estimation import (
+    # MultiFitQuantileConformalSearcher,
+    SingleFitQuantileConformalSearcher,
+    LocallyWeightedConformalSearcher,
+    UCBSampler,
+    # ThompsonSampler,
+)
 
 os.environ["SYNETUNE_FOLDER"] = "cache/syne-tune"
 
@@ -240,21 +249,29 @@ logging.basicConfig(
     level=logging.DEBUG,
     format="%(asctime)s %(levelname)-8s %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
+    force=True,
 )
-logger = logging.getLogger(__name__)
+logger = logging.getLogger()
 
 logging.getLogger("hyperopt").setLevel(logging.ERROR)
 logging.getLogger("confopt").setLevel(logging.ERROR)
 optuna.logging.set_verbosity(optuna.logging.ERROR)
 
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.DEBUG)
+formatter = logging.Formatter("%(asctime)s %(levelname)-8s %(message)s")
+console_handler.setFormatter(formatter)
+logger.addHandler(console_handler)
+
+
 normalize = True
 random_state = 1234
-n_repetitions = 1
+n_repetitions = 10
 
 random.seed(random_state)
 np.random.seed(random_state)
 
-conv_trials = 50
+conv_trials = 40
 conv_timeout = None
 n_warm_starts = 10
 
@@ -316,7 +333,7 @@ generator_configs = [
         "data": ObjectiveSurfaceGenerator(generator="rastrigin"),
         "normalize": True,
         "evaluation_metric_direction": "inverse",
-        "n_trials": 40,
+        "n_trials": conv_trials,
         "n_warm_starts": n_warm_starts,
         "params": synthetic_params,
         "model_name": "Synthetic",
@@ -414,19 +431,78 @@ generator_configs = [
     # },
 ]
 
-
+n_startup_trials = 0
 tuners = [
-    # # "syne-cqr",
-    # "confopt-thompson-0-dtaci",
-    # "confopt-ucb-0.9-dtaci",
-    # "confopt-ucb-0.5-dtaci",
-    # "confopt-thompson-0-aci",
-    "confopt-ucb-0.9-aci",
-    # "confopt-ucb-0.5-aci",
-    "confopt-thompson-0-none",
-    # "confopt-ucb-0.9-none",
-    # "confopt-ucb-0.5-none",
-    "optuna-tpe",
+    # TunerConfig(
+    #     tuner="optuna",
+    #     sampler=CmaEsSampler(n_startup_trials=n_startup_trials),
+    #     config_identifier="CMA-ES",
+    # ),
+    TunerConfig(
+        tuner="optuna",
+        sampler=TPESampler(n_startup_trials=n_startup_trials),
+        config_identifier="TPE",
+    ),
+    # TunerConfig(
+    #     tuner="optuna",
+    #     sampler=GPSampler(n_startup_trials=n_startup_trials),
+    #     config_identifier="GP",
+    # ),
+    # TunerConfig(
+    #     tuner="optuna",
+    #     sampler=RandomSampler(),
+    #     config_identifier="RS",
+    # ),
+    # TunerConfig(
+    #     tuner="confopt",
+    #     sampler=MultiFitQuantileConformalSearcher(quantile_estimator_architecture="qgbm",sampler=UCBSampler(interval_width=0.9,adapter_framework=None)),
+    #     config_identifier="QGBM UCB",
+    # ),
+    # TunerConfig(
+    #     tuner="confopt",
+    #     sampler=MultiFitQuantileConformalSearcher(quantile_estimator_architecture="qgbm",sampler=UCBSampler(interval_width=0.9,adapter_framework="ACI")),
+    #     config_identifier="ACI-QGBM UCB",
+    # ),
+    # TunerConfig(
+    #     tuner="confopt",
+    #     sampler=MultiFitQuantileConformalSearcher(quantile_estimator_architecture="qgbm",sampler=UCBSampler(interval_width=0.9,adapter_framework="DtACI")),
+    #     config_identifier="DtACI-QGBM UCB",
+    # ),
+    TunerConfig(
+        tuner="confopt",
+        sampler=SingleFitQuantileConformalSearcher(
+            quantile_estimator_architecture="qrf",
+            sampler=UCBSampler(interval_width=0.9, adapter_framework=None),
+        ),
+        config_identifier="QRF UCB",
+    ),
+    # TunerConfig(
+    #     tuner="confopt",
+    #     sampler=SingleFitQuantileConformalSearcher(quantile_estimator_architecture="qrf",sampler=ThompsonSampler(n_quantiles=10, enable_optimistic_sampling=True)),
+    #     config_identifier="QRF OBS",
+    # ),
+    # TunerConfig(
+    #     tuner="confopt",
+    #     sampler=LocallyWeightedConformalSearcher(point_estimator_architecture="gbm", variance_estimator_architecture="gbm",sampler=ThompsonSampler(n_quantiles=4, enable_optimistic_sampling=False)),
+    #     config_identifier="GBM TS",
+    # ),
+    TunerConfig(
+        tuner="confopt",
+        sampler=SingleFitQuantileConformalSearcher(
+            quantile_estimator_architecture="qknn",
+            sampler=UCBSampler(interval_width=0.9, adapter_framework=None),
+        ),
+        config_identifier="QKNN UCB",
+    ),
+    TunerConfig(
+        tuner="confopt",
+        sampler=LocallyWeightedConformalSearcher(
+            point_estimator_architecture="gbm",
+            variance_estimator_architecture="gbm",
+            sampler=UCBSampler(interval_width=0.9, adapter_framework=None),
+        ),
+        config_identifier="GBM UCB",
+    ),
 ]
 
 raw_benchmark_data = pd.DataFrame()
@@ -466,7 +542,7 @@ for dataset_config in generator_configs:
         for repetition in range(n_repetitions):
             logger.info(f"Repetition: {repetition}")
             tune_start = datetime.now()
-            historical_performance, best_value = tune_artificial(
+            historical_performance, best_value = tune(
                 performance_generator=dataset_config["data"],
                 tuner=tuner,
                 n_trials=n_trials,
@@ -492,7 +568,7 @@ for dataset_config in generator_configs:
 
             historical_performance["dataset"] = dataset_name
             historical_performance["model"] = dataset_config["model_name"]
-            historical_performance["tuner"] = tuner
+            historical_performance["tuner"] = tuner.config_identifier
             historical_performance["repetition"] = repetition + 1
 
             raw_benchmark_data = pd.concat(

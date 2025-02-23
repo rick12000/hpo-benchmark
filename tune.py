@@ -1,5 +1,6 @@
 from sklearn.metrics import mean_squared_error
 import pandas as pd
+from config import TunerConfig
 
 # import numpy as np
 import random
@@ -12,7 +13,6 @@ from skopt import forest_minimize, gbrt_minimize, gp_minimize
 from skopt.space import Real, Integer as SKInteger, Categorical as SKCategorical
 
 from confopt.tuning import ObjectiveConformalSearcher
-from confopt.estimation import UCBSampler, ThompsonSampler, QuantileConformalRegression
 from confopt.tracking import Trial
 from preprocess import train_val_split, update_model_parameters
 from generate import ObjectiveSurfaceGenerator
@@ -229,78 +229,6 @@ def syne_artificial_tune(
     return historical_performance, best_value
 
 
-# Update tune_artificial() function
-def tune_artificial(
-    performance_generator,
-    tuner: str,
-    params,
-    warm_start_configs=None,
-    random_state=None,
-    n_trials=None,
-    timeout=None,
-):
-    if "optuna" in tuner:
-        if tuner == "optuna-tpe":
-            sampler = "tpe"
-        elif tuner == "optuna-cmaes":
-            sampler = "cma-es"
-        historical_performance, best_value = optuna_artificial_tune(
-            n_trials=n_trials,
-            performance_generator=performance_generator,
-            params=params,
-            sampler=sampler,
-            warm_start_configs=warm_start_configs,
-            random_state=random_state,
-            timeout=timeout,
-        )
-    elif "confopt" in tuner:
-        _, sampler, confidence_level, adapter = tuner.split("-")
-
-        historical_performance, best_value = confopt_artificial_tune(
-            params=params,
-            performance_generator=performance_generator,
-            sampler_name=sampler,
-            adapter_name=adapter,
-            confidence_level=float(confidence_level),
-            max_iter=n_trials,
-            timeout=timeout,
-            warm_start_configs=warm_start_configs,
-            random_state=random_state,
-        )
-    elif "skopt" in tuner:
-        if tuner == "skopt-gp":
-            method = "gp"
-        elif tuner == "skopt-forest":
-            method = "forest"
-        elif tuner == "skopt-gbrt":
-            method = "gbrt"
-
-        historical_performance, best_value = skopt_artificial_tune(
-            n_trials=n_trials,
-            performance_generator=performance_generator,
-            params=params,
-            method=method,
-            warm_start_configs=warm_start_configs,
-            random_state=random_state,
-            timeout=timeout,
-        )
-    elif "syne" in tuner:
-        _, method = tuner.split("-")
-        historical_performance, best_value = syne_artificial_tune(
-            params=params,
-            performance_generator=performance_generator,
-            method=method,
-            warm_start_configs=warm_start_configs,
-            random_state=random_state,
-            n_trials=n_trials,
-            timeout=timeout,
-        )
-    else:
-        raise ValueError(f"Unknown tuner: {tuner}")
-
-    return historical_performance, best_value
-
-
 def set_optuna_params(trial, params):
     optuna_params = {}
     for param_name, param_values in params.items():
@@ -332,24 +260,18 @@ def optuna_artificial_objective(
     return performance_generator.predict(params=optuna_params)
 
 
-def optuna_artificial_tune(
+def optuna_tune(
     params,
     performance_generator,
-    sampler="tpe",
+    sampler,
     random_state=None,
     warm_start_configs=None,
     n_trials=None,
     timeout=None,
 ):
-    if sampler == "tpe":
-        sampler_object = optuna.samplers.TPESampler(
-            seed=random_state, n_startup_trials=0
-        )
-    elif sampler == "cma-es":
-        sampler_object = optuna.samplers.CmaEsSampler(
-            seed=random_state, n_startup_trials=0
-        )
-    study = optuna.create_study(direction="minimize", sampler=sampler_object)
+    sampler.seed = random_state
+
+    study = optuna.create_study(direction="minimize", sampler=sampler)
 
     if warm_start_configs is not None:
         for config, loss in warm_start_configs:
@@ -426,13 +348,11 @@ def confopt_artificial_objective_function(
     return objective_function
 
 
-def confopt_artificial_tune(
+def confopt_tune(
     params,
     performance_generator,
-    sampler_name,
-    adapter_name,
-    confidence_level,
-    max_iter,
+    sampler,
+    n_trials,
     timeout,
     warm_start_configs,
     random_state=None,
@@ -472,37 +392,10 @@ def confopt_artificial_tune(
                 )
             )
 
-    if adapter_name == "aci":
-        adapter = "ACI"
-    elif adapter_name == "dtaci":
-        adapter = "DtACI"
-    else:
-        adapter = None
-
-    if sampler_name == "ucb":
-        sampler = UCBSampler(
-            c=5, interval_width=confidence_level, adapter_framework=adapter
-        )
-    # elif sampler_name == "bayesucb":
-    #     sampler = BayesUCBSampler(c=5,n=30)
-    elif sampler_name == "thompson":
-        sampler = ThompsonSampler(
-            n_quantiles=4, adapter_framework=adapter, enable_optimistic_sampling=True
-        )
-
-    searcher = QuantileConformalRegression(
-        quantile_estimator_architecture="qgbm",
-        sampler=sampler,
-    )
-    # searcher = LocallyWeightedConformalRegression(
-    #     point_estimator_architecture="gbm",
-    #     variance_estimator_architecture="gbm",
-    #     sampler=sampler,
-    # )
     conformal_searcher.search(
-        searcher=searcher,
+        searcher=sampler,
         runtime_budget=timeout,
-        max_iter=max_iter,
+        max_iter=n_trials,
         n_random_searches=0,
         conformal_retraining_frequency=1,
         verbose=False,
@@ -526,10 +419,10 @@ def confopt_artificial_tune(
     return historical_performance, confopt_best_value
 
 
-def skopt_artificial_tune(
+def skopt_tune(
     performance_generator,
     params,
-    method="gp",
+    sampler_name="gp",
     warm_start_configs=None,
     random_state=None,
     n_trials=None,
@@ -582,7 +475,7 @@ def skopt_artificial_tune(
             x0.append([config[param_name] for param_name in renamed_param_names])
             y0.append(loss)
 
-    if method == "gp":
+    if sampler_name == "gp":
         result = gp_minimize(
             objective,
             skopt_params_space,
@@ -591,7 +484,7 @@ def skopt_artificial_tune(
             y0=y0,
             random_state=random_state,
         )
-    elif method == "forest":
+    elif sampler_name == "forest":
         result = forest_minimize(
             objective,
             skopt_params_space,
@@ -600,7 +493,7 @@ def skopt_artificial_tune(
             y0=y0,
             random_state=random_state,
         )
-    elif method == "gbrt":
+    elif sampler_name == "gbrt":
         result = gbrt_minimize(
             objective,
             skopt_params_space,
@@ -610,7 +503,7 @@ def skopt_artificial_tune(
             random_state=random_state,
         )
     else:
-        raise ValueError(f"Unknown scikit-opt method: {method}")
+        raise ValueError(f"Unknown scikit-opt method: {sampler_name}")
 
     # Add runtime to the historical performance DataFrame
     historical_performance = pd.DataFrame(
@@ -627,5 +520,225 @@ def skopt_artificial_tune(
         ]
     )
     best_value = result.fun
+
+    return historical_performance, best_value
+
+
+# from bore import BoreOptimizer
+# from deap import base, creator, tools
+# import random
+# import time
+# import pandas as pd
+# from skopt import gp_minimize, forest_minimize, gbrt_minimize
+# from skopt.space import Integer as SKInteger, Real, Categorical as SKCategorical
+
+# # BORE-based tuning
+
+# def bore_artificial_tune(performance_generator, params, n_trials=None, warm_start_configs=None, random_state=None):
+#     bore_params_space = [(param_values[0], param_values[1]) if "__range" in param_name else param_values for param_name, param_values in params.items()]
+#     optimizer = BoreOptimizer(bounds=bore_params_space, acq_function="logistic")
+
+#     if warm_start_configs:
+#         for config, loss in warm_start_configs:
+#             optimizer.observe([config[param] for param in params.keys()], loss)
+
+#     historical_performance = []
+#     runtimes = []
+
+#     for _ in range(n_trials):
+#         start_time = time.time()
+#         x_next = optimizer.suggest()
+#         params_dict = {key: val for key, val in zip(params.keys(), x_next)}
+#         y_next = performance_generator.predict(params=params_dict)
+#         optimizer.observe(x_next, y_next)
+#         end_time = time.time()
+
+#         runtimes.append(end_time - start_time)
+#         historical_performance.append({"configurations": params_dict, "performance": y_next, "end_time": end_time - start_time})
+
+#     best_value = min(historical_performance, key=lambda x: x["performance"])["performance"]
+#     return pd.DataFrame(historical_performance), best_value
+
+# # REA-based tuning
+
+# import random
+# import time
+# import pandas as pd
+# from deap import base, creator, tools
+
+# import random
+# import time
+# import pandas as pd
+# from deap import base, creator, tools
+# from datetime import datetime
+
+# def rea_artificial_tune(performance_generator, params, n_trials=None, warm_start_configs=None, random_state=None, population_size=20):
+#     # Set random seed if provided
+#     if random_state is not None:
+#         random.seed(random_state)
+
+#     # Define the fitness and individual classes
+#     creator.create("FitnessMin", base.Fitness, weights=(-1.0,))
+#     creator.create("Individual", list, fitness=creator.FitnessMin)
+
+#     # Initialize the toolbox
+#     toolbox = base.Toolbox()
+#     toolbox.register("attr_float", random.uniform, 0, 10)
+#     toolbox.register("individual", tools.initRepeat, creator.Individual, toolbox.attr_float, n=len(params))
+#     toolbox.register("population", tools.initRepeat, list, toolbox.individual)
+
+#     # Define the objective function
+#     def objective_function(individual):
+#         param_dict = {key: val for key, val in zip(params.keys(), individual)}
+#         try:
+#             performance = performance_generator.predict(params=param_dict)
+#             return (performance,)
+#         except Exception as e:
+#             print(f"Error evaluating individual: {e}")
+#             return (float('inf'),)  # Return a high value for invalid individuals
+
+#     # Register the genetic operators
+#     toolbox.register("evaluate", objective_function)
+#     toolbox.register("mutate", tools.mutGaussian, mu=0, sigma=1, indpb=0.2)
+#     toolbox.register("select", tools.selTournament, tournsize=3)
+
+#     # Initialize the population
+#     population = toolbox.population(n=population_size)
+
+#     # Warm start the population with provided configurations
+#     if warm_start_configs:
+#         # Replace the first `n` individuals in the population with warm start configurations
+#         n_warm_start = min(len(warm_start_configs), population_size)
+#         for i in range(n_warm_start):
+#             config, loss = warm_start_configs[i]
+#             ind = creator.Individual([config[param] for param in config.keys()])
+#             ind.fitness.values = (loss,)
+#             population[i] = ind  # Replace a random individual with the warm start configuration
+
+#     # Initialize lists to store historical performance and runtimes
+#     historical_performance = []
+#     runtimes = []
+
+#     # Run the optimization for the specified number of trials
+#     for gen in range(n_trials):
+#         start_time = time.time()
+
+#         # Clone the population and mutate the offspring
+#         offspring = [toolbox.clone(ind) for ind in population]
+#         for mutant in offspring:
+#             toolbox.mutate(mutant)
+
+#         # Evaluate the offspring
+#         for ind in offspring:
+#             ind.fitness.values = toolbox.evaluate(ind)
+
+#         # Combine the population and offspring, then select the best individuals
+#         population.extend(offspring)
+
+#         # Ensure all individuals have fitness values before sorting
+#         for ind in population:
+#             if not ind.fitness.valid:
+#                 ind.fitness.values = toolbox.evaluate(ind)
+
+#         # Sort the population by fitness and select the top individuals
+#         population.sort(key=lambda ind: ind.fitness.values[0])
+#         population = population[:population_size]
+
+#         # Record the runtime for this generation
+#         end_time = time.time()
+#         runtimes.append(end_time - start_time)
+
+#         # Log the best individual of this generation
+#         best_ind = tools.selBest(population, 1)[0]
+#         best_params = {key: val for key, val in zip(params.keys(), best_ind)}
+#         historical_performance.append({
+#             "configurations": best_params,
+#             "performance": best_ind.fitness.values[0],
+#             "end_time": datetime.now(),
+#             "iteration": gen + 1
+#         })
+
+#     # Calculate the best value from the final population
+#     best_value = min(ind.fitness.values[0] for ind in population)
+
+#     # Return the historical performance and the best value
+#     return pd.DataFrame(historical_performance), best_value
+
+
+def tune(
+    performance_generator,
+    tuner: TunerConfig,
+    params: dict,
+    warm_start_configs: list[tuple[dict, float]] = None,
+    random_state: int = None,
+    n_trials: int = None,
+    timeout: float = None,
+):
+    if tuner.tuner == "optuna":
+        historical_performance, best_value = optuna_tune(
+            n_trials=n_trials,
+            performance_generator=performance_generator,
+            params=params,
+            sampler=tuner.sampler,
+            warm_start_configs=warm_start_configs,
+            random_state=random_state,
+            timeout=timeout,
+        )
+    elif tuner.tuner == "confopt":
+        historical_performance, best_value = confopt_tune(
+            params=params,
+            performance_generator=performance_generator,
+            sampler=tuner.sampler,
+            n_trials=n_trials,
+            timeout=timeout,
+            warm_start_configs=warm_start_configs,
+            random_state=random_state,
+        )
+    elif "skopt" in tuner.tuner:
+        if tuner == "skopt-gp":
+            method = "gp"
+        elif tuner == "skopt-forest":
+            method = "forest"
+        elif tuner == "skopt-gbrt":
+            method = "gbrt"
+
+        historical_performance, best_value = skopt_tune(
+            n_trials=n_trials,
+            performance_generator=performance_generator,
+            params=params,
+            sampler_name=method,
+            warm_start_configs=warm_start_configs,
+            random_state=random_state,
+            timeout=timeout,
+        )
+    # elif "syne" in tuner:
+    #     _, method = tuner.split("-")
+    #     historical_performance, best_value = syne_artificial_tune(
+    #         params=params,
+    #         performance_generator=performance_generator,
+    #         method=method,
+    #         warm_start_configs=warm_start_configs,
+    #         random_state=random_state,
+    #         n_trials=n_trials,
+    #         timeout=timeout,
+    #     )
+    # elif tuner == "bore":
+    #     historical_performance, best_value = bore_artificial_tune(
+    #         performance_generator=performance_generator,
+    #         params=params,
+    #         n_trials=n_trials,
+    #         warm_start_configs=warm_start_configs,
+    #         random_state=random_state,
+    #     )
+    # elif tuner == "rea":
+    #     historical_performance, best_value = rea_artificial_tune(
+    #         performance_generator=performance_generator,
+    #         params=params,
+    #         n_trials=n_trials,
+    #         warm_start_configs=warm_start_configs,
+    #         random_state=random_state,
+    #     )
+    else:
+        raise ValueError(f"Unknown tuner: {tuner}")
 
     return historical_performance, best_value
