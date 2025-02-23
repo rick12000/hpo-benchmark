@@ -18,7 +18,7 @@ DNN_NAME: str = "dnn"
 
 
 class TunerConfig(BaseModel):
-    tuner: Literal["confopt", "optuna"]
+    tuner: Literal["confopt", "optuna", "skopt"]
     sampler: Union[
         str,
         BaseSampler,
@@ -29,3 +29,20 @@ class TunerConfig(BaseModel):
     config_identifier: str
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
+
+
+class FloatRange(BaseModel):
+    type: str = "float"
+    lower: float
+    upper: float
+
+
+class IntRange(BaseModel):
+    type: str = "int"
+    lower: int
+    upper: int
+
+
+class CategoricalRange(BaseModel):
+    type: str = "categorical"
+    choices: list[Union[str, int, bool]]

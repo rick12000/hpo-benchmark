@@ -6,22 +6,23 @@ from utils import q10, q90
 import os
 import random
 import time
-from config import TunerConfig
+from config import TunerConfig, IntRange, CategoricalRange, FloatRange
+from typing import Union, Optional
 
-# import json
 import logging
 import optuna
-from generate import ObjectiveSurfaceGenerator  # , Jahs201Generator, YahpoGenerator
+from generate import BlackBoxGenerator  # , Jahs201Generator, YahpoGenerator
 from plot import plot_benchmark_data
 import ast
 from optuna.samplers import TPESampler  # , RandomSampler, GPSampler, CmaEsSampler
-from confopt.estimation import (
-    # MultiFitQuantileConformalSearcher,
-    SingleFitQuantileConformalSearcher,
-    LocallyWeightedConformalSearcher,
-    UCBSampler,
-    # ThompsonSampler,
-)
+
+# from confopt.estimation import (
+#     # MultiFitQuantileConformalSearcher,
+#     SingleFitQuantileConformalSearcher,
+#     LocallyWeightedConformalSearcher,
+#     UCBSampler,
+#     # ThompsonSampler,
+# )
 
 os.environ["SYNETUNE_FOLDER"] = "cache/syne-tune"
 
@@ -275,54 +276,57 @@ conv_trials = 40
 conv_timeout = None
 n_warm_starts = 10
 
-synthetic_params = {
-    "param1__range_float": [0, 100],
-    "param2__range_float": [0, 100],
-    "param3__range_float": [0, 100],
-    "param4__range_float": [0, 100],
-    "param5__range_float": [0, 100],
-    "param6__range_float": [0, 100],
-    "param7__range_float": [0, 100],
-}
+n_synthetic_params = 10
+synthetic_params = {}
+for n in range(n_synthetic_params):
+    synthetic_params[f"param{n}"] = FloatRange(type="float", lower=0, upper=100)
 
 cnn_params = {
-    "Activation": ["ReLU", "Hardswish", "Mish"],
-    "LearningRate__range_float": [0.001, 1],
-    "N": [5],
-    "Op1": list(range(5)),
-    "Op2": list(range(5)),
-    "Op3": list(range(5)),
-    "Op4": list(range(5)),
-    "Op5": list(range(5)),
-    "Op6": list(range(5)),
-    "Optimizer": ["SGD"],
-    "Resolution": [1],
-    "TrivialAugment": [True, False],
-    "W": [16],
-    "WeightDecay__range_float": [0.00001, 0.01],
-    "epoch__range_int": [5, 200],
+    "Activation": CategoricalRange(
+        type="categorical", choices=["ReLU", "Hardswish", "Mish"]
+    ),
+    "LearningRate": FloatRange(type="float", lower=0.001, upper=1),
+    "N": CategoricalRange(type="categorical", choices=[5]),
+    "Op1": CategoricalRange(type="categorical", choices=list(range(5))),
+    "Op2": CategoricalRange(type="categorical", choices=list(range(5))),
+    "Op3": CategoricalRange(type="categorical", choices=list(range(5))),
+    "Op4": CategoricalRange(type="categorical", choices=list(range(5))),
+    "Op5": CategoricalRange(type="categorical", choices=list(range(5))),
+    "Op6": CategoricalRange(type="categorical", choices=list(range(5))),
+    "Optimizer": CategoricalRange(type="categorical", choices=["SGD"]),
+    "Resolution": CategoricalRange(type="categorical", choices=[1]),
+    "TrivialAugment": CategoricalRange(type="categorical", choices=[True, False]),
+    "W": CategoricalRange(type="categorical", choices=[16]),
+    "WeightDecay": FloatRange(type="float", lower=0.00001, upper=0.01),
+    "epoch": IntRange(type="int", lower=5, upper=200),
 }
 
 
-def generate_hyperparameter_combinations(confopt_params, n_combinations, random_state):
+def generate_hyperparameter_combinations(
+    params: dict[str, Union[IntRange, FloatRange, CategoricalRange]],
+    n_combinations: int,
+    random_state: Optional[int] = None,
+):
     random.seed(random_state)
     combinations = []
     for _ in range(n_combinations):
         combination = {}
-        for param_name, param_values in confopt_params.items():
-            if "__range_int" in param_name:
-                combination[param_name.replace("__range_int", "")] = random.choice(
-                    list(range(param_values[0], param_values[1] + 1))
+        for param_name, param_values in params.items():
+            if param_values.type == "int":
+                combination[param_name] = random.choice(
+                    list(range(param_values.lower, param_values.upper + 1))
                 )
-            elif "__range_float" in param_name:
-                combination[param_name.replace("__range_float", "")] = random.choice(
+            elif param_values.type == "float":
+                combination[param_name] = random.choice(
                     [
-                        random.uniform(param_values[0], param_values[1])
+                        random.uniform(param_values.lower, param_values.upper)
                         for _ in range(1000)
                     ]
                 )
+            elif param_values.type == "categorical":
+                combination[param_name] = random.choice(param_values.choices)
             else:
-                combination[param_name] = random.choice(param_values)
+                raise ValueError()
         combinations.append(combination)
     return combinations
 
@@ -330,7 +334,7 @@ def generate_hyperparameter_combinations(confopt_params, n_combinations, random_
 generator_configs = [
     {
         "name": "rastrigin",
-        "data": ObjectiveSurfaceGenerator(generator="rastrigin"),
+        "data": BlackBoxGenerator(generator="rastrigin"),
         "normalize": True,
         "evaluation_metric_direction": "inverse",
         "n_trials": conv_trials,
@@ -468,14 +472,14 @@ tuners = [
     #     sampler=MultiFitQuantileConformalSearcher(quantile_estimator_architecture="qgbm",sampler=UCBSampler(interval_width=0.9,adapter_framework="DtACI")),
     #     config_identifier="DtACI-QGBM UCB",
     # ),
-    TunerConfig(
-        tuner="confopt",
-        sampler=SingleFitQuantileConformalSearcher(
-            quantile_estimator_architecture="qrf",
-            sampler=UCBSampler(interval_width=0.9, adapter_framework=None),
-        ),
-        config_identifier="QRF UCB",
-    ),
+    # TunerConfig(
+    #     tuner="confopt",
+    #     sampler=SingleFitQuantileConformalSearcher(
+    #         quantile_estimator_architecture="qrf",
+    #         sampler=UCBSampler(interval_width=0.9, adapter_framework=None),
+    #     ),
+    #     config_identifier="QRF UCB",
+    # ),
     # TunerConfig(
     #     tuner="confopt",
     #     sampler=SingleFitQuantileConformalSearcher(quantile_estimator_architecture="qrf",sampler=ThompsonSampler(n_quantiles=10, enable_optimistic_sampling=True)),
@@ -486,22 +490,27 @@ tuners = [
     #     sampler=LocallyWeightedConformalSearcher(point_estimator_architecture="gbm", variance_estimator_architecture="gbm",sampler=ThompsonSampler(n_quantiles=4, enable_optimistic_sampling=False)),
     #     config_identifier="GBM TS",
     # ),
+    # TunerConfig(
+    #     tuner="confopt",
+    #     sampler=SingleFitQuantileConformalSearcher(
+    #         quantile_estimator_architecture="qknn",
+    #         sampler=UCBSampler(interval_width=0.9, adapter_framework=None),
+    #     ),
+    #     config_identifier="QKNN UCB",
+    # ),
+    # TunerConfig(
+    #     tuner="confopt",
+    #     sampler=LocallyWeightedConformalSearcher(
+    #         point_estimator_architecture="gbm",
+    #         variance_estimator_architecture="gbm",
+    #         sampler=UCBSampler(interval_width=0.9, adapter_framework=None),
+    #     ),
+    #     config_identifier="GBM UCB",
+    # ),
     TunerConfig(
-        tuner="confopt",
-        sampler=SingleFitQuantileConformalSearcher(
-            quantile_estimator_architecture="qknn",
-            sampler=UCBSampler(interval_width=0.9, adapter_framework=None),
-        ),
-        config_identifier="QKNN UCB",
-    ),
-    TunerConfig(
-        tuner="confopt",
-        sampler=LocallyWeightedConformalSearcher(
-            point_estimator_architecture="gbm",
-            variance_estimator_architecture="gbm",
-            sampler=UCBSampler(interval_width=0.9, adapter_framework=None),
-        ),
-        config_identifier="GBM UCB",
+        tuner="skopt",
+        sampler="gbrt",
+        config_identifier="GBRT",
     ),
 ]
 
@@ -525,15 +534,9 @@ for dataset_config in generator_configs:
         )
 
         warm_starts = []
-        for param in hyperparameter_combinations:
-            clean_param = {}
-            for param_name, param_value in param.items():
-                clean_param[
-                    param_name.replace("__range_float", "").replace("__range_int", "")
-                ] = param_value
-            performance = dataset_config["data"].predict(clean_param)
-            warm_starts.append((clean_param, performance))
-
+        for combination in hyperparameter_combinations:
+            performance = dataset_config["data"].predict(combination)
+            warm_starts.append((combination, performance))
         warm_starts_per_repetition.append(warm_starts)
 
     logger.info(f"Model: {dataset_config['model_name']}")
@@ -544,7 +547,7 @@ for dataset_config in generator_configs:
             tune_start = datetime.now()
             historical_performance, best_value = tune(
                 performance_generator=dataset_config["data"],
-                tuner=tuner,
+                tuner_config=tuner,
                 n_trials=n_trials,
                 timeout=timeout,
                 params=dataset_config["params"],
