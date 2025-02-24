@@ -133,6 +133,7 @@ def accumulate_breaches(
         by=grouping_columns + [budget_unit],
         ascending=True,
     ).reset_index(drop=True)
+
     sorted_experiment_log["cumulative_breach_rate"] = (
         sorted_experiment_log.groupby(grouping_columns)[breach_col]
         .expanding()
@@ -142,7 +143,7 @@ def accumulate_breaches(
 
     sorted_experiment_log["rolling_breach_rate"] = (
         sorted_experiment_log.groupby(grouping_columns)[breach_col]
-        .rolling(window=rolling_breach_count)
+        .rolling(window=rolling_breach_count, min_periods=1)
         .mean()
         .reset_index(level=grouping_columns, drop=True)
     )
@@ -206,7 +207,7 @@ def time_discretize_benchmark_data(
     historical_performance_aggregated = historical_performance_aggregated.groupby(
         groupby_columns,
         as_index=False,
-    ).agg({performance_column: "min"})
+    ).agg({performance_column: lambda x: x.min() if x.notnull().all() else np.nan})
 
     # Step 6: Merge with expanded runtime grid within each group
     results = []
@@ -491,7 +492,8 @@ processed_benchmark_data = accumulate_breaches(
 )
 
 time_discretized_benchmark_data = time_discretize_benchmark_data(
-    historical_performance=raw_benchmark_data
+    historical_performance=raw_benchmark_data,
+    groupby_columns=grouping_columns + ["runtime"],
 )
 time_discretized_benchmark_data = accumulate_and_rank_performances(
     experiment_log=time_discretized_benchmark_data,
