@@ -247,6 +247,47 @@ def time_discretize_benchmark_data(
     return historical_performance_filled
 
 
+def cap_budget_unit(
+    processed_benchmark_data, experiment_aggregators, budget_unit="runtime"
+):
+
+    # Create a copy of the processed benchmark data
+    processed_benchmark_data_copy = processed_benchmark_data.copy()
+
+    # Step 1: Find the maximum budget_unit value for each experiment
+    max_budget_per_experiment = processed_benchmark_data_copy.groupby(
+        experiment_aggregators
+    )[budget_unit].max()
+
+    # Step 2: Find the minimum of these maximum values (the largest value shared by all experiments)
+    max_shared_budget = max_budget_per_experiment.min()
+
+    # Step 3: Filter the processed data to include only values below the max shared budget
+    processed_benchmark_data_copy = processed_benchmark_data_copy[
+        processed_benchmark_data_copy[budget_unit] <= max_shared_budget
+    ]
+
+    return processed_benchmark_data_copy
+
+
+def standardize_budget_unit(
+    processed_benchmark_data, experiment_aggregators, budget_unit="runtime"
+):
+    # Create a copy of the processed benchmark data
+    processed_benchmark_data_copy = processed_benchmark_data.copy()
+
+    # Min-max normalization using groupby and transform
+    processed_benchmark_data_copy[
+        f"normalized_{budget_unit}"
+    ] = processed_benchmark_data_copy.groupby(experiment_aggregators)[
+        budget_unit
+    ].transform(
+        lambda x: 100 * (x - x.min()) / (x.max() - x.min())
+    )
+
+    return processed_benchmark_data_copy
+
+
 def parse_config_space(s, openml_id: str):
     config_dict = {}
     for line in s.split("\n"):
@@ -513,6 +554,20 @@ time_discretized_benchmark_data = process_benchmark_data(
     metrics=["rank", "best_performance"],
     budget_unit="runtime",
 )
+processed_benchmark_data = cap_budget_unit(
+    processed_benchmark_data, flattening_columns, budget_unit="iteration"
+)
+time_discretized_benchmark_data = cap_budget_unit(
+    time_discretized_benchmark_data, flattening_columns, budget_unit="runtime"
+)
+
+
+processed_benchmark_data = standardize_budget_unit(
+    processed_benchmark_data, flattening_columns, budget_unit="iteration"
+)
+time_discretized_benchmark_data = standardize_budget_unit(
+    time_discretized_benchmark_data, flattening_columns, budget_unit="runtime"
+)
 
 
 plot_path = f"cache/plots/{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}/"
@@ -535,6 +590,12 @@ time.sleep(2)
 run_plots(
     data=time_discretized_benchmark_data,
     x_col="runtime",
+    y_cols=["rank", "best_performance"],
+    plot_path=plot_path,
+)
+run_plots(
+    data=time_discretized_benchmark_data,
+    x_col="normalized_runtime",
     y_cols=["rank", "best_performance"],
     plot_path=plot_path,
 )
