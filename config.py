@@ -13,7 +13,7 @@ from optuna.samplers import TPESampler  # , RandomSampler, GPSampler, CmaEsSampl
 from generate import ObjectiveMetricGenerator
 
 
-N_REPETITIONS_PER_TUNER_CONFIG = 3
+N_REPETITIONS_PER_TUNER_CONFIG = 30
 N_TRIALS = 40
 TIMEOUT = None
 N_WARM_STARTS = 10

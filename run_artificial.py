@@ -1,3 +1,6 @@
+# %%
+from scipy.stats import friedmanchisquare
+
 import pandas as pd
 import numpy as np
 from tune import tune
@@ -14,7 +17,7 @@ from config import (
     ExperimentConfig,
     DEFAULT_TUNING_CONFIGURATIONS,
     # JAHS201_SEARCH_SPACE,
-    BLACK_BOX_SEARCH_SPACE,
+    # BLACK_BOX_SEARCH_SPACE,
     N_REPETITIONS_PER_TUNER_CONFIG,
     N_TRIALS,
     N_WARM_STARTS,
@@ -24,7 +27,7 @@ from typing import Union, Optional
 
 import logging
 import optuna
-from generate import BlackBoxGenerator  # , Jahs201Generator, YahpoGenerator
+from generate import YahpoGenerator  # BlackBoxGenerator, Jahs201Generator,
 from plot import plot_benchmark_data
 import ast
 from generate import ObjectiveMetricGenerator
@@ -94,7 +97,7 @@ def add_runtime(
     return experiment_log_copy
 
 
-def process_benchmark_data(
+def collapse_per_budget(
     raw_benchmark_data,
     experiment_aggregators=["dataset", "tuner"],
     metrics=["rank", "best_performance"],
@@ -302,6 +305,113 @@ def standardize_budget_unit(
     return processed_benchmark_data_copy
 
 
+def friedman_test_runner(
+    data,
+    budget_cross_sections,
+    within_col,
+    across_col,
+    tuner_col="tuner",
+    rank_col="rank",
+    budget_unit="normalized_runtime",
+    alpha=0.05,
+    round_decimals=0,
+):
+    """
+    Perform Friedman tests across specified cross-sections with Bonferroni correction.
+
+    Parameters:
+    df : DataFrame
+        Input dataframe containing the data
+    cross_sections : list
+        List of normalized runtime values to analyze
+    within_col : str
+        Column name defining the groups to analyze within (e.g., 'dataset')
+    across_col : str
+        Column name defining the blocks to compare across (e.g., 'repetition')
+    tuner_col : str, optional
+        Column name containing tuner identifiers
+    runtime_col : str, optional
+        Column name containing normalized runtime values
+    rank_col : str, optional
+        Column name containing rank values
+    alpha : float, optional
+        Overall significance level
+    round_decimals : int, optional
+        Number of decimals to round runtime values to
+
+    Returns:
+    results_df : DataFrame
+        Results with statistics, p-values, and significance flags
+    adjusted_alpha : float
+        Bonferroni-adjusted significance threshold
+    """
+
+    # Check if required columns exist
+    required_columns = [within_col, across_col, tuner_col, budget_unit, rank_col]
+    missing_columns = [col for col in required_columns if col not in data.columns]
+    if missing_columns:
+        raise KeyError(f"Missing required columns: {missing_columns}")
+
+    # Round runtime values and filter to specified cross-sections
+    data = data.copy()
+    data[budget_unit] = data[budget_unit].round(round_decimals)
+    filtered_df = data[data[budget_unit].astype(int).isin(budget_cross_sections)]
+
+    # Initialize storage for results
+    results = []
+
+    # Perform tests for each cross section
+    for runtime in budget_cross_sections:
+        # Get data for current cross section
+        runtime_df = filtered_df[filtered_df[budget_unit] == runtime]
+        # Group by within-column categories
+        for within_group, group_df in runtime_df.groupby(within_col):
+            try:
+                # Pivot data for Friedman test format
+                pivot_df = group_df.pivot(
+                    index=across_col, columns=tuner_col, values=rank_col
+                )
+
+                # Check if we have enough data
+                if len(pivot_df) < 2 or len(pivot_df.columns) < 2:
+                    logger.debug(
+                        f"Skipping {within_group} at runtime {runtime}: Insufficient data for Friedman test"
+                    )
+                    continue
+
+                # Perform Friedman test
+                stat, p = friedmanchisquare(
+                    *[pivot_df[col].dropna() for col in pivot_df.columns]
+                )
+
+                # Store results
+                results.append(
+                    {
+                        "normalized_runtime": runtime,
+                        "within_group": within_group,
+                        "statistic": stat,
+                        "p_value": p,
+                    }
+                )
+
+            except Exception as e:
+                logger.debug(
+                    f"Error processing {within_group} at runtime {runtime}: {str(e)}"
+                )
+                continue
+
+    # Create results dataframe
+    results_df = pd.DataFrame(results)
+
+    # Apply Bonferroni correction
+    n_tests = len(results_df)
+    adjusted_alpha = alpha / n_tests if n_tests > 0 else 0
+    results_df["significant"] = results_df["p_value"] < adjusted_alpha
+    results_df["adjusted_alpha"] = adjusted_alpha
+
+    return results_df, adjusted_alpha
+
+
 def parse_config_space(s, openml_id: str):
     config_dict = {}
     for line in s.split("\n"):
@@ -437,44 +547,47 @@ np.random.seed(random_state)
 
 experiment_configs: list[ExperimentConfig] = []
 # openml_ids = ["3945", "7593", "34539", "126025", "126026", "126029", "146212", "167104", "167149", "167152", "167161", "167168", "167181", "167184", "167185", "167190", "167200", "167201", "168329", "168330", "168331", "168335", "168868", "168908", "168910", "189354", "189862", "189865", "189866", "189873", "189905", "189906", "189908", "189909"]
-# for openml_id in openml_ids:
-#     logger.info(f"Setting up lcbench datasource ID {openml_id}...")
-#     search_space = parse_config_space(
-#                 s=str(
-#                     YahpoGenerator(dataset="lcbench").generator.get_opt_space(
-#                         drop_fidelity_params=False
-#                     )
-#                 ), openml_id=openml_id
-#             )
-#     experiment_configs.append(ExperimentConfig(
-#         search_space=search_space,
-#         generator=YahpoGenerator(dataset="lcbench"),
-#         tuning_configurations=DEFAULT_TUNING_CONFIGURATIONS,
-#         n_warm_starts=N_WARM_STARTS,
-#         n_trials= N_TRIALS,
-#         timeout=TIMEOUT,
-#         benchmark_identifier="lcbench",
-#         dataset_identifier=openml_id
-#         )
-#     )
-
-
-black_box_functions = ["rastrigin", "shekel", "weierstrass", "griewank", "ackley"]
-# TODO TEMP
-# black_box_functions = ["rastrigin"]
-for function in black_box_functions:
+openml_ids = ["3945", "7593", "34539", "126025"]
+for openml_id in openml_ids:
+    logger.info(f"Setting up lcbench datasource ID {openml_id}...")
+    search_space = parse_config_space(
+        s=str(
+            YahpoGenerator(dataset="lcbench").generator.get_opt_space(
+                drop_fidelity_params=False
+            )
+        ),
+        openml_id=openml_id,
+    )
     experiment_configs.append(
         ExperimentConfig(
-            search_space=BLACK_BOX_SEARCH_SPACE,
-            generator=BlackBoxGenerator(generator=function),
+            search_space=search_space,
+            generator=YahpoGenerator(dataset="lcbench"),
             tuning_configurations=DEFAULT_TUNING_CONFIGURATIONS,
             n_warm_starts=N_WARM_STARTS,
             n_trials=N_TRIALS,
             timeout=TIMEOUT,
-            benchmark_identifier="blackbox",
-            dataset_identifier=function,
+            benchmark_identifier="lcbench",
+            dataset_identifier=openml_id,
         )
     )
+
+
+# black_box_functions = ["rastrigin", "shekel", "weierstrass", "griewank", "ackley"]
+# TODO TEMP
+# black_box_functions = ["rastrigin", "shekel"]
+# for function in black_box_functions:
+#     experiment_configs.append(
+#         ExperimentConfig(
+#             search_space=BLACK_BOX_SEARCH_SPACE,
+#             generator=BlackBoxGenerator(generator=function),
+#             tuning_configurations=DEFAULT_TUNING_CONFIGURATIONS,
+#             n_warm_starts=N_WARM_STARTS,
+#             n_trials=N_TRIALS,
+#             timeout=TIMEOUT,
+#             benchmark_identifier="blackbox",
+#             dataset_identifier=function,
+#         )
+#     )
 
 
 # jahs_201_datasets = ["cifar10", "fashion_mnist", "colorectal_histology"]
@@ -555,23 +668,80 @@ for experiment_config in experiment_configs:
 data_path = cache_path + f"data/{run_start}"
 if not os.path.exists(data_path):
     os.makedirs(data_path)
-raw_benchmark_data.to_csv(f"{data_path}/raw_benchmark_data.csv", index=False)
+# raw_benchmark_data.to_csv(f"{data_path}/raw_benchmark_data.csv", index=False)
+
+# %%
+
+raw_benchmark_data = pd.read_csv(f"{data_path}/raw_benchmark_data.csv")
 
 grouping_columns = ["benchmark_identifier", "dataset", "tuner", "repetition"]
 flattening_columns = deepcopy(grouping_columns)
 flattening_columns.remove("repetition")
-
-processed_benchmark_data = accumulate_and_rank_performances(
+ranked_performance_data = accumulate_and_rank_performances(
     experiment_log=raw_benchmark_data,
     grouping_columns=grouping_columns,
     budget_unit="iteration",
 )
-
-processed_benchmark_data = accumulate_breaches(
-    experiment_log=processed_benchmark_data,
+breach_accumulated_performance_data = accumulate_breaches(
+    experiment_log=ranked_performance_data,
     grouping_columns=grouping_columns,
     budget_unit="iteration",
 )
+capped_performance_data = cap_budget_unit(
+    breach_accumulated_performance_data, flattening_columns, budget_unit="iteration"
+)
+standardized_performance_data = standardize_budget_unit(
+    capped_performance_data, flattening_columns, budget_unit="iteration"
+)
+
+
+friedman_test_results, adjusted_alpha = friedman_test_runner(
+    data=standardized_performance_data,
+    budget_cross_sections=[24, 74],
+    within_col="dataset",
+    across_col="repetition",
+    tuner_col="tuner",
+    rank_col="rank",
+    budget_unit="normalized_iteration",
+    alpha=0.05,
+    round_decimals=0,
+)
+
+
+metrics = ["rank", "best_performance", "cumulative_breach_rate", "rolling_breach_rate"]
+collapsed_performance_data = collapse_per_budget(
+    raw_benchmark_data=capped_performance_data,
+    experiment_aggregators=flattening_columns,
+    metrics=metrics,
+    budget_unit="iteration",
+)
+
+standardized_collapsed_performance_data = collapse_per_budget(
+    raw_benchmark_data=standardized_performance_data,
+    experiment_aggregators=flattening_columns,
+    metrics=metrics,
+    budget_unit="normalized_iteration",
+)
+friedman_test_results, adjusted_alpha = friedman_test_runner(
+    data=standardized_collapsed_performance_data,
+    budget_cross_sections=[24, 74],
+    within_col="benchmark_identifier",
+    across_col="dataset",
+    tuner_col="tuner",
+    rank_col="rank_mean",
+    budget_unit="normalized_iteration",
+    alpha=0.05,
+    round_decimals=0,
+)
+
+benchmark_level_processed_benchmark_data = aggregate_benchmark_data(
+    standardized_collapsed_performance_data,
+    benchmark_identifier_col="benchmark_identifier",
+    budget_unit="normalized_iteration",
+)
+
+
+# %%
 
 time_discretized_benchmark_data = time_discretize_benchmark_data(
     historical_performance=raw_benchmark_data,
@@ -582,29 +752,14 @@ time_discretized_benchmark_data = accumulate_and_rank_performances(
     grouping_columns=grouping_columns,
     budget_unit="runtime",
 )
-metrics = ["rank", "best_performance", "cumulative_breach_rate", "rolling_breach_rate"]
-processed_benchmark_data = process_benchmark_data(
-    raw_benchmark_data=processed_benchmark_data,
-    experiment_aggregators=flattening_columns,
-    metrics=metrics,
-    budget_unit="iteration",
-)
-time_discretized_benchmark_data = process_benchmark_data(
+time_discretized_benchmark_data = collapse_per_budget(
     raw_benchmark_data=time_discretized_benchmark_data,
     experiment_aggregators=flattening_columns,
     metrics=["rank", "best_performance"],
     budget_unit="runtime",
 )
-processed_benchmark_data = cap_budget_unit(
-    processed_benchmark_data, flattening_columns, budget_unit="iteration"
-)
 time_discretized_benchmark_data = cap_budget_unit(
     time_discretized_benchmark_data, flattening_columns, budget_unit="runtime"
-)
-
-
-processed_benchmark_data = standardize_budget_unit(
-    processed_benchmark_data, flattening_columns, budget_unit="iteration"
 )
 time_discretized_benchmark_data = standardize_budget_unit(
     time_discretized_benchmark_data, flattening_columns, budget_unit="runtime"
@@ -614,11 +769,6 @@ time_discretized_benchmark_data.to_csv(
     f"{data_path}/time_discretized_benchmark_data.csv", index=False
 )
 
-benchmark_level_processed_benchmark_data = aggregate_benchmark_data(
-    processed_benchmark_data,
-    benchmark_identifier_col="benchmark_identifier",
-    budget_unit="normalized_iteration",
-)
 benchmark_level_processed_benchmark_data[
     "dataset"
 ] = benchmark_level_processed_benchmark_data["benchmark_identifier"]
@@ -636,7 +786,7 @@ if not os.path.exists(plot_path):
     os.makedirs(plot_path)
 
 run_plots(
-    data=processed_benchmark_data,
+    data=collapsed_performance_data,
     x_col="iteration",
     y_cols=[
         "rank",
@@ -655,8 +805,10 @@ run_plots(
 )
 time.sleep(2)
 run_plots(
-    data=benchmark_level_time_discretized_benchmark_data,
+    data=benchmark_level_processed_benchmark_data,
     x_col="normalized_runtime",
     y_cols=["rank_mean"],
     plot_path=plot_path,
 )
+
+# %%
