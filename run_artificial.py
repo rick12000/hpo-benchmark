@@ -250,6 +250,9 @@ def time_discretize_benchmark_data(
 def cap_budget_unit(
     processed_benchmark_data, experiment_aggregators, budget_unit="runtime"
 ):
+    # Ensure "dataset" is included in the experiment_aggregators
+    if "dataset" not in experiment_aggregators:
+        experiment_aggregators.append("dataset")
 
     # Create a copy of the processed benchmark data
     processed_benchmark_data_copy = processed_benchmark_data.copy()
@@ -259,13 +262,24 @@ def cap_budget_unit(
         experiment_aggregators
     )[budget_unit].max()
 
-    # Step 2: Find the minimum of these maximum values (the largest value shared by all experiments)
-    max_shared_budget = max_budget_per_experiment.min()
+    # Step 2: Find the minimum of these maximum values (the largest value shared by all experiments within each dataset)
+    max_shared_budget = max_budget_per_experiment.groupby("dataset").min()
 
     # Step 3: Filter the processed data to include only values below the max shared budget
-    processed_benchmark_data_copy = processed_benchmark_data_copy[
-        processed_benchmark_data_copy[budget_unit] <= max_shared_budget
-    ]
+    # Merge the max_shared_budget back into the processed_benchmark_data_copy
+    processed_benchmark_data_copy = processed_benchmark_data_copy.merge(
+        max_shared_budget.rename("max_shared_budget"), how="left", on="dataset"
+    )
+
+    # Filter rows where the budget_unit is less than or equal to the max_shared_budget
+    processed_benchmark_data_copy = (
+        processed_benchmark_data_copy[
+            processed_benchmark_data_copy[budget_unit]
+            <= processed_benchmark_data_copy["max_shared_budget"]
+        ]
+        .drop(columns=["max_shared_budget"])
+        .reset_index(drop=True)
+    )
 
     return processed_benchmark_data_copy
 
@@ -358,6 +372,33 @@ def parse_config_space(s, openml_id: str):
     return config_dict
 
 
+def aggregate_benchmark_data(
+    data,
+    benchmark_identifier_col="benchmark_identifier",
+    budget_unit="runtime",
+    tuner_col="tuner",
+):
+    data_copy = data.copy()
+    aggregations = {
+        "rank_mean": ["mean", q10, q90],
+    }
+    aggregated_data = data_copy.groupby(
+        [benchmark_identifier_col, budget_unit, tuner_col], as_index=False
+    ).agg(aggregations)
+
+    # Flatten the multi-level column names
+    aggregated_data.columns = [
+        "_".join(col) if isinstance(col, tuple) else col
+        for col in aggregated_data.columns
+    ]
+
+    # Clean up column names by removing trailing underscores
+    aggregated_data.columns = [
+        col if col[-1] != "_" else col[:-1] for col in aggregated_data.columns
+    ]
+    return aggregated_data
+
+
 cache_path = "cache/"
 if not os.path.exists(cache_path):
     os.makedirs(cache_path)
@@ -420,7 +461,7 @@ experiment_configs: list[ExperimentConfig] = []
 
 black_box_functions = ["rastrigin", "shekel", "weierstrass", "griewank", "ackley"]
 # TODO TEMP
-black_box_functions = ["rastrigin"]
+# black_box_functions = ["rastrigin"]
 for function in black_box_functions:
     experiment_configs.append(
         ExperimentConfig(
@@ -569,11 +610,30 @@ time_discretized_benchmark_data = standardize_budget_unit(
     time_discretized_benchmark_data, flattening_columns, budget_unit="runtime"
 )
 
+time_discretized_benchmark_data.to_csv(
+    f"{data_path}/time_discretized_benchmark_data.csv", index=False
+)
+
+benchmark_level_processed_benchmark_data = aggregate_benchmark_data(
+    processed_benchmark_data,
+    benchmark_identifier_col="benchmark_identifier",
+    budget_unit="normalized_iteration",
+)
+benchmark_level_processed_benchmark_data[
+    "dataset"
+] = benchmark_level_processed_benchmark_data["benchmark_identifier"]
+benchmark_level_time_discretized_benchmark_data = aggregate_benchmark_data(
+    time_discretized_benchmark_data,
+    benchmark_identifier_col="benchmark_identifier",
+    budget_unit="normalized_runtime",
+)
+benchmark_level_time_discretized_benchmark_data[
+    "dataset"
+] = benchmark_level_time_discretized_benchmark_data["benchmark_identifier"]
 
 plot_path = f"cache/plots/{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}/"
 if not os.path.exists(plot_path):
     os.makedirs(plot_path)
-
 
 run_plots(
     data=processed_benchmark_data,
@@ -593,9 +653,10 @@ run_plots(
     y_cols=["rank", "best_performance"],
     plot_path=plot_path,
 )
+time.sleep(2)
 run_plots(
-    data=time_discretized_benchmark_data,
+    data=benchmark_level_time_discretized_benchmark_data,
     x_col="normalized_runtime",
-    y_cols=["rank", "best_performance"],
+    y_cols=["rank_mean"],
     plot_path=plot_path,
 )
