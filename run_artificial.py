@@ -288,21 +288,111 @@ def cap_budget_unit(
 
 
 def standardize_budget_unit(
-    processed_benchmark_data, experiment_aggregators, budget_unit="runtime"
+    processed_benchmark_data,
+    experiment_aggregators,
+    budget_unit="runtime",
+    metrics_to_keep=None,
 ):
-    # Create a copy of the processed benchmark data
+    """
+    Standardizes benchmark data by normalizing the budget unit and forward propagating metrics.
+
+    Args:
+        processed_benchmark_data: DataFrame containing benchmark data
+        experiment_aggregators: Columns to group by for normalization
+        budget_unit: Column to normalize (default: "runtime")
+        metrics_to_keep: List of metrics to forward propagate (default: empty list)
+
+    Returns:
+        DataFrame with standardized benchmark data
+    """
+    # Ensure processed_benchmark_data is not modified in-place
     processed_benchmark_data_copy = processed_benchmark_data.copy()
 
-    # Min-max normalization using groupby and transform
+    if metrics_to_keep is None:
+        metrics_to_keep = []
+
+    # Import necessary libraries
+    import pandas as pd
+    import numpy as np
+
+    # Check if budget_unit exists in the dataframe
+    if budget_unit not in processed_benchmark_data_copy.columns:
+        raise ValueError(f"Budget unit '{budget_unit}' not found in the dataframe")
+
+    # Verify all metrics_to_keep exist in the dataframe
+    missing_metrics = [
+        m for m in metrics_to_keep if m not in processed_benchmark_data_copy.columns
+    ]
+    if missing_metrics:
+        raise ValueError(f"Metrics {missing_metrics} not found in the dataframe")
+
+    # Handle groups with only one value (where max = min would cause division by zero)
+    for _, group in processed_benchmark_data_copy.groupby(experiment_aggregators):
+        if group[budget_unit].min() == group[budget_unit].max() and len(group) > 0:
+            # If all values in group are identical, set normalized value to 0 (or another convention)
+            processed_benchmark_data_copy.loc[
+                group.index, f"normalized_{budget_unit}"
+            ] = 0
+
+    # Min-max normalization using groupby and transform, handling the division by zero case
     processed_benchmark_data_copy[
         f"normalized_{budget_unit}"
     ] = processed_benchmark_data_copy.groupby(experiment_aggregators)[
         budget_unit
     ].transform(
-        lambda x: 100 * (x - x.min()) / (x.max() - x.min())
+        lambda x: 100 * (x - x.min()) / (x.max() - x.min()) if x.max() > x.min() else 0
     )
 
-    return processed_benchmark_data_copy
+    # Discretize the normalized budget unit (ensure it's a float before rounding)
+    processed_benchmark_data_copy[f"normalized_{budget_unit}"] = (
+        processed_benchmark_data_copy[f"normalized_{budget_unit}"].round().astype(int)
+    )
+
+    # Forward propagate the metrics to keep
+    results = []
+    for _, group in processed_benchmark_data_copy.groupby(experiment_aggregators):
+        # Create a complete range from 0 to 100 for the normalized budget unit
+        runtime_spacings = pd.DataFrame(
+            {f"normalized_{budget_unit}": np.arange(0, 101)}
+        )
+
+        # Keep only necessary columns to avoid duplicate columns in merge
+        columns_to_keep = (
+            experiment_aggregators
+            + [f"normalized_{budget_unit}", budget_unit]
+            + metrics_to_keep
+        )
+        group_subset = group[columns_to_keep].drop_duplicates(
+            subset=[f"normalized_{budget_unit}"]
+        )
+
+        # Merge to create the complete normalized scale
+        merged_group = pd.merge(
+            runtime_spacings,
+            group_subset,
+            how="left",
+            on=f"normalized_{budget_unit}",
+        )
+
+        # Sort and reset index
+        merged_group = merged_group.sort_values(
+            by=f"normalized_{budget_unit}"
+        ).reset_index(drop=True)
+
+        # Forward fill values for experiment_aggregators as well
+        columns_to_fill = experiment_aggregators + metrics_to_keep
+        merged_group[columns_to_fill] = merged_group[columns_to_fill].ffill()
+
+        # Add to results
+        results.append(merged_group)
+
+    # Handle the case when results is empty
+    if not results:
+        return pd.DataFrame()
+
+    standardized_benchmark_data = pd.concat(results, ignore_index=True)
+
+    return standardized_benchmark_data
 
 
 def friedman_test_runner(
@@ -688,25 +778,8 @@ breach_accumulated_performance_data = accumulate_breaches(
     budget_unit="iteration",
 )
 capped_performance_data = cap_budget_unit(
-    breach_accumulated_performance_data, flattening_columns, budget_unit="iteration"
+    breach_accumulated_performance_data, grouping_columns, budget_unit="iteration"
 )
-standardized_performance_data = standardize_budget_unit(
-    capped_performance_data, flattening_columns, budget_unit="iteration"
-)
-
-
-friedman_test_results, adjusted_alpha = friedman_test_runner(
-    data=standardized_performance_data,
-    budget_cross_sections=[24, 74],
-    within_col="dataset",
-    across_col="repetition",
-    tuner_col="tuner",
-    rank_col="rank",
-    budget_unit="normalized_iteration",
-    alpha=0.05,
-    round_decimals=0,
-)
-
 
 metrics = ["rank", "best_performance", "cumulative_breach_rate", "rolling_breach_rate"]
 collapsed_performance_data = collapse_per_budget(
@@ -716,15 +789,35 @@ collapsed_performance_data = collapse_per_budget(
     budget_unit="iteration",
 )
 
+# Iteration standardized data:
+standardized_performance_data = standardize_budget_unit(
+    capped_performance_data,
+    grouping_columns,
+    budget_unit="iteration",
+    metrics_to_keep=["rank", "best_performance"],
+)
+
+friedman_test_results, adjusted_alpha = friedman_test_runner(
+    data=standardized_performance_data,
+    budget_cross_sections=[25, 75],
+    within_col="dataset",
+    across_col="repetition",
+    tuner_col="tuner",
+    rank_col="rank",
+    budget_unit="normalized_iteration",
+    alpha=0.05,
+    round_decimals=0,
+)
+
 standardized_collapsed_performance_data = collapse_per_budget(
     raw_benchmark_data=standardized_performance_data,
     experiment_aggregators=flattening_columns,
-    metrics=metrics,
+    metrics=["rank", "best_performance"],
     budget_unit="normalized_iteration",
 )
 friedman_test_results, adjusted_alpha = friedman_test_runner(
     data=standardized_collapsed_performance_data,
-    budget_cross_sections=[24, 74],
+    budget_cross_sections=[25, 75],
     within_col="benchmark_identifier",
     across_col="dataset",
     tuner_col="tuner",
@@ -739,47 +832,80 @@ benchmark_level_processed_benchmark_data = aggregate_benchmark_data(
     benchmark_identifier_col="benchmark_identifier",
     budget_unit="normalized_iteration",
 )
+benchmark_level_processed_benchmark_data[
+    "dataset"
+] = benchmark_level_processed_benchmark_data["benchmark_identifier"]
 
 
 # %%
 
-time_discretized_benchmark_data = time_discretize_benchmark_data(
+discretized_benchmark_data_time = time_discretize_benchmark_data(
     historical_performance=raw_benchmark_data,
     groupby_columns=grouping_columns + ["runtime"],
 )
-time_discretized_benchmark_data = accumulate_and_rank_performances(
-    experiment_log=time_discretized_benchmark_data,
+ranked_performance_data_time = accumulate_and_rank_performances(
+    experiment_log=discretized_benchmark_data_time,
     grouping_columns=grouping_columns,
     budget_unit="runtime",
 )
-time_discretized_benchmark_data = collapse_per_budget(
-    raw_benchmark_data=time_discretized_benchmark_data,
+capped_performance_data_time = cap_budget_unit(
+    ranked_performance_data_time, grouping_columns, budget_unit="runtime"
+)
+collapsed_performance_data_time = collapse_per_budget(
+    raw_benchmark_data=capped_performance_data_time,
     experiment_aggregators=flattening_columns,
     metrics=["rank", "best_performance"],
     budget_unit="runtime",
 )
-time_discretized_benchmark_data = cap_budget_unit(
-    time_discretized_benchmark_data, flattening_columns, budget_unit="runtime"
-)
-time_discretized_benchmark_data = standardize_budget_unit(
-    time_discretized_benchmark_data, flattening_columns, budget_unit="runtime"
+
+
+# Runtime standardized data:
+standardized_performance_data_time = standardize_budget_unit(
+    capped_performance_data_time,
+    grouping_columns,
+    budget_unit="runtime",
+    metrics_to_keep=["rank", "best_performance"],
 )
 
-time_discretized_benchmark_data.to_csv(
-    f"{data_path}/time_discretized_benchmark_data.csv", index=False
+friedman_test_results, adjusted_alpha = friedman_test_runner(
+    data=standardized_performance_data_time,
+    budget_cross_sections=[25, 75],
+    within_col="dataset",
+    across_col="repetition",
+    tuner_col="tuner",
+    rank_col="rank",
+    budget_unit="normalized_runtime",
+    alpha=0.05,
+    round_decimals=0,
 )
 
-benchmark_level_processed_benchmark_data[
-    "dataset"
-] = benchmark_level_processed_benchmark_data["benchmark_identifier"]
-benchmark_level_time_discretized_benchmark_data = aggregate_benchmark_data(
-    time_discretized_benchmark_data,
+standardized_collapsed_performance_data_time = collapse_per_budget(
+    raw_benchmark_data=standardized_performance_data_time,
+    experiment_aggregators=flattening_columns,
+    metrics=["rank", "best_performance"],
+    budget_unit="normalized_runtime",
+)
+friedman_test_results, adjusted_alpha = friedman_test_runner(
+    data=standardized_collapsed_performance_data_time,
+    budget_cross_sections=[25, 75],
+    within_col="benchmark_identifier",
+    across_col="dataset",
+    tuner_col="tuner",
+    rank_col="rank_mean",
+    budget_unit="normalized_runtime",
+    alpha=0.05,
+    round_decimals=0,
+)
+
+benchmark_level_processed_benchmark_data_time = aggregate_benchmark_data(
+    standardized_collapsed_performance_data_time,
     benchmark_identifier_col="benchmark_identifier",
     budget_unit="normalized_runtime",
 )
-benchmark_level_time_discretized_benchmark_data[
+
+benchmark_level_processed_benchmark_data_time[
     "dataset"
-] = benchmark_level_time_discretized_benchmark_data["benchmark_identifier"]
+] = benchmark_level_processed_benchmark_data_time["benchmark_identifier"]
 
 plot_path = f"cache/plots/{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}/"
 if not os.path.exists(plot_path):
@@ -798,16 +924,23 @@ run_plots(
 )
 time.sleep(2)
 run_plots(
-    data=time_discretized_benchmark_data,
+    data=collapsed_performance_data_time,
     x_col="runtime",
     y_cols=["rank", "best_performance"],
     plot_path=plot_path,
 )
 time.sleep(2)
 run_plots(
-    data=benchmark_level_processed_benchmark_data,
+    data=benchmark_level_processed_benchmark_data_time,
     x_col="normalized_runtime",
-    y_cols=["rank_mean"],
+    y_cols=["rank_mean_mean"],
+    plot_path=plot_path,
+)
+time.sleep(2)
+run_plots(
+    data=benchmark_level_processed_benchmark_data,
+    x_col="normalized_iteration",
+    y_cols=["rank_mean_mean"],
     plot_path=plot_path,
 )
 
