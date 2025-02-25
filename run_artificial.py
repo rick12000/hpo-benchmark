@@ -933,14 +933,14 @@ time.sleep(2)
 run_plots(
     data=benchmark_level_processed_benchmark_data_time,
     x_col="normalized_runtime",
-    y_cols=["rank_mean_mean"],
+    y_cols=["rank_mean"],
     plot_path=plot_path,
 )
 time.sleep(2)
 run_plots(
     data=benchmark_level_processed_benchmark_data,
     x_col="normalized_iteration",
-    y_cols=["rank_mean_mean"],
+    y_cols=["rank_mean"],
     plot_path=plot_path,
 )
 
