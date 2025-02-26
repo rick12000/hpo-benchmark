@@ -184,65 +184,83 @@ def accumulate_and_rank_performances(
 def time_discretize_benchmark_data(
     historical_performance,
     groupby_columns=["dataset", "tuner", "repetition", "runtime"],
-    performance_column="performance",
+    metrics=["best_performance", "rank"],
     runtime_column="runtime",
 ):
+    # Check if runtime column is in groupby_columns
+    if runtime_column not in groupby_columns:
+        raise ValueError(f"{runtime_column} must be included in groupby_columns")
+
+    # Create a copy for fill_columns to avoid modifying the input
     fill_columns = groupby_columns.copy()
     fill_columns.remove(runtime_column)
 
+    # Make a copy of input data to avoid modifying original
     historical_performance_aggregated = historical_performance.copy()
-    max_runtime = max(historical_performance_aggregated[runtime_column])
-    if max_runtime < 1000:
-        rounding_increment = 0
-    elif max_runtime < 10000:
-        rounding_increment = -2
-    else:
-        rounding_increment = -4
 
-    # Step 4: Round runtime values
-    historical_performance_aggregated[
-        runtime_column
-    ] = historical_performance_aggregated[runtime_column].round(
-        min(0, rounding_increment)
-    )
-
-    # Step 1: Aggregate performance data
-    historical_performance_aggregated = historical_performance_aggregated.groupby(
-        groupby_columns,
-        as_index=False,
-    ).agg({performance_column: lambda x: x.min() if x.notnull().all() else np.nan})
-
-    # Step 6: Merge with expanded runtime grid within each group
+    # Step 4: Merge with expanded runtime grid within each group
     results = []
-    for _, group in historical_performance_aggregated.groupby(fill_columns):
 
-        # Step 5: Expand runtime grid
-        runtime_spacings = pd.DataFrame(
-            {
-                runtime_column: np.arange(
-                    0,
-                    max(group[runtime_column]),
-                    max(1, 10 ** (-rounding_increment)),
-                )
-            }
-        ).astype(int)
-        # Merge group with runtime grid
-        merged_group = pd.merge(
-            runtime_spacings,
-            group,
+    # Group by all columns except runtime
+    for _, group_df in historical_performance_aggregated.groupby(fill_columns):
+        if len(group_df) == 0:
+            continue
+
+        max_runtime = max(group_df[runtime_column])
+        # Count number of digits after first digit to get to 100
+        rounding_increment = -(len(str(int(max_runtime))) - 3)
+
+        # Step 4: Round runtime values
+        group_df[runtime_column] = (
+            group_df[runtime_column].round(rounding_increment).astype(int)
+        )
+
+        # Step 1: Get min and max runtime for this group
+        min_runtime = int(group_df[runtime_column].min())
+        max_runtime = int(group_df[runtime_column].max())
+
+        # Step 2: Create expanded runtime grid with integer steps
+        runtime_values = np.arange(
+            min_runtime, max_runtime + 1, max(1, 10 ** (-rounding_increment))
+        )  # Integer steps
+
+        # Step 3: For each unique combination of fill_columns
+        group_keys = {col: group_df[col].iloc[0] for col in fill_columns}
+
+        # Create a dataframe with the expanded runtime grid
+        expanded_df = pd.DataFrame({runtime_column: runtime_values}).astype(int)
+
+        # Add the group identifiers to each row
+        for col, val in group_keys.items():
+            expanded_df[col] = val
+
+        # Left join the expanded grid with the original grouped data
+        # This preserves all runtime values in the expanded grid
+        merged = pd.merge(
+            expanded_df,
+            group_df,
             how="left",
-            on=runtime_column,
+            on=groupby_columns,  # Merge on all groupby_columns, including runtime_column
         )
-        merged_group = merged_group.sort_values(by=runtime_column).reset_index(
-            drop=True
-        )
-        merged_group = merged_group.ffill()
-        results.append(merged_group)
 
-    # Step 7: Concatenate all groups back together
+        # Sort by runtime
+        merged = merged.sort_values(by=fill_columns).reset_index(drop=True)
+
+        # Forward fill the performance values by group
+        for metric in metrics:
+            merged[metric] = merged.groupby(fill_columns)[metric].ffill()
+
+        # Append to results
+        results.append(merged)
+
+    # Check if results list is empty
+    if not results:
+        return pd.DataFrame(columns=historical_performance.columns)
+
+    # Concatenate all groups
     historical_performance_filled = pd.concat(results, ignore_index=True)
 
-    # Step 8: Sort the final dataframe
+    # Sort the final dataframe
     historical_performance_filled = historical_performance_filled.sort_values(
         by=groupby_columns
     ).reset_index(drop=True)
@@ -637,7 +655,7 @@ np.random.seed(random_state)
 
 experiment_configs: list[ExperimentConfig] = []
 # openml_ids = ["3945", "7593", "34539", "126025", "126026", "126029", "146212", "167104", "167149", "167152", "167161", "167168", "167181", "167184", "167185", "167190", "167200", "167201", "168329", "168330", "168331", "168335", "168868", "168908", "168910", "189354", "189862", "189865", "189866", "189873", "189905", "189906", "189908", "189909"]
-openml_ids = ["3945", "7593", "34539", "126025"]
+openml_ids = ["3945", "7593"]
 for openml_id in openml_ids:
     logger.info(f"Setting up lcbench datasource ID {openml_id}...")
     search_space = parse_config_space(
@@ -758,11 +776,11 @@ for experiment_config in experiment_configs:
 data_path = cache_path + f"data/{run_start}"
 if not os.path.exists(data_path):
     os.makedirs(data_path)
-# raw_benchmark_data.to_csv(f"{data_path}/raw_benchmark_data.csv", index=False)
+raw_benchmark_data.to_csv(f"{data_path}/raw_benchmark_data.csv", index=False)
 
 # %%
 
-raw_benchmark_data = pd.read_csv(f"{data_path}/raw_benchmark_data.csv")
+# raw_benchmark_data = pd.read_csv(f"{data_path}/raw_benchmark_data.csv")
 
 grouping_columns = ["benchmark_identifier", "dataset", "tuner", "repetition"]
 flattening_columns = deepcopy(grouping_columns)
@@ -839,15 +857,22 @@ benchmark_level_processed_benchmark_data[
 
 # %%
 
+
 discretized_benchmark_data_time = time_discretize_benchmark_data(
     historical_performance=raw_benchmark_data,
     groupby_columns=grouping_columns + ["runtime"],
+    metrics=["performance"],
 )
+
+
+# %%
+
 ranked_performance_data_time = accumulate_and_rank_performances(
     experiment_log=discretized_benchmark_data_time,
     grouping_columns=grouping_columns,
     budget_unit="runtime",
 )
+
 capped_performance_data_time = cap_budget_unit(
     ranked_performance_data_time, grouping_columns, budget_unit="runtime"
 )

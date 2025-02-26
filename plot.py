@@ -89,8 +89,8 @@ def plot_benchmark_data(
             if i == 0:
                 ax.set_title(model, fontsize=12)
             if j == 0:
-                ax.set_ylabel(f"{dataset}\nBest Performance", fontsize=10)
-            ax.set_xlabel("Runtime", fontsize=10)
+                ax.set_ylabel(f"{dataset}\n{y_col}", fontsize=10)
+            ax.set_xlabel(x_col, fontsize=10)
             ax.grid(True)
 
             ax.set_ylim((ymin, ymax))
