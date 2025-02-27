@@ -154,13 +154,11 @@ def accumulate_breaches(
     return sorted_experiment_log
 
 
-def accumulate_and_rank_performances(
+def accumulate_performances(
     experiment_log,
     grouping_columns,
     budget_unit,
-    rank_ascending=True,
     performance_col: str = "performance",
-    tuner_col: str = "tuner",
 ):
     sorted_experiment_log = experiment_log.sort_values(
         by=grouping_columns + [budget_unit],
@@ -171,101 +169,224 @@ def accumulate_and_rank_performances(
         grouping_columns
     )[performance_col].transform("cummin")
 
+    return sorted_experiment_log
+
+
+def calculate_ranks(
+    experiment_log,
+    grouping_columns,
+    budget_unit,
+    tuner_col: str = "tuner",
+    rank_ascending=True,
+):
     ranking_columns = deepcopy(grouping_columns)
     ranking_columns.remove(tuner_col)
-    sorted_experiment_log["rank"] = sorted_experiment_log.groupby(
+    experiment_log["rank"] = experiment_log.groupby(
         ranking_columns + [budget_unit],
         as_index=False,
     )["best_performance"].rank(method="average", ascending=rank_ascending)
 
-    return sorted_experiment_log
+    return experiment_log
 
 
 def time_discretize_benchmark_data(
-    historical_performance,
-    groupby_columns=["dataset", "tuner", "repetition", "runtime"],
-    metrics=["best_performance", "rank"],
+    df,
+    entity_columns=["benchmark_identifier", "dataset", "tuner"],
+    repetition_column="repetition",
     runtime_column="runtime",
+    performance_column="performance",
+    best_performance_column="best_performance",
+    fixed_interval=None,
 ):
-    # Check if runtime column is in groupby_columns
-    if runtime_column not in groupby_columns:
-        raise ValueError(f"{runtime_column} must be included in groupby_columns")
+    """
+    Discretize runtime values in a dataframe to standardized intervals and calculate best performance.
+    Ensures all repetitions and tuners for a (benchmark, dataset) share the same discretized runtimes.
+    Missing performance values are filled with NaN, and best performance is forward-propagated.
+    """
+    # Validate input columns
+    required_columns = entity_columns + [
+        repetition_column,
+        runtime_column,
+        performance_column,
+    ]
+    for col in required_columns:
+        if col not in df.columns:
+            raise ValueError(f"Input dataframe is missing required column: {col}")
 
-    # Create a copy for fill_columns to avoid modifying the input
-    fill_columns = groupby_columns.copy()
-    fill_columns.remove(runtime_column)
+    # Preprocess data
+    df = df.copy()
+    for col in entity_columns + [repetition_column]:
+        df[col] = df[col].astype(str)
 
-    # Make a copy of input data to avoid modifying original
-    historical_performance_aggregated = historical_performance.copy()
+    df[runtime_column] = pd.to_numeric(df[runtime_column], errors="coerce")
+    df[performance_column] = pd.to_numeric(df[performance_column], errors="coerce")
+    df = df.dropna(subset=[runtime_column, performance_column])
 
-    # Step 4: Merge with expanded runtime grid within each group
-    results = []
+    # Split entity columns into groups (benchmark, dataset) and tuners
+    group_columns = [
+        col for col in entity_columns if col != "tuner"
+    ]  # e.g., ['benchmark_identifier', 'dataset']
+    if not group_columns:
+        raise ValueError("At least one non-tuner column must be in `entity_columns`.")
 
-    # Group by all columns except runtime
-    for _, group_df in historical_performance_aggregated.groupby(fill_columns):
-        if len(group_df) == 0:
-            continue
+    tuner_column = "tuner"  # Assumes 'tuner' is part of entity_columns
 
-        max_runtime = max(group_df[runtime_column])
-        # Count number of digits after first digit to get to 100
-        rounding_increment = -(len(str(int(max_runtime))) - 3)
+    # Generate global discretized runtimes for each (benchmark, dataset)
+    discretized_dfs = []
+    for group_key, group_df in df.groupby(group_columns):
+        # Get min/max runtime for this group (across all tuners and repetitions)
+        min_runtime = group_df[runtime_column].min()
+        max_runtime = group_df[runtime_column].max()
 
-        # Step 4: Round runtime values
-        group_df[runtime_column] = (
-            group_df[runtime_column].round(rounding_increment).astype(int)
+        # Compute interval
+        if fixed_interval is not None:
+            interval = fixed_interval
+        else:
+            rounding_increment = -(len(str(int(max_runtime))) - 3)
+            interval = max(1, 10 ** (-rounding_increment))
+
+        # Generate global discrete runtimes
+        min_runtime_disc = np.floor(min_runtime / interval) * interval
+        max_runtime_disc = np.ceil(max_runtime / interval) * interval
+        discrete_runtimes = np.arange(
+            min_runtime_disc, max_runtime_disc + interval, interval
         )
 
-        # Step 1: Get min and max runtime for this group
-        min_runtime = int(group_df[runtime_column].min())
-        max_runtime = int(group_df[runtime_column].max())
+        # Get all unique tuners and repetitions in this group
+        all_tuners = group_df[tuner_column].unique()
+        all_repetitions = group_df[repetition_column].unique()
 
-        # Step 2: Create expanded runtime grid with integer steps
-        runtime_values = np.arange(
-            min_runtime, max_runtime + 1, max(1, 10 ** (-rounding_increment))
-        )  # Integer steps
+        # Create a grid of all combinations: tuners x repetitions x discrete_runtimes
+        full_grid = pd.MultiIndex.from_product(
+            [all_tuners, all_repetitions, discrete_runtimes],
+            names=[tuner_column, repetition_column, runtime_column],
+        ).to_frame(index=False)
 
-        # Step 3: For each unique combination of fill_columns
-        group_keys = {col: group_df[col].iloc[0] for col in fill_columns}
+        # Merge with original data to get performance values (aggregate min performance per interval)
+        group_df["discretized_runtime"] = (
+            np.floor(group_df[runtime_column] / interval) * interval
+        )
+        aggregated = (
+            group_df.groupby([tuner_column, repetition_column, "discretized_runtime"])[
+                performance_column
+            ]
+            .min()
+            .reset_index()
+        )
 
-        # Create a dataframe with the expanded runtime grid
-        expanded_df = pd.DataFrame({runtime_column: runtime_values}).astype(int)
-
-        # Add the group identifiers to each row
-        for col, val in group_keys.items():
-            expanded_df[col] = val
-
-        # Left join the expanded grid with the original grouped data
-        # This preserves all runtime values in the expanded grid
-        merged = pd.merge(
-            expanded_df,
-            group_df,
+        merged = full_grid.merge(
+            aggregated,
+            left_on=[tuner_column, repetition_column, runtime_column],
+            right_on=[tuner_column, repetition_column, "discretized_runtime"],
             how="left",
-            on=groupby_columns,  # Merge on all groupby_columns, including runtime_column
-        )
+        ).drop(columns="discretized_runtime")
 
-        # Sort by runtime
-        merged = merged.sort_values(by=fill_columns).reset_index(drop=True)
+        # Add group columns (e.g., benchmark_identifier, dataset)
+        for col, val in zip(group_columns, group_key):
+            merged[col] = val
 
-        # Forward fill the performance values by group
-        for metric in metrics:
-            merged[metric] = merged.groupby(fill_columns)[metric].ffill()
+        # Forward-fill best performance within each (tuner, repetition)
+        merged[best_performance_column] = merged.groupby(
+            [tuner_column, repetition_column]
+        )[performance_column].transform(lambda x: x.ffill().cummin())
 
-        # Append to results
-        results.append(merged)
+        discretized_dfs.append(merged)
 
-    # Check if results list is empty
-    if not results:
-        return pd.DataFrame(columns=historical_performance.columns)
+    # Combine all groups and sort
+    result_df = pd.concat(discretized_dfs, ignore_index=True)
+    sort_cols = group_columns + [tuner_column, repetition_column, runtime_column]
+    result_df = result_df.sort_values(by=sort_cols).reset_index(drop=True)
 
-    # Concatenate all groups
-    historical_performance_filled = pd.concat(results, ignore_index=True)
+    return result_df
 
-    # Sort the final dataframe
-    historical_performance_filled = historical_performance_filled.sort_values(
-        by=groupby_columns
-    ).reset_index(drop=True)
 
-    return historical_performance_filled
+# def time_discretize_benchmark_data(
+#     historical_performance,
+#     groupby_columns=["dataset", "tuner", "repetition"],
+#     runtime_column="runtime",
+# ):
+#     # Create a copy for fill_columns to avoid modifying the input
+#     tuner_group = groupby_columns.copy()
+#     tuner_group.remove("repetition")
+
+#     # Make a copy of input data to avoid modifying original
+#     historical_performance_aggregated = historical_performance.copy()
+
+#     # Step 4: Merge with expanded runtime grid within each group
+#     results = []
+
+#     # Group by all columns except runtime
+#     for _, group_df in historical_performance_aggregated.groupby(tuner_group):
+#         if len(group_df) == 0:
+#             continue
+
+#         max_runtime = max(group_df[runtime_column])
+#         # Count number of digits after first digit to get to 100
+#         rounding_increment = -(len(str(int(max_runtime))) - 3)
+
+#         # Step 4: Round runtime values
+#         group_df[runtime_column] = (
+#             group_df[runtime_column].round(rounding_increment).astype(int)
+#         )
+
+#         # Step 1: Get max runtime for this group
+#         max_runtime = int(group_df[runtime_column].max())
+
+#         # Step 2: Create expanded runtime grid with integer steps
+#         runtime_values = np.arange(
+#             0, max_runtime, max(1, 10 ** (-rounding_increment))
+#         )  # Integer steps
+
+#         # Create a dataframe with the expanded runtime grid
+#         expanded_df = pd.DataFrame({runtime_column: runtime_values}).astype(int)
+
+#         # Step 3: Create a Cartesian product of groupby_columns and runtime_column
+#         # Get unique combinations of groupby_columns
+#         unique_groupby_combinations = group_df[groupby_columns].drop_duplicates()
+
+#         # Create a Cartesian product of unique_groupby_combinations and expanded_df
+#         expanded_grid = unique_groupby_combinations.assign(key=1).merge(
+#             expanded_df.assign(key=1), on="key"
+#         ).drop(columns="key")
+
+#         # Step 4: Merge the expanded grid with the original data
+#         merged = pd.merge(
+#             expanded_grid,
+#             group_df,
+#             how="left",
+#             on=groupby_columns + [runtime_column],
+#         )
+
+#         # Sort by runtime
+#         merged = merged.sort_values(by=groupby_columns + [runtime_column]).reset_index(drop=True)
+
+#         merged = accumulate_performances(experiment_log=merged, grouping_columns=groupby_columns, budget_unit=runtime_column)
+#         # Forward fill the performance values by group
+#         merged["best_performance"] = merged.groupby(groupby_columns)["best_performance"].ffill()
+#         merged = calculate_ranks(
+#             experiment_log=merged,
+#             grouping_columns=groupby_columns,
+#             budget_unit=runtime_column,
+#             tuner_col="tuner",
+#             rank_ascending=True
+#         )
+
+#         # Append to results
+#         results.append(merged)
+
+#     # Check if results list is empty
+#     if not results:
+#         return pd.DataFrame(columns=historical_performance.columns)
+
+#     # Concatenate all groups
+#     historical_performance_filled = pd.concat(results, ignore_index=True)
+
+#     # Sort the final dataframe
+#     historical_performance_filled = historical_performance_filled.sort_values(
+#         by=groupby_columns
+#     ).reset_index(drop=True)
+
+#     return historical_performance_filled
 
 
 def cap_budget_unit(
@@ -328,10 +449,6 @@ def standardize_budget_unit(
 
     if metrics_to_keep is None:
         metrics_to_keep = []
-
-    # Import necessary libraries
-    import pandas as pd
-    import numpy as np
 
     # Check if budget_unit exists in the dataframe
     if budget_unit not in processed_benchmark_data_copy.columns:
@@ -785,11 +902,19 @@ raw_benchmark_data.to_csv(f"{data_path}/raw_benchmark_data.csv", index=False)
 grouping_columns = ["benchmark_identifier", "dataset", "tuner", "repetition"]
 flattening_columns = deepcopy(grouping_columns)
 flattening_columns.remove("repetition")
-ranked_performance_data = accumulate_and_rank_performances(
+
+accumulated_performance_data = accumulate_performances(
     experiment_log=raw_benchmark_data,
     grouping_columns=grouping_columns,
     budget_unit="iteration",
 )
+
+ranked_performance_data = calculate_ranks(
+    experiment_log=accumulated_performance_data,
+    grouping_columns=grouping_columns,
+    budget_unit="iteration",
+)
+
 breach_accumulated_performance_data = accumulate_breaches(
     experiment_log=ranked_performance_data,
     grouping_columns=grouping_columns,
@@ -856,25 +981,21 @@ benchmark_level_processed_benchmark_data[
 
 
 # %%
-
-
 discretized_benchmark_data_time = time_discretize_benchmark_data(
-    historical_performance=raw_benchmark_data,
-    groupby_columns=grouping_columns + ["runtime"],
-    metrics=["performance"],
+    df=raw_benchmark_data,
+    entity_columns=["benchmark_identifier", "dataset", "tuner"],
+    runtime_column="runtime",
 )
-
-
-# %%
-
-ranked_performance_data_time = accumulate_and_rank_performances(
+ranked_benchmark_data_time = calculate_ranks(
     experiment_log=discretized_benchmark_data_time,
     grouping_columns=grouping_columns,
     budget_unit="runtime",
+    tuner_col="tuner",
+    rank_ascending=True,
 )
 
 capped_performance_data_time = cap_budget_unit(
-    ranked_performance_data_time, grouping_columns, budget_unit="runtime"
+    discretized_benchmark_data_time, grouping_columns, budget_unit="runtime"
 )
 collapsed_performance_data_time = collapse_per_budget(
     raw_benchmark_data=capped_performance_data_time,
