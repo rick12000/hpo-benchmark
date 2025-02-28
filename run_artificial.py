@@ -16,8 +16,8 @@ from config import (
     FloatRange,
     ExperimentConfig,
     DEFAULT_TUNING_CONFIGURATIONS,
-    # JAHS201_SEARCH_SPACE,
-    # BLACK_BOX_SEARCH_SPACE,
+    JAHS201_SEARCH_SPACE,
+    BLACK_BOX_SEARCH_SPACE,
     N_REPETITIONS_PER_TUNER_CONFIG,
     N_TRIALS,
     N_WARM_STARTS,
@@ -27,7 +27,7 @@ from typing import Union, Optional
 
 import logging
 import optuna
-from generate import YahpoGenerator  # BlackBoxGenerator, Jahs201Generator,
+from generate import YahpoGenerator, BlackBoxGenerator, Jahs201Generator
 from plot import plot_benchmark_data
 import ast
 from generate import ObjectiveMetricGenerator
@@ -174,256 +174,76 @@ def accumulate_performances(
 
 def calculate_ranks(
     experiment_log,
-    grouping_columns,
-    budget_unit,
-    tuner_col: str = "tuner",
+    ranking_columns,
     rank_ascending=True,
 ):
-    ranking_columns = deepcopy(grouping_columns)
-    ranking_columns.remove(tuner_col)
-    experiment_log["rank"] = experiment_log.groupby(
-        ranking_columns + [budget_unit],
-        as_index=False,
-    )["best_performance"].rank(method="average", ascending=rank_ascending)
+    experiment_log["rank"] = experiment_log.groupby(ranking_columns,)[
+        "best_performance"
+    ].rank(method="average", ascending=rank_ascending)
 
     return experiment_log
 
 
 def time_discretize_benchmark_data(
-    df,
+    data,
     entity_columns=["benchmark_identifier", "dataset", "tuner"],
     repetition_column="repetition",
     runtime_column="runtime",
     performance_column="performance",
-    best_performance_column="best_performance",
-    fixed_interval=None,
 ):
-    """
-    Discretize runtime values in a dataframe to standardized intervals and calculate best performance.
-    Ensures all repetitions and tuners for a (benchmark, dataset) share the same discretized runtimes.
-    Missing performance values are filled with NaN, and best performance is forward-propagated.
-    """
-    # Validate input columns
-    required_columns = entity_columns + [
-        repetition_column,
-        runtime_column,
-        performance_column,
+    data_copy = data.copy()
+    discretized_slices = []
+    for _, group_df in data_copy.groupby(
+        [col for col in entity_columns if col != "tuner"]
+    ):
+        max_runtime = max(group_df[runtime_column])
+        # Count number of digits after first digit to get to 100
+        rounding_increment = -(len(str(int(max_runtime))) - 3)
+
+        # Step 2: Create expanded runtime grid with integer steps
+        runtime_values = np.arange(
+            0, max_runtime, max(1, 10 ** (-rounding_increment))
+        )  # Integer steps
+
+        # Create a dataframe with the expanded runtime grid
+        expanded_df = pd.DataFrame({runtime_column: runtime_values}).astype(int)
+
+        for _, subgroup_df in group_df.groupby(entity_columns + [repetition_column]):
+            # Step 4: Round runtime values
+            subgroup_df[runtime_column] = (
+                subgroup_df[runtime_column].round(rounding_increment).astype(int)
+            )
+            subgroup_df = subgroup_df.groupby(
+                entity_columns + [repetition_column] + [runtime_column], as_index=False
+            ).agg({performance_column: "min"})
+            subgroup_df = accumulate_performances(
+                experiment_log=subgroup_df,
+                grouping_columns=entity_columns + [repetition_column],
+                budget_unit=runtime_column,
+            )
+            subgroup_df = pd.merge(
+                expanded_df,
+                subgroup_df,
+                how="left",
+                on=runtime_column,
+            )
+            subgroup_df = subgroup_df.sort_values(by=runtime_column).reset_index(
+                drop=True
+            )
+            subgroup_df = subgroup_df.ffill()
+            subgroup_df[entity_columns + [repetition_column]] = subgroup_df[
+                entity_columns + [repetition_column]
+            ].bfill()
+            discretized_slices.append(subgroup_df)
+    df_discretized_slices = pd.concat(discretized_slices, ignore_index=True)
+    df_discretized_slices["observation_fill_rate"] = df_discretized_slices.groupby(
+        entity_columns + [runtime_column]
+    )["best_performance"].transform(lambda x: (x.notna().sum()) / len(x))
+    df_discretized_slices = df_discretized_slices[
+        df_discretized_slices["observation_fill_rate"] == 1
     ]
-    for col in required_columns:
-        if col not in df.columns:
-            raise ValueError(f"Input dataframe is missing required column: {col}")
 
-    # Preprocess data
-    df = df.copy()
-    for col in entity_columns + [repetition_column]:
-        df[col] = df[col].astype(str)
-
-    df[runtime_column] = pd.to_numeric(df[runtime_column], errors="coerce")
-    df[performance_column] = pd.to_numeric(df[performance_column], errors="coerce")
-    df = df.dropna(subset=[runtime_column, performance_column])
-
-    # Split entity columns into groups (benchmark, dataset) and tuners
-    group_columns = [
-        col for col in entity_columns if col != "tuner"
-    ]  # e.g., ['benchmark_identifier', 'dataset']
-    if not group_columns:
-        raise ValueError("At least one non-tuner column must be in `entity_columns`.")
-
-    tuner_column = "tuner"  # Assumes 'tuner' is part of entity_columns
-
-    # Generate global discretized runtimes for each (benchmark, dataset)
-    discretized_dfs = []
-    for group_key, group_df in df.groupby(group_columns):
-        # Get min/max runtime for this group (across all tuners and repetitions)
-        min_runtime = group_df[runtime_column].min()
-        max_runtime = group_df[runtime_column].max()
-
-        # Compute interval
-        if fixed_interval is not None:
-            interval = fixed_interval
-        else:
-            rounding_increment = -(len(str(int(max_runtime))) - 3)
-            interval = max(1, 10 ** (-rounding_increment))
-
-        # Generate global discrete runtimes
-        min_runtime_disc = np.floor(min_runtime / interval) * interval
-        max_runtime_disc = np.ceil(max_runtime / interval) * interval
-        discrete_runtimes = np.arange(
-            min_runtime_disc, max_runtime_disc + interval, interval
-        )
-
-        # Get all unique tuners and repetitions in this group
-        all_tuners = group_df[tuner_column].unique()
-        all_repetitions = group_df[repetition_column].unique()
-
-        # Create a grid of all combinations: tuners x repetitions x discrete_runtimes
-        full_grid = pd.MultiIndex.from_product(
-            [all_tuners, all_repetitions, discrete_runtimes],
-            names=[tuner_column, repetition_column, runtime_column],
-        ).to_frame(index=False)
-
-        # Merge with original data to get performance values (aggregate min performance per interval)
-        group_df["discretized_runtime"] = (
-            np.floor(group_df[runtime_column] / interval) * interval
-        )
-        aggregated = (
-            group_df.groupby([tuner_column, repetition_column, "discretized_runtime"])[
-                performance_column
-            ]
-            .min()
-            .reset_index()
-        )
-
-        merged = full_grid.merge(
-            aggregated,
-            left_on=[tuner_column, repetition_column, runtime_column],
-            right_on=[tuner_column, repetition_column, "discretized_runtime"],
-            how="left",
-        ).drop(columns="discretized_runtime")
-
-        # Add group columns (e.g., benchmark_identifier, dataset)
-        for col, val in zip(group_columns, group_key):
-            merged[col] = val
-
-        # Forward-fill best performance within each (tuner, repetition)
-        merged[best_performance_column] = merged.groupby(
-            [tuner_column, repetition_column]
-        )[performance_column].transform(lambda x: x.ffill().cummin())
-
-        discretized_dfs.append(merged)
-
-    # Combine all groups and sort
-    result_df = pd.concat(discretized_dfs, ignore_index=True)
-    sort_cols = group_columns + [tuner_column, repetition_column, runtime_column]
-    result_df = result_df.sort_values(by=sort_cols).reset_index(drop=True)
-
-    return result_df
-
-
-# def time_discretize_benchmark_data(
-#     historical_performance,
-#     groupby_columns=["dataset", "tuner", "repetition"],
-#     runtime_column="runtime",
-# ):
-#     # Create a copy for fill_columns to avoid modifying the input
-#     tuner_group = groupby_columns.copy()
-#     tuner_group.remove("repetition")
-
-#     # Make a copy of input data to avoid modifying original
-#     historical_performance_aggregated = historical_performance.copy()
-
-#     # Step 4: Merge with expanded runtime grid within each group
-#     results = []
-
-#     # Group by all columns except runtime
-#     for _, group_df in historical_performance_aggregated.groupby(tuner_group):
-#         if len(group_df) == 0:
-#             continue
-
-#         max_runtime = max(group_df[runtime_column])
-#         # Count number of digits after first digit to get to 100
-#         rounding_increment = -(len(str(int(max_runtime))) - 3)
-
-#         # Step 4: Round runtime values
-#         group_df[runtime_column] = (
-#             group_df[runtime_column].round(rounding_increment).astype(int)
-#         )
-
-#         # Step 1: Get max runtime for this group
-#         max_runtime = int(group_df[runtime_column].max())
-
-#         # Step 2: Create expanded runtime grid with integer steps
-#         runtime_values = np.arange(
-#             0, max_runtime, max(1, 10 ** (-rounding_increment))
-#         )  # Integer steps
-
-#         # Create a dataframe with the expanded runtime grid
-#         expanded_df = pd.DataFrame({runtime_column: runtime_values}).astype(int)
-
-#         # Step 3: Create a Cartesian product of groupby_columns and runtime_column
-#         # Get unique combinations of groupby_columns
-#         unique_groupby_combinations = group_df[groupby_columns].drop_duplicates()
-
-#         # Create a Cartesian product of unique_groupby_combinations and expanded_df
-#         expanded_grid = unique_groupby_combinations.assign(key=1).merge(
-#             expanded_df.assign(key=1), on="key"
-#         ).drop(columns="key")
-
-#         # Step 4: Merge the expanded grid with the original data
-#         merged = pd.merge(
-#             expanded_grid,
-#             group_df,
-#             how="left",
-#             on=groupby_columns + [runtime_column],
-#         )
-
-#         # Sort by runtime
-#         merged = merged.sort_values(by=groupby_columns + [runtime_column]).reset_index(drop=True)
-
-#         merged = accumulate_performances(experiment_log=merged, grouping_columns=groupby_columns, budget_unit=runtime_column)
-#         # Forward fill the performance values by group
-#         merged["best_performance"] = merged.groupby(groupby_columns)["best_performance"].ffill()
-#         merged = calculate_ranks(
-#             experiment_log=merged,
-#             grouping_columns=groupby_columns,
-#             budget_unit=runtime_column,
-#             tuner_col="tuner",
-#             rank_ascending=True
-#         )
-
-#         # Append to results
-#         results.append(merged)
-
-#     # Check if results list is empty
-#     if not results:
-#         return pd.DataFrame(columns=historical_performance.columns)
-
-#     # Concatenate all groups
-#     historical_performance_filled = pd.concat(results, ignore_index=True)
-
-#     # Sort the final dataframe
-#     historical_performance_filled = historical_performance_filled.sort_values(
-#         by=groupby_columns
-#     ).reset_index(drop=True)
-
-#     return historical_performance_filled
-
-
-def cap_budget_unit(
-    processed_benchmark_data, experiment_aggregators, budget_unit="runtime"
-):
-    # Ensure "dataset" is included in the experiment_aggregators
-    if "dataset" not in experiment_aggregators:
-        experiment_aggregators.append("dataset")
-
-    # Create a copy of the processed benchmark data
-    processed_benchmark_data_copy = processed_benchmark_data.copy()
-
-    # Step 1: Find the maximum budget_unit value for each experiment
-    max_budget_per_experiment = processed_benchmark_data_copy.groupby(
-        experiment_aggregators
-    )[budget_unit].max()
-
-    # Step 2: Find the minimum of these maximum values (the largest value shared by all experiments within each dataset)
-    max_shared_budget = max_budget_per_experiment.groupby("dataset").min()
-
-    # Step 3: Filter the processed data to include only values below the max shared budget
-    # Merge the max_shared_budget back into the processed_benchmark_data_copy
-    processed_benchmark_data_copy = processed_benchmark_data_copy.merge(
-        max_shared_budget.rename("max_shared_budget"), how="left", on="dataset"
-    )
-
-    # Filter rows where the budget_unit is less than or equal to the max_shared_budget
-    processed_benchmark_data_copy = (
-        processed_benchmark_data_copy[
-            processed_benchmark_data_copy[budget_unit]
-            <= processed_benchmark_data_copy["max_shared_budget"]
-        ]
-        .drop(columns=["max_shared_budget"])
-        .reset_index(drop=True)
-    )
-
-    return processed_benchmark_data_copy
+    return df_discretized_slices
 
 
 def standardize_budget_unit(
@@ -528,6 +348,33 @@ def standardize_budget_unit(
     standardized_benchmark_data = pd.concat(results, ignore_index=True)
 
     return standardized_benchmark_data
+
+
+def align_tuners(
+    data, dataset_aggregators, tuner_column, repetition_column, budget_unit="runtime"
+):
+    data_copy = data.copy()
+    data_copy["max_budget_per_repetition"] = data_copy.groupby(
+        dataset_aggregators + [tuner_column] + [repetition_column]
+    )[budget_unit].transform(max)
+    data_copy["min_budget_per_repetition"] = data_copy.groupby(
+        dataset_aggregators + [tuner_column] + [repetition_column]
+    )[budget_unit].transform(min)
+    data_copy["max_shared_budget_per_dataset"] = data_copy.groupby(dataset_aggregators)[
+        "max_budget_per_repetition"
+    ].transform(min)
+    data_copy["min_shared_budget_per_dataset"] = data_copy.groupby(dataset_aggregators)[
+        "min_budget_per_repetition"
+    ].transform(max)
+
+    data_copy = data_copy[
+        data_copy[budget_unit] >= data_copy["min_shared_budget_per_dataset"]
+    ]
+    data_copy = data_copy[
+        data_copy[budget_unit] <= data_copy["max_shared_budget_per_dataset"]
+    ]
+
+    return data_copy
 
 
 def friedman_test_runner(
@@ -769,10 +616,44 @@ random_state = 1234
 random.seed(random_state)
 np.random.seed(random_state)
 
-
 experiment_configs: list[ExperimentConfig] = []
-# openml_ids = ["3945", "7593", "34539", "126025", "126026", "126029", "146212", "167104", "167149", "167152", "167161", "167168", "167181", "167184", "167185", "167190", "167200", "167201", "168329", "168330", "168331", "168335", "168868", "168908", "168910", "189354", "189862", "189865", "189866", "189873", "189905", "189906", "189908", "189909"]
-openml_ids = ["3945", "7593"]
+openml_ids = [
+    "3945",
+    "7593",
+    "34539",
+    "126025",
+    "126026",
+    "126029",
+    "146212",
+    "167104",
+    "167149",
+    "167152",
+    "167161",
+    "167168",
+    "167181",
+    "167184",
+    "167185",
+    "167190",
+    "167200",
+    "167201",
+    "168329",
+    "168330",
+    "168331",
+    "168335",
+    "168868",
+    "168908",
+    "168910",
+    "189354",
+    "189862",
+    "189865",
+    "189866",
+    "189873",
+    "189905",
+    "189906",
+    "189908",
+    "189909",
+]
+# openml_ids = ["3945", "7593"]
 for openml_id in openml_ids:
     logger.info(f"Setting up lcbench datasource ID {openml_id}...")
     search_space = parse_config_space(
@@ -797,37 +678,39 @@ for openml_id in openml_ids:
     )
 
 
-# black_box_functions = ["rastrigin", "shekel", "weierstrass", "griewank", "ackley"]
+black_box_functions = ["rastrigin", "shekel", "weierstrass", "griewank", "ackley"]
 # TODO TEMP
 # black_box_functions = ["rastrigin", "shekel"]
-# for function in black_box_functions:
-#     experiment_configs.append(
-#         ExperimentConfig(
-#             search_space=BLACK_BOX_SEARCH_SPACE,
-#             generator=BlackBoxGenerator(generator=function),
-#             tuning_configurations=DEFAULT_TUNING_CONFIGURATIONS,
-#             n_warm_starts=N_WARM_STARTS,
-#             n_trials=N_TRIALS,
-#             timeout=TIMEOUT,
-#             benchmark_identifier="blackbox",
-#             dataset_identifier=function,
-#         )
-#     )
+for function in black_box_functions:
+    experiment_configs.append(
+        ExperimentConfig(
+            search_space=BLACK_BOX_SEARCH_SPACE,
+            generator=BlackBoxGenerator(generator=function),
+            tuning_configurations=DEFAULT_TUNING_CONFIGURATIONS,
+            n_warm_starts=N_WARM_STARTS,
+            n_trials=N_TRIALS,
+            timeout=TIMEOUT,
+            benchmark_identifier="blackbox",
+            dataset_identifier=function,
+        )
+    )
 
 
-# jahs_201_datasets = ["cifar10", "fashion_mnist", "colorectal_histology"]
-# for dataset in jahs_201_datasets:
-#     experiment_configs.append(ExperimentConfig(
-#         search_space=JAHS201_SEARCH_SPACE,
-#         generator= Jahs201Generator(dataset=dataset),
-#         tuning_configurations=DEFAULT_TUNING_CONFIGURATIONS,
-#         n_warm_starts=N_WARM_STARTS,
-#         n_trials= N_TRIALS,
-#         timeout=TIMEOUT,
-#         benchmark_identifier="JAHS-201",
-#         dataset_identifier=dataset
-#         )
-#     )
+jahs_201_datasets = ["cifar10", "fashion_mnist", "colorectal_histology"]
+for dataset in jahs_201_datasets:
+    experiment_configs.append(
+        ExperimentConfig(
+            search_space=JAHS201_SEARCH_SPACE,
+            generator=Jahs201Generator(dataset=dataset),
+            tuning_configurations=DEFAULT_TUNING_CONFIGURATIONS,
+            n_warm_starts=N_WARM_STARTS,
+            n_trials=N_TRIALS,
+            timeout=TIMEOUT,
+            benchmark_identifier="JAHS-201",
+            dataset_identifier=dataset,
+        )
+    )
+
 
 raw_benchmark_data = pd.DataFrame()
 
@@ -903,6 +786,11 @@ grouping_columns = ["benchmark_identifier", "dataset", "tuner", "repetition"]
 flattening_columns = deepcopy(grouping_columns)
 flattening_columns.remove("repetition")
 
+ranking_columns = deepcopy(grouping_columns)
+ranking_columns.remove("tuner")
+time_ranking_columns = ranking_columns + ["runtime"]
+iteration_ranking_columns = ranking_columns + ["iteration"]
+
 accumulated_performance_data = accumulate_performances(
     experiment_log=raw_benchmark_data,
     grouping_columns=grouping_columns,
@@ -911,8 +799,7 @@ accumulated_performance_data = accumulate_performances(
 
 ranked_performance_data = calculate_ranks(
     experiment_log=accumulated_performance_data,
-    grouping_columns=grouping_columns,
-    budget_unit="iteration",
+    ranking_columns=iteration_ranking_columns,
 )
 
 breach_accumulated_performance_data = accumulate_breaches(
@@ -920,13 +807,10 @@ breach_accumulated_performance_data = accumulate_breaches(
     grouping_columns=grouping_columns,
     budget_unit="iteration",
 )
-capped_performance_data = cap_budget_unit(
-    breach_accumulated_performance_data, grouping_columns, budget_unit="iteration"
-)
 
 metrics = ["rank", "best_performance", "cumulative_breach_rate", "rolling_breach_rate"]
 collapsed_performance_data = collapse_per_budget(
-    raw_benchmark_data=capped_performance_data,
+    raw_benchmark_data=breach_accumulated_performance_data,
     experiment_aggregators=flattening_columns,
     metrics=metrics,
     budget_unit="iteration",
@@ -934,23 +818,23 @@ collapsed_performance_data = collapse_per_budget(
 
 # Iteration standardized data:
 standardized_performance_data = standardize_budget_unit(
-    capped_performance_data,
+    breach_accumulated_performance_data,
     grouping_columns,
     budget_unit="iteration",
     metrics_to_keep=["rank", "best_performance"],
 )
 
-friedman_test_results, adjusted_alpha = friedman_test_runner(
-    data=standardized_performance_data,
-    budget_cross_sections=[25, 75],
-    within_col="dataset",
-    across_col="repetition",
-    tuner_col="tuner",
-    rank_col="rank",
-    budget_unit="normalized_iteration",
-    alpha=0.05,
-    round_decimals=0,
-)
+# friedman_test_results, adjusted_alpha = friedman_test_runner(
+#     data=standardized_performance_data,
+#     budget_cross_sections=[25, 75],
+#     within_col="dataset",
+#     across_col="repetition",
+#     tuner_col="tuner",
+#     rank_col="rank",
+#     budget_unit="normalized_iteration",
+#     alpha=0.05,
+#     round_decimals=0,
+# )
 
 standardized_collapsed_performance_data = collapse_per_budget(
     raw_benchmark_data=standardized_performance_data,
@@ -958,17 +842,17 @@ standardized_collapsed_performance_data = collapse_per_budget(
     metrics=["rank", "best_performance"],
     budget_unit="normalized_iteration",
 )
-friedman_test_results, adjusted_alpha = friedman_test_runner(
-    data=standardized_collapsed_performance_data,
-    budget_cross_sections=[25, 75],
-    within_col="benchmark_identifier",
-    across_col="dataset",
-    tuner_col="tuner",
-    rank_col="rank_mean",
-    budget_unit="normalized_iteration",
-    alpha=0.05,
-    round_decimals=0,
-)
+# friedman_test_results, adjusted_alpha = friedman_test_runner(
+#     data=standardized_collapsed_performance_data,
+#     budget_cross_sections=[25, 75],
+#     within_col="benchmark_identifier",
+#     across_col="dataset",
+#     tuner_col="tuner",
+#     rank_col="rank_mean",
+#     budget_unit="normalized_iteration",
+#     alpha=0.05,
+#     round_decimals=0,
+# )
 
 benchmark_level_processed_benchmark_data = aggregate_benchmark_data(
     standardized_collapsed_performance_data,
@@ -982,23 +866,27 @@ benchmark_level_processed_benchmark_data[
 
 # %%
 discretized_benchmark_data_time = time_discretize_benchmark_data(
-    df=raw_benchmark_data,
+    data=raw_benchmark_data,
     entity_columns=["benchmark_identifier", "dataset", "tuner"],
     runtime_column="runtime",
 )
-ranked_benchmark_data_time = calculate_ranks(
-    experiment_log=discretized_benchmark_data_time,
-    grouping_columns=grouping_columns,
+
+# %%
+
+aligned_benchmark_data_time = align_tuners(
+    data=discretized_benchmark_data_time,
+    dataset_aggregators=["benchmark_identifier", "dataset"],
+    tuner_column="tuner",
+    repetition_column="repetition",
     budget_unit="runtime",
-    tuner_col="tuner",
-    rank_ascending=True,
 )
 
-capped_performance_data_time = cap_budget_unit(
-    discretized_benchmark_data_time, grouping_columns, budget_unit="runtime"
+ranked_benchmark_data_time = calculate_ranks(
+    experiment_log=aligned_benchmark_data_time, ranking_columns=time_ranking_columns
 )
+
 collapsed_performance_data_time = collapse_per_budget(
-    raw_benchmark_data=capped_performance_data_time,
+    raw_benchmark_data=ranked_benchmark_data_time,
     experiment_aggregators=flattening_columns,
     metrics=["rank", "best_performance"],
     budget_unit="runtime",
@@ -1007,23 +895,23 @@ collapsed_performance_data_time = collapse_per_budget(
 
 # Runtime standardized data:
 standardized_performance_data_time = standardize_budget_unit(
-    capped_performance_data_time,
+    ranked_benchmark_data_time,
     grouping_columns,
     budget_unit="runtime",
     metrics_to_keep=["rank", "best_performance"],
 )
 
-friedman_test_results, adjusted_alpha = friedman_test_runner(
-    data=standardized_performance_data_time,
-    budget_cross_sections=[25, 75],
-    within_col="dataset",
-    across_col="repetition",
-    tuner_col="tuner",
-    rank_col="rank",
-    budget_unit="normalized_runtime",
-    alpha=0.05,
-    round_decimals=0,
-)
+# friedman_test_results, adjusted_alpha = friedman_test_runner(
+#     data=standardized_performance_data_time,
+#     budget_cross_sections=[25, 75],
+#     within_col="dataset",
+#     across_col="repetition",
+#     tuner_col="tuner",
+#     rank_col="rank",
+#     budget_unit="normalized_runtime",
+#     alpha=0.05,
+#     round_decimals=0,
+# )
 
 standardized_collapsed_performance_data_time = collapse_per_budget(
     raw_benchmark_data=standardized_performance_data_time,
@@ -1031,17 +919,17 @@ standardized_collapsed_performance_data_time = collapse_per_budget(
     metrics=["rank", "best_performance"],
     budget_unit="normalized_runtime",
 )
-friedman_test_results, adjusted_alpha = friedman_test_runner(
-    data=standardized_collapsed_performance_data_time,
-    budget_cross_sections=[25, 75],
-    within_col="benchmark_identifier",
-    across_col="dataset",
-    tuner_col="tuner",
-    rank_col="rank_mean",
-    budget_unit="normalized_runtime",
-    alpha=0.05,
-    round_decimals=0,
-)
+# friedman_test_results, adjusted_alpha = friedman_test_runner(
+#     data=standardized_collapsed_performance_data_time,
+#     budget_cross_sections=[25, 75],
+#     within_col="benchmark_identifier",
+#     across_col="dataset",
+#     tuner_col="tuner",
+#     rank_col="rank_mean",
+#     budget_unit="normalized_runtime",
+#     alpha=0.05,
+#     round_decimals=0,
+# )
 
 benchmark_level_processed_benchmark_data_time = aggregate_benchmark_data(
     standardized_collapsed_performance_data_time,
