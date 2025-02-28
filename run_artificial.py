@@ -11,17 +11,22 @@ from copy import deepcopy
 import random
 import time
 from config import (
+    BLACK_BOX_IDS,
+    JAHS201_IDS,
     IntRange,
     CategoricalRange,
     FloatRange,
     ExperimentConfig,
-    DEFAULT_TUNING_CONFIGURATIONS,
+    FULL_TUNING_CONFIGURATIONS,
+    DEV_TUNING_CONFIGURATIONS,
+    RUN_TYPE,
     JAHS201_SEARCH_SPACE,
     BLACK_BOX_SEARCH_SPACE,
     N_REPETITIONS_PER_TUNER_CONFIG,
     N_TRIALS,
     N_WARM_STARTS,
     TIMEOUT,
+    OPEN_ML_IDS,
 )
 from typing import Union, Optional
 
@@ -581,6 +586,136 @@ def aggregate_benchmark_data(
     return aggregated_data
 
 
+def setup_lcbench_configs(
+    openml_ids: list[str],
+    tuning_configurations: list,
+    n_warm_starts: int,
+    n_trials: int,
+    timeout: int,
+) -> list[ExperimentConfig]:
+    """
+    Set up experiment configurations for LCBench datasets.
+
+    Args:
+        openml_ids: List of OpenML dataset IDs
+        tuning_configurations: List of tuning configurations to use
+        n_warm_starts: Number of warm start trials
+        n_trials: Number of optimization trials
+        timeout: Timeout in seconds
+
+    Returns:
+        List of ExperimentConfig objects
+    """
+    experiment_configs = []
+
+    for openml_id in openml_ids:
+        logger.info(f"Setting up lcbench datasource ID {openml_id}...")
+
+        # Get search space from YAHPO generator
+        search_space = parse_config_space(
+            s=str(
+                YahpoGenerator(dataset="lcbench").generator.get_opt_space(
+                    drop_fidelity_params=False
+                )
+            ),
+            openml_id=openml_id,
+        )
+
+        # Create experiment config
+        experiment_configs.append(
+            ExperimentConfig(
+                search_space=search_space,
+                generator=YahpoGenerator(dataset="lcbench"),
+                tuning_configurations=tuning_configurations,
+                n_warm_starts=n_warm_starts,
+                n_trials=n_trials,
+                timeout=timeout,
+                benchmark_identifier="lcbench",
+                dataset_identifier=openml_id,
+            )
+        )
+
+    return experiment_configs
+
+
+def setup_jahs201_configs(
+    datasets: list[str],
+    tuning_configurations: list,
+    n_warm_starts: int,
+    n_trials: int,
+    timeout: int,
+) -> list[ExperimentConfig]:
+    """
+    Set up experiment configurations for JAHS-201 datasets.
+
+    Args:
+        datasets: List of JAHS-201 dataset names
+        tuning_configurations: List of tuning configurations to use
+        n_warm_starts: Number of warm start trials
+        n_trials: Number of optimization trials
+        timeout: Timeout in seconds
+
+    Returns:
+        List of ExperimentConfig objects
+    """
+    experiment_configs = []
+
+    for dataset in datasets:
+        experiment_configs.append(
+            ExperimentConfig(
+                search_space=JAHS201_SEARCH_SPACE,
+                generator=Jahs201Generator(dataset=dataset),
+                tuning_configurations=tuning_configurations,
+                n_warm_starts=n_warm_starts,
+                n_trials=n_trials,
+                timeout=timeout,
+                benchmark_identifier="JAHS-201",
+                dataset_identifier=dataset,
+            )
+        )
+
+    return experiment_configs
+
+
+def setup_blackbox_configs(
+    functions: list[str],
+    tuning_configurations: list,
+    n_warm_starts: int,
+    n_trials: int,
+    timeout: int,
+) -> list[ExperimentConfig]:
+    """
+    Set up experiment configurations for black box optimization functions.
+
+    Args:
+        functions: List of black box function names
+        tuning_configurations: List of tuning configurations to use
+        n_warm_starts: Number of warm start trials
+        n_trials: Number of optimization trials
+        timeout: Timeout in seconds
+
+    Returns:
+        List of ExperimentConfig objects
+    """
+    experiment_configs = []
+
+    for function in functions:
+        experiment_configs.append(
+            ExperimentConfig(
+                search_space=BLACK_BOX_SEARCH_SPACE,
+                generator=BlackBoxGenerator(generator=function),
+                tuning_configurations=tuning_configurations,
+                n_warm_starts=n_warm_starts,
+                n_trials=n_trials,
+                timeout=timeout,
+                benchmark_identifier="blackbox",
+                dataset_identifier=function,
+            )
+        )
+
+    return experiment_configs
+
+
 cache_path = "cache/"
 if not os.path.exists(cache_path):
     os.makedirs(cache_path)
@@ -616,104 +751,47 @@ random_state = 1234
 random.seed(random_state)
 np.random.seed(random_state)
 
-experiment_configs: list[ExperimentConfig] = []
-openml_ids = [
-    "3945",
-    "7593",
-    "34539",
-    "126025",
-    "126026",
-    "126029",
-    "146212",
-    "167104",
-    "167149",
-    "167152",
-    "167161",
-    "167168",
-    "167181",
-    "167184",
-    "167185",
-    "167190",
-    "167200",
-    "167201",
-    "168329",
-    "168330",
-    "168331",
-    "168335",
-    "168868",
-    "168908",
-    "168910",
-    "189354",
-    "189862",
-    "189865",
-    "189866",
-    "189873",
-    "189905",
-    "189906",
-    "189908",
-    "189909",
-]
-# openml_ids = ["3945", "7593"]
-for openml_id in openml_ids:
-    logger.info(f"Setting up lcbench datasource ID {openml_id}...")
-    search_space = parse_config_space(
-        s=str(
-            YahpoGenerator(dataset="lcbench").generator.get_opt_space(
-                drop_fidelity_params=False
-            )
-        ),
-        openml_id=openml_id,
-    )
-    experiment_configs.append(
-        ExperimentConfig(
-            search_space=search_space,
-            generator=YahpoGenerator(dataset="lcbench"),
-            tuning_configurations=DEFAULT_TUNING_CONFIGURATIONS,
-            n_warm_starts=N_WARM_STARTS,
-            n_trials=N_TRIALS,
-            timeout=TIMEOUT,
-            benchmark_identifier="lcbench",
-            dataset_identifier=openml_id,
-        )
-    )
 
+if RUN_TYPE == "dev":
+    tuning_configurations = DEV_TUNING_CONFIGURATIONS
+elif RUN_TYPE == "full":
+    tuning_configurations = FULL_TUNING_CONFIGURATIONS
 
-black_box_functions = ["rastrigin", "shekel", "weierstrass", "griewank", "ackley"]
-# TODO TEMP
-# black_box_functions = ["rastrigin", "shekel"]
-for function in black_box_functions:
-    experiment_configs.append(
-        ExperimentConfig(
-            search_space=BLACK_BOX_SEARCH_SPACE,
-            generator=BlackBoxGenerator(generator=function),
-            tuning_configurations=DEFAULT_TUNING_CONFIGURATIONS,
-            n_warm_starts=N_WARM_STARTS,
-            n_trials=N_TRIALS,
-            timeout=TIMEOUT,
-            benchmark_identifier="blackbox",
-            dataset_identifier=function,
-        )
+experiment_configs = []
+if RUN_TYPE == "dev":
+    open_ml_ids = OPEN_ML_IDS[:2]
+else:
+    open_ml_ids = OPEN_ML_IDS
+lc_bench_configs = setup_lcbench_configs(
+    openml_ids=open_ml_ids,
+    tuning_configurations=tuning_configurations,
+    n_warm_starts=N_WARM_STARTS,
+    n_trials=N_TRIALS,
+    timeout=TIMEOUT,
+)
+experiment_configs.extend(lc_bench_configs)
+
+if RUN_TYPE == "full":
+    blackbox_configs = setup_blackbox_configs(
+        functions=BLACK_BOX_IDS,
+        tuning_configurations=tuning_configurations,
+        n_warm_starts=N_WARM_STARTS,
+        n_trials=N_TRIALS,
+        timeout=TIMEOUT,
     )
+    experiment_configs.extend(blackbox_configs)
 
-
-jahs_201_datasets = ["cifar10", "fashion_mnist", "colorectal_histology"]
-for dataset in jahs_201_datasets:
-    experiment_configs.append(
-        ExperimentConfig(
-            search_space=JAHS201_SEARCH_SPACE,
-            generator=Jahs201Generator(dataset=dataset),
-            tuning_configurations=DEFAULT_TUNING_CONFIGURATIONS,
-            n_warm_starts=N_WARM_STARTS,
-            n_trials=N_TRIALS,
-            timeout=TIMEOUT,
-            benchmark_identifier="JAHS-201",
-            dataset_identifier=dataset,
-        )
+    jahs_201_configs = setup_jahs201_configs(
+        datasets=JAHS201_IDS,
+        tuning_configurations=tuning_configurations,
+        n_warm_starts=N_WARM_STARTS,
+        n_trials=N_TRIALS,
+        timeout=TIMEOUT,
     )
+    experiment_configs.extend(jahs_201_configs)
 
 
 raw_benchmark_data = pd.DataFrame()
-
 logger.info("Running HPO benchmark...")
 for experiment_config in experiment_configs:
     dataset_name = experiment_config.dataset_identifier

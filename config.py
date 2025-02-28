@@ -13,10 +13,11 @@ from optuna.samplers import TPESampler  # , RandomSampler, GPSampler, CmaEsSampl
 from generate import ObjectiveMetricGenerator
 
 
-N_REPETITIONS_PER_TUNER_CONFIG = 10
+N_REPETITIONS_PER_TUNER_CONFIG = 3
 N_TRIALS = 40
 TIMEOUT = None
 N_WARM_STARTS = 10
+RUN_TYPE: Literal["dev", "full"] = "dev"
 
 
 class TunerConfig(BaseModel):
@@ -97,8 +98,48 @@ BLACK_BOX_SEARCH_SPACE = {}
 for n in range(n_synthetic_params):
     BLACK_BOX_SEARCH_SPACE[f"param{n}"] = FloatRange(type="float", lower=0, upper=100)
 
+JAHS201_IDS: list[str] = ["cifar10", "fashion_mnist", "colorectal_histology"]
+BLACK_BOX_IDS: list[str] = ["rastrigin", "shekel", "weierstrass", "griewank", "ackley"]
 
-DEFAULT_TUNING_CONFIGURATIONS = [
+OPEN_ML_IDS: list[str] = [
+    "3945",
+    "7593",
+    "34539",
+    "126025",
+    "126026",
+    "126029",
+    "146212",
+    "167104",
+    "167149",
+    "167152",
+    "167161",
+    "167168",
+    "167181",
+    "167184",
+    "167185",
+    "167190",
+    "167200",
+    "167201",
+    "168329",
+    "168330",
+    "168331",
+    "168335",
+    "168868",
+    "168908",
+    "168910",
+    "189354",
+    "189862",
+    "189865",
+    "189866",
+    "189873",
+    "189905",
+    "189906",
+    "189908",
+    "189909",
+]
+
+
+FULL_TUNING_CONFIGURATIONS = [
     # TunerConfig(
     #     tuner="optuna",
     #     sampler=CmaEsSampler(),
@@ -195,4 +236,29 @@ DEFAULT_TUNING_CONFIGURATIONS = [
     #     sampler="gbrt",
     #     config_identifier="GBRT",
     # ),
+]
+
+
+DEV_TUNING_CONFIGURATIONS = [
+    TunerConfig(
+        tuner="optuna",
+        sampler=TPESampler(),
+        config_identifier="TPE",
+    ),
+    TunerConfig(
+        tuner="confopt",
+        sampler=MultiFitQuantileConformalSearcher(
+            quantile_estimator_architecture="qgbm",
+            sampler=ThompsonSampler(n_quantiles=4, enable_optimistic_sampling=False),
+        ),
+        config_identifier="QGBM TS",
+    ),
+    TunerConfig(
+        tuner="confopt",
+        sampler=SingleFitQuantileConformalSearcher(
+            quantile_estimator_architecture="qknn",
+            sampler=UCBSampler(interval_width=0.9, adapter_framework=None),
+        ),
+        config_identifier="QKNN UCB c=1",
+    ),
 ]
