@@ -17,7 +17,7 @@ N_REPETITIONS_PER_TUNER_CONFIG = 10
 N_TRIALS = 40
 TIMEOUT = None
 N_WARM_STARTS = 10
-RUN_TYPE: Literal["dev", "full"] = "full"
+RUN_TYPE: Literal["dev", "full"] = "dev"
 
 
 class TunerConfig(BaseModel):
@@ -231,11 +231,11 @@ FULL_TUNING_CONFIGURATIONS = [
         ),
         config_identifier="GBM UCB c=5",
     ),
-    # TunerConfig(
-    #     tuner="skopt",
-    #     sampler="gbrt",
-    #     config_identifier="GBRT",
-    # ),
+    TunerConfig(
+        tuner="skopt",
+        sampler="gbrt",
+        config_identifier="GBRT",
+    ),
 ]
 
 
