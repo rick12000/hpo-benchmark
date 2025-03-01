@@ -114,8 +114,10 @@ elif RUN_TYPE == "full":
 experiment_configs = []
 if RUN_TYPE == "dev":
     open_ml_ids = OPEN_ML_IDS[:2]
+    n_repetitions = 2
 else:
     open_ml_ids = OPEN_ML_IDS
+    n_repetitions = N_REPETITIONS_PER_TUNER_CONFIG
 lc_bench_configs = setup_lcbench_configs(
     openml_ids=open_ml_ids,
     tuning_configurations=tuning_configurations,
@@ -152,7 +154,7 @@ for experiment_config in experiment_configs:
     logger.info(f"Dataset: {dataset_name}")
 
     warm_starts_per_repetition = []
-    for repetition in range(N_REPETITIONS_PER_TUNER_CONFIG):
+    for repetition in range(n_repetitions):
         # Generate 10 hyperparameter combinations
         hyperparameter_combinations = generate_hyperparameter_combinations(
             params=experiment_config.search_space,
@@ -168,7 +170,7 @@ for experiment_config in experiment_configs:
 
     for tuner in experiment_config.tuning_configurations:
         logger.info(f"Tuner: {tuner}")
-        for repetition in range(N_REPETITIONS_PER_TUNER_CONFIG):
+        for repetition in range(n_repetitions):
             logger.info(f"Repetition: {repetition}")
             tune_start = datetime.now()
             historical_performance, best_value = tune(

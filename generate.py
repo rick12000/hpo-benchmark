@@ -139,7 +139,6 @@ class Jahs201Generator(ObjectiveMetricGenerator):
 class YahpoGenerator(ObjectiveMetricGenerator):
     def __init__(self, dataset: str):
         self.generator = benchmark_set.BenchmarkSet(dataset)
-        # self.generator.set_instance(self.generator.instances[0])
 
     def predict(self, configuration: dict[str, Union[str, int, float, bool]]):
         return -self.generator.objective_function(configuration)[0]["val_accuracy"]
@@ -147,12 +146,3 @@ class YahpoGenerator(ObjectiveMetricGenerator):
     def predict_runtime(self, configuration: dict[str, Union[str, int, float, bool]]):
         # TODO: Check unit of time
         return self.generator.objective_function(configuration)[0]["time"]
-
-
-# class Jahs201Generator:
-#     def __init__(self, dataset: str, metrics: list[str] = ["valid-acc", "runtime"]):
-#         self.generator = Benchmark(task=dataset, lazy=False, metrics=metrics)
-
-#     def predict(self, params):
-#         response = self.generator(params)[200]
-#         return -response["valid-acc"], response["runtime"]

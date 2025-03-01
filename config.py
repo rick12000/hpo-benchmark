@@ -13,11 +13,11 @@ from optuna.samplers import TPESampler  # , RandomSampler, GPSampler, CmaEsSampl
 from generate import ObjectiveMetricGenerator
 
 
-N_REPETITIONS_PER_TUNER_CONFIG = 2
+N_REPETITIONS_PER_TUNER_CONFIG = 10
 N_TRIALS = 40
 TIMEOUT = None
 N_WARM_STARTS = 10
-RUN_TYPE: Literal["dev", "full"] = "dev"
+RUN_TYPE: Literal["dev", "full"] = "full"
 
 
 class TunerConfig(BaseModel):
@@ -240,6 +240,11 @@ FULL_TUNING_CONFIGURATIONS = [
 
 
 DEV_TUNING_CONFIGURATIONS = [
+    TunerConfig(
+        tuner="skopt",
+        sampler="gbrt",
+        config_identifier="GBRT",
+    ),
     TunerConfig(
         tuner="optuna",
         sampler=TPESampler(),
