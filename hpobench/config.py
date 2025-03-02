@@ -10,7 +10,7 @@ from confopt.estimation import (
 )
 from optuna.samplers import TPESampler  # , RandomSampler, GPSampler, CmaEsSampler
 
-from generate import ObjectiveMetricGenerator
+from hpobench.generate import ObjectiveMetricGenerator
 
 
 N_REPETITIONS_PER_TUNER_CONFIG = 10

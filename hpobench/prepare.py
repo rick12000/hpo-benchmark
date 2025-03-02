@@ -1,7 +1,7 @@
 import logging
-from generate import Jahs201Generator, BlackBoxGenerator, YahpoGenerator
-from utils import parse_config_space
-from config import (
+from hpobench.generate import Jahs201Generator, BlackBoxGenerator, YahpoGenerator
+from hpobench.utils import parse_config_space
+from hpobench.config import (
     ExperimentConfig,
     JAHS201_SEARCH_SPACE,
     BLACK_BOX_SEARCH_SPACE,

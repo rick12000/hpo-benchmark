@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 from scipy.stats import friedmanchisquare
 import logging
-from utils import q10, q90
+from hpobench.utils import q10, q90
 from copy import deepcopy
 from typing import Literal
 
@@ -100,7 +100,7 @@ def time_discretize_benchmark_data(
     data,
     entity_columns=["benchmark_identifier", "dataset", "tuner"],
     repetition_column="repetition",
-    runtime_column="runtime",
+    budget_unit="runtime",
     performance_column="performance",
 ):
     data_copy = data.copy()
@@ -108,7 +108,7 @@ def time_discretize_benchmark_data(
     for _, group_df in data_copy.groupby(
         [col for col in entity_columns if col != "tuner"]
     ):
-        max_runtime = max(group_df[runtime_column])
+        max_runtime = max(group_df[budget_unit])
         # Count number of digits after first digit to get to 100
         rounding_increment = -(len(str(int(max_runtime))) - 3)
 
@@ -118,38 +118,45 @@ def time_discretize_benchmark_data(
         )  # Integer steps
 
         # Create a dataframe with the expanded runtime grid
-        expanded_df = pd.DataFrame({runtime_column: runtime_values}).astype(int)
+        expanded_df = pd.DataFrame({budget_unit: runtime_values}).astype(int)
 
         for _, subgroup_df in group_df.groupby(entity_columns + [repetition_column]):
+
             # Step 4: Round runtime values
-            subgroup_df[runtime_column] = (
-                subgroup_df[runtime_column].round(rounding_increment).astype(int)
+            subgroup_df[budget_unit] = (
+                subgroup_df[budget_unit].round(rounding_increment).astype(int)
             )
             subgroup_df = subgroup_df.groupby(
-                entity_columns + [repetition_column] + [runtime_column], as_index=False
+                entity_columns + [repetition_column] + [budget_unit], as_index=False
             ).agg({performance_column: "min"})
+            subgroup_max_runtime = max(subgroup_df[budget_unit])
+            subgroup_min_runtime = min(subgroup_df[budget_unit])
             subgroup_df = accumulate_performances(
                 experiment_log=subgroup_df,
                 grouping_columns=entity_columns + [repetition_column],
-                budget_unit=runtime_column,
+                budget_unit=budget_unit,
             )
             subgroup_df = pd.merge(
                 expanded_df,
                 subgroup_df,
                 how="left",
-                on=runtime_column,
+                on=budget_unit,
             )
-            subgroup_df = subgroup_df.sort_values(by=runtime_column).reset_index(
-                drop=True
-            )
+            subgroup_df = subgroup_df.sort_values(by=budget_unit).reset_index(drop=True)
             subgroup_df = subgroup_df.ffill()
             subgroup_df[entity_columns + [repetition_column]] = subgroup_df[
                 entity_columns + [repetition_column]
             ].bfill()
+            subgroup_df.loc[
+                subgroup_df[budget_unit] < subgroup_min_runtime, "best_performance"
+            ] = np.nan
+            subgroup_df.loc[
+                subgroup_df[budget_unit] > subgroup_max_runtime, "best_performance"
+            ] = np.nan
             discretized_slices.append(subgroup_df)
     df_discretized_slices = pd.concat(discretized_slices, ignore_index=True)
     df_discretized_slices["observation_fill_rate"] = df_discretized_slices.groupby(
-        entity_columns + [runtime_column]
+        entity_columns + [budget_unit]
     )["best_performance"].transform(lambda x: (x.notna().sum()) / len(x))
     df_discretized_slices = df_discretized_slices[
         df_discretized_slices["observation_fill_rate"] == 1
@@ -491,7 +498,7 @@ def process_performance_records(
         discretized_benchmark_data_time = time_discretize_benchmark_data(
             data=raw_benchmark_data,
             entity_columns=alignment_columns,
-            runtime_column=budget_unit,
+            budget_unit=budget_unit,
             performance_column=performance_column,
         )
 

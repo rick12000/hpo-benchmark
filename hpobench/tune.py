@@ -2,14 +2,14 @@ import pandas as pd
 import random
 import optuna
 from datetime import datetime, timedelta
-from config import TunerConfig, IntRange, FloatRange, CategoricalRange
+from hpobench.config import TunerConfig, IntRange, FloatRange, CategoricalRange
 from typing import Union, Optional
 from optuna.samplers._base import BaseSampler
 from skopt import forest_minimize, gbrt_minimize, gp_minimize
 from skopt.space import Real, Integer as SKInteger, Categorical as SKCategorical
 from confopt.tuning import ObjectiveConformalSearcher
 from confopt.tracking import Trial
-from generate import ObjectiveMetricGenerator
+from hpobench.generate import ObjectiveMetricGenerator
 from confopt.estimation import (
     MultiFitQuantileConformalSearcher,
     SingleFitQuantileConformalSearcher,

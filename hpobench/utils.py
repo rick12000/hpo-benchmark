@@ -1,5 +1,5 @@
 import ast
-from config import IntRange, CategoricalRange, FloatRange
+from hpobench.config import IntRange, CategoricalRange, FloatRange
 import random
 from typing import Optional, Union
 

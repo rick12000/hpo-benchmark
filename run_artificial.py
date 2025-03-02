@@ -1,12 +1,12 @@
 # %%
 import pandas as pd
 import numpy as np
-from tune import tune
+from hpobench.tune import tune
 from datetime import datetime
 import os
 import random
 import time
-from config import (
+from hpobench.config import (
     BLACK_BOX_IDS,
     JAHS201_IDS,
     FULL_TUNING_CONFIGURATIONS,
@@ -18,17 +18,21 @@ from config import (
     TIMEOUT,
     OPEN_ML_IDS,
 )
-from utils import generate_hyperparameter_combinations
-from prepare import setup_lcbench_configs, setup_blackbox_configs, setup_jahs201_configs
+from hpobench.utils import generate_hyperparameter_combinations
+from hpobench.prepare import (
+    setup_lcbench_configs,
+    setup_blackbox_configs,
+    setup_jahs201_configs,
+)
 import logging
 import optuna
-from plot import plot_benchmark_data
-from process import (
+from hpobench.plot import plot_benchmark_data
+from hpobench.process import (
     aggregate_benchmark_data,
     process_performance_records,
     friedman_test_runner,
 )
-from generate import ObjectiveMetricGenerator
+from hpobench.generate import ObjectiveMetricGenerator
 
 os.environ["SYNETUNE_FOLDER"] = "cache/syne-tune"
 
