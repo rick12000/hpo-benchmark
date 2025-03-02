@@ -51,11 +51,11 @@ N_TRIALS = 20
 
 
 @pytest.mark.slow
+@pytest.mark.parametrize("sampler", ["tpe", "random", "cmaes"])
 def test_optuna_tune_reproducibility(
-    small_param_space, performance_generator, warm_start_configs
+    small_param_space, performance_generator, warm_start_configs, sampler
 ):
     """Test that optuna_tune produces the same results when called with the same random seed."""
-    sampler = "tpe"  # Use string literal instead of TPESampler() instance
     random_state = 42
 
     # First run
@@ -183,11 +183,11 @@ def test_confopt_tune_reproducibility(
 
 
 @pytest.mark.slow
+@pytest.mark.parametrize("sampler", ["gbrt", "gp", "forest"])
 def test_skopt_tune_reproducibility(
-    small_param_space, performance_generator, warm_start_configs
+    small_param_space, performance_generator, warm_start_configs, sampler
 ):
     """Test that skopt_tune produces the same results when called with the same random seed."""
-    sampler = "gbrt"  # Use GBRT as the sampler
     random_state = 42
 
     # First run
