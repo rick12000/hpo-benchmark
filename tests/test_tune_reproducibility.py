@@ -2,7 +2,13 @@ import pytest
 from hpobench.generate import BlackBoxGenerator
 from hpobench.config import FloatRange
 from hpobench.tune import optuna_tune, confopt_tune, skopt_tune
-from confopt.estimation import LocallyWeightedConformalSearcher, UCBSampler
+from confopt.estimation import (
+    LocallyWeightedConformalSearcher,
+    SingleFitQuantileConformalSearcher,
+    MultiFitQuantileConformalSearcher,
+    UCBSampler,
+    ThompsonSampler,
+)
 
 
 @pytest.fixture
@@ -22,8 +28,19 @@ def performance_generator():
 
 @pytest.fixture
 def warm_start_configs(performance_generator):
-    """Create a small set of warm start configurations for testing with actual performance values."""
-    configs = [{"x": 0.0, "y": 0.0}, {"x": 1.0, "y": 1.0}]
+    """Create a set of warm start configurations for testing with actual performance values."""
+    configs = [
+        {"x": 0.0, "y": 0.0},
+        {"x": 1.0, "y": 1.0},
+        {"x": 10.0, "y": 20.0},
+        {"x": 30.0, "y": 40.0},
+        {"x": 50.0, "y": 60.0},
+        {"x": 70.0, "y": 80.0},
+        {"x": 90.0, "y": 100.0},
+        {"x": 75.0, "y": 25.0},
+        {"x": 25.0, "y": 75.0},
+        {"x": 45.0, "y": 55.0},
+    ]
 
     # Get actual performances from the generator instead of hardcoding
     return [(config, performance_generator.predict(config)) for config in configs]
@@ -71,15 +88,71 @@ def test_optuna_tune_reproducibility(
 
 
 @pytest.mark.slow
+@pytest.mark.parametrize(
+    "estimator_class,estimator_params,sampler_class,sampler_params",
+    [
+        # LocallyWeightedConformalSearcher with different samplers
+        (
+            LocallyWeightedConformalSearcher,
+            {
+                "point_estimator_architecture": "knn",
+                "variance_estimator_architecture": "knn",
+            },
+            UCBSampler,
+            {"interval_width": 0.9, "adapter_framework": None},
+        ),
+        (
+            LocallyWeightedConformalSearcher,
+            {
+                "point_estimator_architecture": "gbm",
+                "variance_estimator_architecture": "gbm",
+            },
+            ThompsonSampler,
+            {"n_quantiles": 4, "enable_optimistic_sampling": False},
+        ),
+        # SingleFitQuantileConformalSearcher with different samplers
+        (
+            SingleFitQuantileConformalSearcher,
+            {"quantile_estimator_architecture": "qknn"},
+            UCBSampler,
+            {"interval_width": 0.9, "adapter_framework": None},
+        ),
+        (
+            SingleFitQuantileConformalSearcher,
+            {"quantile_estimator_architecture": "qrf"},
+            ThompsonSampler,
+            {"n_quantiles": 10, "enable_optimistic_sampling": True},
+        ),
+        # MultiFitQuantileConformalSearcher with different samplers
+        (
+            MultiFitQuantileConformalSearcher,
+            {"quantile_estimator_architecture": "qgbm"},
+            UCBSampler,
+            {"interval_width": 0.9, "adapter_framework": None},
+        ),
+        (
+            MultiFitQuantileConformalSearcher,
+            {"quantile_estimator_architecture": "qgbm"},
+            ThompsonSampler,
+            {"n_quantiles": 4, "enable_optimistic_sampling": False},
+        ),
+    ],
+)
 def test_confopt_tune_reproducibility(
-    small_param_space, performance_generator, warm_start_configs
+    small_param_space,
+    performance_generator,
+    warm_start_configs,
+    estimator_class,
+    estimator_params,
+    sampler_class,
+    sampler_params,
 ):
     """Test that confopt_tune produces the same results when called with the same random seed."""
-    sampler = LocallyWeightedConformalSearcher(
-        point_estimator_architecture="knn",
-        variance_estimator_architecture="knn",
-        sampler=UCBSampler(interval_width=0.9, adapter_framework=None),
-    )
+    # Create the sampler instance with the given parameters
+    internal_sampler = sampler_class(**sampler_params)
+    estimator_params["sampler"] = internal_sampler
+    sampler = estimator_class(**estimator_params)
+
     random_state = 42
 
     # First run
@@ -149,57 +222,3 @@ def test_skopt_tune_reproducibility(
                 result1.iloc[i]["configurations"][key]
                 == result2.iloc[i]["configurations"][key]
             )
-
-
-# @pytest.mark.slow
-# @pytest.mark.parametrize("tuner_type, sampler_type", [
-#     # ("skopt", "gbrt"),
-#     ("confopt", "qknn"),
-# ])
-# def test_main_tune_reproducibility(tuner_type, sampler_type, small_param_space, performance_generator, warm_start_configs):
-#     """Test that the main tune function produces the same results when called with the same random seed."""
-#     if tuner_type == "confopt":
-#         sampler = SingleFitQuantileConformalSearcher(
-#             quantile_estimator_architecture=sampler_type,
-#             sampler=UCBSampler(interval_width=0.9, adapter_framework=None),
-#         )
-#     else:
-#         sampler = sampler_type
-
-#     tuner_config = TunerConfig(
-#         tuner=tuner_type,
-#         sampler=sampler,
-#         config_identifier=f"{tuner_type}_{sampler_type}_TEST"
-#     )
-
-#     random_state = 42
-
-#     # First run
-#     result1, best_value1 = tune(
-#         performance_generator=performance_generator,
-#         tuner_config=tuner_config,
-#         params=small_param_space,
-#         warm_start_configs=warm_start_configs,
-#         random_state=random_state,
-#         n_trials=N_TRIALS,
-#     )
-
-#     # Second run
-#     result2, best_value2 = tune(
-#         performance_generator=performance_generator,
-#         tuner_config=tuner_config,
-#         params=small_param_space,
-#         warm_start_configs=warm_start_configs,
-#         random_state=random_state,
-#         n_trials=N_TRIALS,
-#     )
-
-#     # Check that best values match
-#     assert best_value1 == best_value2
-
-#     # Check that performance values match
-#     for i in range(len(result1)):
-#         assert result1.iloc[i]["performance"] == result2.iloc[i]["performance"]
-#         # Check configurations match
-#         for key in result1.iloc[i]["configurations"]:
-#             assert result1.iloc[i]["configurations"][key] == result2.iloc[i]["configurations"][key]
