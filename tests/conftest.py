@@ -1,6 +1,8 @@
 import pytest
 import pandas as pd
 import numpy as np
+from hpobench.generate import BlackBoxGenerator
+from hpobench.config import FloatRange
 
 
 @pytest.fixture
@@ -198,3 +200,38 @@ def dummy_yahpo_generator():
     return {
         "dataset": "167168",
     }
+
+
+@pytest.fixture
+def small_param_space():
+    """Create a small parameter search space for testing."""
+    return {
+        "x": FloatRange(type="float", lower=0, upper=100.0),
+        "y": FloatRange(type="float", lower=0, upper=100.0),
+    }
+
+
+@pytest.fixture
+def performance_generator():
+    """Create a BlackBoxGenerator with rastrigin for testing."""
+    return BlackBoxGenerator(generator="rastrigin")
+
+
+@pytest.fixture
+def warm_start_configs(performance_generator):
+    """Create a set of warm start configurations for testing with actual performance values."""
+    configs = [
+        {"x": 0.0, "y": 0.0},
+        {"x": 1.0, "y": 1.0},
+        {"x": 10.0, "y": 20.0},
+        {"x": 30.0, "y": 40.0},
+        {"x": 50.0, "y": 60.0},
+        {"x": 70.0, "y": 80.0},
+        {"x": 90.0, "y": 100.0},
+        {"x": 75.0, "y": 25.0},
+        {"x": 25.0, "y": 75.0},
+        {"x": 45.0, "y": 55.0},
+    ]
+
+    # Get actual performances from the generator instead of hardcoding
+    return [(config, performance_generator.predict(config)) for config in configs]

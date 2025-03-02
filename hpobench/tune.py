@@ -114,7 +114,7 @@ def optuna_tune(
         }
         for i, t in enumerate(study.trials)
     ]
-    return pd.DataFrame(history), study.best_value
+    return pd.DataFrame(history)  # Remove best_value from return value
 
 
 def confopt_artificial_objective_function(
@@ -198,7 +198,7 @@ def confopt_tune(
         }
         for i, trial in enumerate(searcher.study.trials)
     ]
-    return pd.DataFrame(history), None
+    return pd.DataFrame(history)  # Remove None from return value
 
 
 def build_skopt_space(params: dict[str, Union[IntRange, FloatRange, CategoricalRange]]):
@@ -269,7 +269,7 @@ def skopt_tune(
             zip(result.func_vals, result.x_iters, runtimes)
         )
     ]
-    return pd.DataFrame(history), result.fun
+    return pd.DataFrame(history)  # Remove best_value from return value
 
 
 def tune(
@@ -282,7 +282,7 @@ def tune(
     timeout: Optional[float] = None,
 ):
     if tuner_config.tuner == "optuna":
-        history, best_value = optuna_tune(
+        history = optuna_tune(
             params=params,
             performance_generator=performance_generator,
             sampler=tuner_config.sampler,
@@ -292,7 +292,7 @@ def tune(
             timeout=timeout,
         )
     elif tuner_config.tuner == "confopt":
-        history, best_value = confopt_tune(
+        history = confopt_tune(
             params=params,
             performance_generator=performance_generator,
             sampler=tuner_config.sampler,
@@ -302,7 +302,7 @@ def tune(
             timeout=timeout,
         )
     elif tuner_config.tuner == "skopt":
-        history, best_value = skopt_tune(
+        history = skopt_tune(
             params=params,
             performance_generator=performance_generator,
             sampler=tuner_config.sampler,
@@ -313,4 +313,4 @@ def tune(
         )
     else:
         raise ValueError(f"Unknown tuner: {tuner_config.tuner}")
-    return history, best_value
+    return history  # Remove best_value from return value

@@ -177,7 +177,7 @@ for experiment_config in experiment_configs:
         for repetition in range(n_repetitions):
             logger.info(f"Repetition: {repetition}")
             tune_start = datetime.now()
-            historical_performance, best_value = tune(
+            historical_performance = tune(
                 performance_generator=experiment_config.generator,
                 tuner_config=tuner,
                 n_trials=experiment_config.n_trials,

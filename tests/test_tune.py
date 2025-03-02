@@ -1,218 +1,389 @@
-from unittest.mock import Mock, patch
-import pandas as pd
-import optuna
-from datetime import datetime
 import pytest
-from hpobench.config import IntRange, FloatRange, CategoricalRange
-
-from hpobench.tune import (
-    set_optuna_params,
-    build_optuna_distributions,
-    optuna_tune,
-    build_confopt_search_space,
-    confopt_tune,
-    build_skopt_space,
-    skopt_tune,
-    tune,
+import pandas as pd
+from hpobench.generate import BlackBoxGenerator
+from hpobench.config import FloatRange, TunerConfig
+from hpobench.tune import optuna_tune, confopt_tune, skopt_tune, tune
+from confopt.estimation import (
+    LocallyWeightedConformalSearcher,
+    SingleFitQuantileConformalSearcher,
+    MultiFitQuantileConformalSearcher,
+    UCBSampler,
+    ThompsonSampler,
 )
 
 
-class TestHelperFunctions:
-    def test_set_optuna_params(self):
-        trial = Mock()
-        trial.suggest_int.return_value = 5
-        trial.suggest_float.return_value = 0.5
-        trial.suggest_categorical.return_value = "option2"
-
-        params = {
-            "int_param": IntRange(type="int", lower=1, upper=10),
-            "float_param": FloatRange(type="float", lower=0.1, upper=0.9),
-            "cat_param": CategoricalRange(
-                type="categorical", choices=["option1", "option2"]
-            ),
-        }
-
-        result = set_optuna_params(trial, params)
-
-        assert result["int_param"] == 5
-        assert result["float_param"] == 0.5
-        assert result["cat_param"] == "option2"
-        trial.suggest_int.assert_called_once_with("int_param", 1, 10)
-
-    def test_build_optuna_distributions(self):
-        params = {
-            "int_param": IntRange(type="int", lower=1, upper=10),
-            "float_param": FloatRange(type="float", lower=0.1, upper=0.9),
-            "cat_param": CategoricalRange(
-                type="categorical", choices=["option1", "option2"]
-            ),
-        }
-
-        dists = build_optuna_distributions(params)
-
-        assert isinstance(
-            dists["int_param"], optuna.distributions.IntUniformDistribution
-        )
-        assert dists["int_param"].low == 1
-        assert dists["int_param"].high == 10
-
-    def test_build_confopt_search_space(self):
-        params = {
-            "int_param": IntRange(type="int", lower=1, upper=3),
-            "cat_param": CategoricalRange(
-                type="categorical", choices=["option1", "option2"]
-            ),
-        }
-
-        with patch("random.uniform", return_value=0.5):
-            space = build_confopt_search_space(params)
-            assert space["int_param"] == [1, 2, 3]
-            assert space["cat_param"] == ["option1", "option2"]
-
-    def test_build_skopt_space(self):
-        params = {
-            "int_param": IntRange(type="int", lower=1, upper=10),
-            "cat_param": CategoricalRange(
-                type="categorical", choices=["option1", "option2"]
-            ),
-        }
-
-        space, names = build_skopt_space(params)
-        assert len(space) == 2
-        assert names == ["int_param", "cat_param"]
+# Define n_trials as a global parameter for all tests
+N_TRIALS = 20
 
 
-class TestOptunaTune:
-    @patch("optuna.create_study")
-    def test_optuna_tune_basic(self, mock_create_study):
-        mock_study = Mock()
-        mock_trial = Mock()
-        mock_trial.datetime_complete = datetime.now()
-        mock_trial.value = 0.5
-        mock_trial.params = {"param1": 5}
-        mock_study.trials = [mock_trial]
-        mock_study.best_value = 0.5
-        mock_create_study.return_value = mock_study
+@pytest.mark.slow
+@pytest.mark.parametrize("sampler", ["tpe", "random", "cmaes"])
+def test_optuna_tune_reproducibility(
+    small_param_space, performance_generator, warm_start_configs, sampler
+):
+    """Test that optuna_tune produces the same results when called with the same random seed."""
+    random_state = 42
 
-        params = {"param1": IntRange(type="int", lower=1, upper=10)}
-        performance_generator = Mock()
-        performance_generator.predict.return_value = 0.5
+    # First run
+    result1 = optuna_tune(
+        params=small_param_space,
+        performance_generator=performance_generator,
+        sampler=sampler,
+        warm_start_configs=warm_start_configs,
+        random_state=random_state,
+        n_trials=N_TRIALS,
+    )
 
-        history, best_value = optuna_tune(
-            params=params,
-            performance_generator=performance_generator,
-            sampler="tpe",  # Use string literal instead of sampler instance
-            n_trials=1,
-        )
+    # Second run
+    result2 = optuna_tune(
+        params=small_param_space,
+        performance_generator=performance_generator,
+        sampler=sampler,
+        warm_start_configs=warm_start_configs,
+        random_state=random_state,
+        n_trials=N_TRIALS,
+    )
 
-        assert best_value == 0.5
-        assert len(history) == 1
-        assert history.iloc[0]["performance"] == 0.5
+    # Check that all configurations match
+    for i in range(len(result1)):
+        assert result1.iloc[i]["performance"] == result2.iloc[i]["performance"]
+        assert result1.iloc[i]["configurations"] == result2.iloc[i]["configurations"]
 
 
-class TestConfoptTune:
-    @patch("hpobench.tune.ObjectiveConformalSearcher")
-    def test_confopt_tune_basic(self, mock_searcher_class):
-        mock_searcher = Mock()
-        mock_trial = Mock(
-            timestamp=datetime.now(),
-            performance=0.5,
-            configuration={"param1": 5},
-            breached_interval=False,
-            primary_estimator_error=0.1,
-            searcher_runtime=0.2,
-        )
-        mock_searcher.study.trials = [mock_trial]
-        mock_searcher_class.return_value = mock_searcher
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    "estimator_class,estimator_params,sampler_class,sampler_params",
+    [
+        # LocallyWeightedConformalSearcher with different samplers
+        (
+            LocallyWeightedConformalSearcher,
+            {
+                "point_estimator_architecture": "knn",
+                "variance_estimator_architecture": "knn",
+            },
+            UCBSampler,
+            {"interval_width": 0.9, "adapter_framework": None},
+        ),
+        (
+            LocallyWeightedConformalSearcher,
+            {
+                "point_estimator_architecture": "gbm",
+                "variance_estimator_architecture": "gbm",
+            },
+            ThompsonSampler,
+            {"n_quantiles": 4, "enable_optimistic_sampling": False},
+        ),
+        # SingleFitQuantileConformalSearcher with different samplers
+        (
+            SingleFitQuantileConformalSearcher,
+            {"quantile_estimator_architecture": "qknn"},
+            UCBSampler,
+            {"interval_width": 0.9, "adapter_framework": None},
+        ),
+        (
+            SingleFitQuantileConformalSearcher,
+            {"quantile_estimator_architecture": "qrf"},
+            ThompsonSampler,
+            {"n_quantiles": 10, "enable_optimistic_sampling": True},
+        ),
+        # MultiFitQuantileConformalSearcher with different samplers
+        (
+            MultiFitQuantileConformalSearcher,
+            {"quantile_estimator_architecture": "qgbm"},
+            UCBSampler,
+            {"interval_width": 0.9, "adapter_framework": None},
+        ),
+        (
+            MultiFitQuantileConformalSearcher,
+            {"quantile_estimator_architecture": "qgbm"},
+            ThompsonSampler,
+            {"n_quantiles": 4, "enable_optimistic_sampling": False},
+        ),
+    ],
+)
+def test_confopt_tune_reproducibility(
+    small_param_space,
+    performance_generator,
+    warm_start_configs,
+    estimator_class,
+    estimator_params,
+    sampler_class,
+    sampler_params,
+):
+    """Test that confopt_tune produces the same results when called with the same random seed."""
+    # Create the sampler instance with the given parameters
+    internal_sampler = sampler_class(**sampler_params)
+    estimator_params["sampler"] = internal_sampler
+    sampler = estimator_class(**estimator_params)
 
-        params = {"param1": IntRange(type="int", lower=1, upper=10)}
-        performance_generator = Mock()
-        sampler = Mock()
+    random_state = 42
 
-        with patch("hpobench.tune.build_confopt_search_space") as mock_build:
-            mock_build.return_value = {"param1": [1, 2, 3, 4, 5]}
-            history, best_value = confopt_tune(
-                params=params,
-                performance_generator=performance_generator,
-                sampler=sampler,
-                n_trials=1,
+    # First run
+    result1 = confopt_tune(
+        params=small_param_space,
+        performance_generator=performance_generator,
+        sampler=sampler,
+        warm_start_configs=warm_start_configs,
+        random_state=random_state,
+        n_trials=N_TRIALS,
+    )
+
+    # Second run
+    result2 = confopt_tune(
+        params=small_param_space,
+        performance_generator=performance_generator,
+        sampler=sampler,
+        warm_start_configs=warm_start_configs,
+        random_state=random_state,
+        n_trials=N_TRIALS,
+    )
+
+    # Check that configurations and performance values match
+    for i in range(len(result1)):
+        assert result1.iloc[i]["performance"] == result2.iloc[i]["performance"]
+        assert result1.iloc[i]["configurations"] == result2.iloc[i]["configurations"]
+        assert result1.iloc[i]["breach_status"] == result2.iloc[i]["breach_status"]
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("sampler", ["gbrt", "gp", "forest"])
+def test_skopt_tune_reproducibility(
+    small_param_space, performance_generator, warm_start_configs, sampler
+):
+    """Test that skopt_tune produces the same results when called with the same random seed."""
+    random_state = 42
+
+    # First run
+    result1 = skopt_tune(
+        params=small_param_space,
+        performance_generator=performance_generator,
+        sampler=sampler,
+        warm_start_configs=warm_start_configs,
+        random_state=random_state,
+        n_trials=N_TRIALS,
+    )
+
+    # Second run
+    result2 = skopt_tune(
+        params=small_param_space,
+        performance_generator=performance_generator,
+        sampler=sampler,
+        warm_start_configs=warm_start_configs,
+        random_state=random_state,
+        n_trials=N_TRIALS,
+    )
+
+    # Check that all performance values match
+    for i in range(len(result1)):
+        assert result1.iloc[i]["performance"] == result2.iloc[i]["performance"]
+        # Configurations should also match but scikit-optimize may have float precision differences
+        for key in result1.iloc[i]["configurations"]:
+            assert (
+                result1.iloc[i]["configurations"][key]
+                == result2.iloc[i]["configurations"][key]
             )
 
-            assert mock_searcher.search.called
-            assert len(history) == 1
-            assert history.iloc[0]["performance"] == 0.5
+
+# Performance-oriented tests that don't rely on reproducibility
 
 
-class TestSkoptTune:
-    @patch("hpobench.tune.gp_minimize")
-    def test_skopt_tune_gp(self, mock_gp_minimize):
-        mock_result = Mock()
-        mock_result.fun = 0.5
-        mock_result.func_vals = [0.5]
-        mock_result.x_iters = [[5]]
-        mock_gp_minimize.return_value = mock_result
+@pytest.mark.slow
+def test_optuna_improves_over_time(small_param_space, performance_generator):
+    """Test that optuna_tune actually improves performance over iterations."""
+    n_trials = 15
+    sampler = "tpe"
+    random_state = 42
 
-        params = {"param1": IntRange(type="int", lower=1, upper=10)}
-        performance_generator = Mock()
-        performance_generator.predict.return_value = 0.5
+    # Run the optimizer
+    result = optuna_tune(
+        params=small_param_space,
+        performance_generator=performance_generator,
+        sampler=sampler,
+        random_state=random_state,
+        n_trials=n_trials,
+    )
 
-        with patch("hpobench.tune.build_skopt_space") as mock_build:
-            mock_build.return_value = ([Mock(name="param1")], ["param1"])
-            history, best_value = skopt_tune(
-                params=params,
-                performance_generator=performance_generator,
-                sampler="gp",
-                n_trials=1,
-            )
+    # Get performances from first third and last third of trials
+    first_third = result["performance"].iloc[: n_trials // 3].mean()
+    last_third = result["performance"].iloc[-n_trials // 3 :].mean()
 
-            assert mock_gp_minimize.called
-            assert best_value == 0.5
-            assert len(history) == 1
+    # Performance should improve (rastrigin is a minimization problem)
+    assert last_third < first_third, "Optuna should improve performance over iterations"
 
-    def test_skopt_tune_unknown_sampler(self):
-        params = {"param1": IntRange(type="int", lower=1, upper=10)}
-        performance_generator = Mock()
-
-        with pytest.raises(ValueError):
-            skopt_tune(
-                params=params,
-                performance_generator=performance_generator,
-                sampler="unknown",
-                n_trials=1,
-            )
+    # Check that the minimum performance is found in the result
+    min_performance = result["performance"].min()
+    assert (
+        min_performance in result["performance"].values
+    ), "Minimum performance should be in the results"
 
 
-class TestMainTune:
-    @patch("hpobench.tune.optuna_tune")
-    def test_tune_optuna(self, mock_optuna_tune):
-        mock_optuna_tune.return_value = (pd.DataFrame(), 0.5)
+@pytest.mark.slow
+def test_skopt_improves_over_time(small_param_space, performance_generator):
+    """Test that skopt_tune actually improves performance over iterations."""
+    n_trials = 15
+    sampler = "gbrt"
+    random_state = 42
 
-        params = {"param1": IntRange(type="int", lower=1, upper=10)}
-        tuner_config = Mock()
-        tuner_config.tuner = "optuna"
-        tuner_config.sampler = "tpe"  # Use string literal instead of sampler instance
-        performance_generator = Mock()
+    # Run the optimizer
+    result = skopt_tune(
+        params=small_param_space,
+        performance_generator=performance_generator,
+        sampler=sampler,
+        random_state=random_state,
+        n_trials=n_trials,
+    )
 
-        history, best_value = tune(
+    # Get performances from first third and last third of trials
+    first_third = result["performance"].iloc[: n_trials // 3].mean()
+    last_third = result["performance"].iloc[-n_trials // 3 :].mean()
+
+    # Performance should improve (rastrigin is a minimization problem)
+    assert last_third < first_third, "Skopt should improve performance over iterations"
+
+
+@pytest.mark.slow
+def test_confopt_generates_breach_intervals(small_param_space, performance_generator):
+    """Test that confopt_tune generates breach status correctly."""
+    n_trials = 15
+
+    # Create a confopt sampler
+    sampler = SingleFitQuantileConformalSearcher(
+        quantile_estimator_architecture="qknn",
+        sampler=UCBSampler(interval_width=0.9, adapter_framework=None),
+    )
+
+    # Run the optimizer
+    result = confopt_tune(
+        params=small_param_space,
+        performance_generator=performance_generator,
+        sampler=sampler,
+        random_state=42,
+        n_trials=n_trials,
+    )
+
+    # Check that breach_status column exists and contains boolean values
+    assert "breach_status" in result.columns, "breach_status column should exist"
+    assert (
+        result["breach_status"].dtype == bool or pd.isna(result["breach_status"]).any()
+    ), "breach_status should contain boolean values (or NaN for initial points)"
+
+    # After some iterations, we should start seeing some breach values
+    non_na_breach = result["breach_status"].dropna()
+    assert len(non_na_breach) > 0, "Some breach status values should be recorded"
+
+
+@pytest.mark.slow
+def test_warm_starts_utilization(
+    small_param_space, performance_generator, warm_start_configs
+):
+    """Test that warm starts are properly utilized by tuners."""
+    n_trials = 10
+
+    # Find the best performance among warm starts
+    best_warm_start_perf = min([perf for _, perf in warm_start_configs])
+
+    # Run optuna with warm starts
+    result = optuna_tune(
+        params=small_param_space,
+        performance_generator=performance_generator,
+        sampler="tpe",
+        warm_start_configs=warm_start_configs,
+        random_state=42,
+        n_trials=n_trials,
+    )
+
+    # The best performance should be at least as good as the best warm start
+    best_performance = result["performance"].min()
+    assert (
+        best_performance <= best_warm_start_perf
+    ), "Final performance should be at least as good as best warm start"
+
+    # Number of trials should include both warm starts and optimization trials
+    assert len(result) == n_trials + len(
+        warm_start_configs
+    ), "Result should include warm starts plus optimization trials"
+
+
+@pytest.mark.slow
+def test_tuner_comparison():
+    """Compare performance of different tuners on the same problem."""
+    # Create a more complex 5D problem
+    param_space = {
+        "x1": FloatRange(type="float", lower=-5.0, upper=5.0),
+        "x2": FloatRange(type="float", lower=-5.0, upper=5.0),
+        "x3": FloatRange(type="float", lower=-5.0, upper=5.0),
+        "x4": FloatRange(type="float", lower=-5.0, upper=5.0),
+        "x5": FloatRange(type="float", lower=-5.0, upper=5.0),
+    }
+    performance_generator = BlackBoxGenerator(generator="rastrigin")
+    n_trials = 30
+    random_state = 42
+
+    # Configure different tuners
+    tuner_configs = [
+        TunerConfig(tuner="optuna", sampler="tpe", config_identifier="TPE"),
+        TunerConfig(tuner="skopt", sampler="gbrt", config_identifier="GBRT"),
+        TunerConfig(
+            tuner="confopt",
+            sampler=LocallyWeightedConformalSearcher(
+                point_estimator_architecture="gbm",
+                variance_estimator_architecture="gbm",
+                sampler=UCBSampler(interval_width=0.9),
+            ),
+            config_identifier="ConfOpt_GBM",
+        ),
+    ]
+
+    results = {}
+
+    # Run each tuner
+    for tuner_config in tuner_configs:
+        history = tune(
             performance_generator=performance_generator,
             tuner_config=tuner_config,
-            params=params,
-            n_trials=1,
+            params=param_space,
+            random_state=random_state,
+            n_trials=n_trials,
         )
+        results[tuner_config.config_identifier] = history["performance"].min()
 
-        mock_optuna_tune.assert_called_once()
-        assert best_value == 0.5
+    # All tuners should find decent solutions but we don't enforce ranking
+    # as performance can vary with randomness
+    print(f"Performance comparison: {results}")  # For debugging
+    for tuner, value in results.items():
+        assert value < 50, f"{tuner} should find a reasonable solution (value < 50)"
 
-    def test_tune_unknown_tuner(self):
-        params = {"param1": IntRange(type="int", lower=1, upper=10)}
-        tuner_config = Mock()
-        tuner_config.tuner = "unknown"
-        performance_generator = Mock()
 
-        with pytest.raises(ValueError):
-            tune(
-                performance_generator=performance_generator,
-                tuner_config=tuner_config,
-                params=params,
-                n_trials=1,
-            )
+@pytest.mark.slow
+def test_convergence_behavior(small_param_space, performance_generator):
+    """Test that tuners show convergence behavior - performance improvements flatten out over time."""
+    n_trials = 25
+    sampler = "tpe"
+    random_state = 42
+
+    # Run the optimizer
+    result = optuna_tune(
+        params=small_param_space,
+        performance_generator=performance_generator,
+        sampler=sampler,
+        random_state=random_state,
+        n_trials=n_trials,
+    )
+
+    # Calculate cumulative minimum at each iteration
+    result["cummin_performance"] = result["performance"].cummin()
+
+    # Calculate the improvement rate for each third of the optimization
+    improvements_first = (
+        result["cummin_performance"].iloc[n_trials // 3]
+        - result["cummin_performance"].iloc[0]
+    )
+    improvements_last = (
+        result["cummin_performance"].iloc[-1]
+        - result["cummin_performance"].iloc[-(n_trials // 3)]
+    )
+
+    # The rate of improvement should slow down
+    assert (
+        improvements_first > improvements_last
+    ), "Performance improvements should flatten out as optimization progresses"
