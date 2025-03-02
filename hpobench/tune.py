@@ -3,8 +3,8 @@ import random
 import optuna
 from datetime import datetime, timedelta
 from hpobench.config import TunerConfig, IntRange, FloatRange, CategoricalRange
-from typing import Union, Optional
-from optuna.samplers._base import BaseSampler
+from typing import Union, Optional, Literal
+from optuna.samplers import TPESampler, RandomSampler, CmaEsSampler
 from skopt import forest_minimize, gbrt_minimize, gp_minimize
 from skopt.space import Real, Integer as SKInteger, Categorical as SKCategorical
 from confopt.tuning import ObjectiveConformalSearcher
@@ -15,6 +15,7 @@ from confopt.estimation import (
     SingleFitQuantileConformalSearcher,
     LocallyWeightedConformalSearcher,
 )
+from copy import deepcopy
 
 
 def set_optuna_params(
@@ -66,18 +67,23 @@ def build_optuna_distributions(
 def optuna_tune(
     params: dict[str, Union[IntRange, FloatRange, CategoricalRange]],
     performance_generator: ObjectiveMetricGenerator,
-    sampler: BaseSampler,
+    sampler: Union[str, Literal["tpe", "random", "cmaes"]],
     warm_start_configs: Optional[list[tuple[dict, float]]] = None,
     random_state: Optional[int] = None,
     n_trials: Optional[int] = None,
     timeout: Optional[float] = None,
 ):
-    if random_state is not None:
-        sampler.seed = random_state
-    if hasattr(sampler, "n_startup_trials"):
-        sampler.n_startup_trials = 0
+    # Initialize appropriate sampler based on string input
+    if sampler == "tpe":
+        initialized_sampler = TPESampler(seed=random_state, n_startup_trials=0)
+    elif sampler == "random":
+        initialized_sampler = RandomSampler(seed=random_state)
+    elif sampler == "cmaes":
+        initialized_sampler = CmaEsSampler(seed=random_state, n_startup_trials=0)
+    else:
+        raise ValueError(f"Unknown optuna sampler: {sampler}")
 
-    study = optuna.create_study(direction="minimize", sampler=sampler)
+    study = optuna.create_study(direction="minimize", sampler=initialized_sampler)
     distributions = build_optuna_distributions(params)
     if warm_start_configs:
         for config, loss in warm_start_configs:
@@ -171,7 +177,7 @@ def confopt_tune(
             )
 
     searcher.search(
-        searcher=sampler,
+        searcher=deepcopy(sampler),
         runtime_budget=timeout,
         max_iter=n_trials,
         n_random_searches=0,

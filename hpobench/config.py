@@ -1,6 +1,5 @@
 from pydantic import BaseModel, ConfigDict, root_validator
 from typing import Union, Literal, Optional
-from optuna.samplers._base import BaseSampler
 from confopt.estimation import (
     MultiFitQuantileConformalSearcher,
     SingleFitQuantileConformalSearcher,
@@ -8,7 +7,6 @@ from confopt.estimation import (
     UCBSampler,
     ThompsonSampler,
 )
-from optuna.samplers import TPESampler  # , RandomSampler, GPSampler, CmaEsSampler
 
 from hpobench.generate import ObjectiveMetricGenerator
 
@@ -24,7 +22,7 @@ class TunerConfig(BaseModel):
     tuner: Literal["confopt", "optuna", "skopt"]
     sampler: Union[
         str,
-        BaseSampler,
+        Literal["tpe", "random", "cmaes", "gbrt", "forest", "gp"],
         MultiFitQuantileConformalSearcher,
         SingleFitQuantileConformalSearcher,
         LocallyWeightedConformalSearcher,
@@ -147,18 +145,18 @@ FULL_TUNING_CONFIGURATIONS = [
     # ),
     TunerConfig(
         tuner="optuna",
-        sampler=TPESampler(),
+        sampler="tpe",
         config_identifier="TPE",
     ),
     # TunerConfig(
     #     tuner="optuna",
-    #     sampler=GPSampler(),
-    #     config_identifier="GP",
+    #     sampler="random",
+    #     config_identifier="RS",
     # ),
     # TunerConfig(
     #     tuner="optuna",
-    #     sampler=RandomSampler(),
-    #     config_identifier="RS",
+    #     sampler=GPSampler(),
+    #     config_identifier="GP",
     # ),
     TunerConfig(
         tuner="confopt",
@@ -247,7 +245,7 @@ DEV_TUNING_CONFIGURATIONS = [
     ),
     TunerConfig(
         tuner="optuna",
-        sampler=TPESampler(),
+        sampler="tpe",
         config_identifier="TPE",
     ),
     TunerConfig(
