@@ -109,6 +109,10 @@ random_state = 1234
 random.seed(random_state)
 np.random.seed(random_state)
 
+# Use a consistent base random state for all repetitions
+base_random_state = 1234
+random.seed(base_random_state)
+np.random.seed(base_random_state)
 
 if RUN_TYPE == "dev":
     tuning_configurations = DEV_TUNING_CONFIGURATIONS
@@ -157,34 +161,38 @@ for experiment_config in experiment_configs:
     dataset_name = experiment_config.dataset_identifier
     logger.info(f"Dataset: {dataset_name}")
 
-    warm_starts_per_repetition = []
-    for repetition in range(n_repetitions):
-        # Generate 10 hyperparameter combinations
-        hyperparameter_combinations = generate_hyperparameter_combinations(
-            params=experiment_config.search_space,
-            n_combinations=experiment_config.n_warm_starts,
-            random_state=repetition,
-        )
+    # Generate one set of warm starts to use across all repetitions and tuners
+    # for fair comparison
+    consistent_warm_starts = generate_hyperparameter_combinations(
+        params=experiment_config.search_space,
+        n_combinations=experiment_config.n_warm_starts,
+        random_state=base_random_state,
+    )
 
-        warm_starts = []
-        for combination in hyperparameter_combinations:
-            performance = experiment_config.generator.predict(combination)
-            warm_starts.append((combination, performance))
-        warm_starts_per_repetition.append(warm_starts)
+    # Create performance values for warm starts
+    warm_start_configs = []
+    for combination in consistent_warm_starts:
+        performance = experiment_config.generator.predict(combination)
+        warm_start_configs.append((combination, performance))
 
     for tuner in experiment_config.tuning_configurations:
         logger.info(f"Tuner: {tuner}")
         for repetition in range(n_repetitions):
             logger.info(f"Repetition: {repetition}")
             tune_start = datetime.now()
+
+            # Use a deterministic seed derived from the base random state and repetition
+            # This ensures different but consistent randomization across repetitions
+            repetition_seed = base_random_state + repetition
+
             historical_performance = tune(
                 performance_generator=experiment_config.generator,
                 tuner_config=tuner,
                 n_trials=experiment_config.n_trials,
                 timeout=experiment_config.timeout,
                 params=experiment_config.search_space,
-                warm_start_configs=warm_starts_per_repetition[repetition],
-                random_state=repetition,
+                warm_start_configs=warm_start_configs,  # Same warm starts for all tuners/repetitions
+                random_state=repetition_seed,
             )
 
             historical_performance = add_runtime(

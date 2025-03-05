@@ -11,10 +11,10 @@ from confopt.estimation import (
 from hpobench.generate import ObjectiveMetricGenerator
 
 
-N_REPETITIONS_PER_TUNER_CONFIG = 10
-N_TRIALS = 40
+N_REPETITIONS_PER_TUNER_CONFIG = 5
+N_TRIALS = 35
 TIMEOUT = None
-N_WARM_STARTS = 10
+N_WARM_STARTS = 15
 RUN_TYPE: Literal["dev", "full"] = "dev"
 
 
@@ -28,6 +28,7 @@ class TunerConfig(BaseModel):
         LocallyWeightedConformalSearcher,
     ]
     config_identifier: str
+    searcher_tuning_framework: Optional[str] = None
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -165,6 +166,7 @@ FULL_TUNING_CONFIGURATIONS = [
             sampler=UCBSampler(interval_width=0.9, adapter_framework=None),
         ),
         config_identifier="QGBM UCB c=1",
+        searcher_tuning_framework=None,
     ),
     TunerConfig(
         tuner="confopt",
@@ -173,6 +175,7 @@ FULL_TUNING_CONFIGURATIONS = [
             sampler=UCBSampler(interval_width=0.9, adapter_framework="ACI"),
         ),
         config_identifier="ACI-QGBM UCB c=1",
+        searcher_tuning_framework=None,
     ),
     # TunerConfig(
     #     tuner="confopt",
@@ -186,6 +189,7 @@ FULL_TUNING_CONFIGURATIONS = [
             sampler=UCBSampler(interval_width=0.9, adapter_framework=None),
         ),
         config_identifier="QRF UCB c=1",
+        searcher_tuning_framework=None,
     ),
     TunerConfig(
         tuner="confopt",
@@ -194,6 +198,7 @@ FULL_TUNING_CONFIGURATIONS = [
             sampler=ThompsonSampler(n_quantiles=10, enable_optimistic_sampling=True),
         ),
         config_identifier="QRF OBS",
+        searcher_tuning_framework=None,
     ),
     TunerConfig(
         tuner="confopt",
@@ -203,6 +208,7 @@ FULL_TUNING_CONFIGURATIONS = [
             sampler=ThompsonSampler(n_quantiles=4, enable_optimistic_sampling=False),
         ),
         config_identifier="GBM TS",
+        searcher_tuning_framework=None,
     ),
     TunerConfig(
         tuner="confopt",
@@ -211,6 +217,7 @@ FULL_TUNING_CONFIGURATIONS = [
             sampler=UCBSampler(c=5, interval_width=0.9, adapter_framework=None),
         ),
         config_identifier="QKNN UCB c=5",
+        searcher_tuning_framework=None,
     ),
     TunerConfig(
         tuner="confopt",
@@ -219,6 +226,7 @@ FULL_TUNING_CONFIGURATIONS = [
             sampler=UCBSampler(interval_width=0.9, adapter_framework=None),
         ),
         config_identifier="QKNN UCB c=1",
+        searcher_tuning_framework=None,
     ),
     TunerConfig(
         tuner="confopt",
@@ -228,6 +236,7 @@ FULL_TUNING_CONFIGURATIONS = [
             sampler=UCBSampler(c=5, interval_width=0.2, adapter_framework="ACI"),
         ),
         config_identifier="GBM UCB c=5",
+        searcher_tuning_framework=None,
     ),
     TunerConfig(
         tuner="skopt",
@@ -255,6 +264,7 @@ DEV_TUNING_CONFIGURATIONS = [
             sampler=ThompsonSampler(n_quantiles=4, enable_optimistic_sampling=False),
         ),
         config_identifier="QGBM TS",
+        searcher_tuning_framework=None,
     ),
     TunerConfig(
         tuner="confopt",
@@ -263,5 +273,6 @@ DEV_TUNING_CONFIGURATIONS = [
             sampler=UCBSampler(interval_width=0.9, adapter_framework=None),
         ),
         config_identifier="QKNN UCB c=1",
+        searcher_tuning_framework=None,
     ),
 ]

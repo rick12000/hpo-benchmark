@@ -127,15 +127,19 @@ def confopt_artificial_objective_function(
 
 
 def build_confopt_search_space(
-    params: dict[str, Union[IntRange, FloatRange, CategoricalRange]]
+    params: dict[str, Union[IntRange, FloatRange, CategoricalRange]],
+    random_state: Optional[int] = None,
 ):
     """Creates a search space mapping for confopt tuning."""
     space = {}
+    # Create a local random generator with the specified seed for reproducibility
+    local_random = random.Random(random_state)
+
     for name, p in params.items():
         if p.type == "int":
             space[name] = list(range(p.lower, p.upper + 1))
         elif p.type == "float":
-            space[name] = [random.uniform(p.lower, p.upper) for _ in range(1000)]
+            space[name] = [local_random.uniform(p.lower, p.upper) for _ in range(1000)]
         elif p.type == "categorical":
             space[name] = p.choices
         else:
@@ -155,9 +159,10 @@ def confopt_tune(
     random_state: Optional[int] = None,
     n_trials: Optional[int] = None,
     timeout: Optional[float] = None,
+    searcher_tuning_framework: Optional[str] = None,
 ):
     objective_fn = confopt_artificial_objective_function(performance_generator)
-    confopt_params = build_confopt_search_space(params)
+    confopt_params = build_confopt_search_space(params, random_state=random_state)
     searcher = ObjectiveConformalSearcher(
         objective_function=objective_fn,
         search_space=confopt_params,
@@ -184,6 +189,7 @@ def confopt_tune(
         conformal_retraining_frequency=1,
         verbose=False,
         random_state=random_state,
+        searcher_tuning_framework=searcher_tuning_framework,
     )
 
     history = [
@@ -300,6 +306,7 @@ def tune(
             random_state=random_state,
             n_trials=n_trials,
             timeout=timeout,
+            searcher_tuning_framework=tuner_config.searcher_tuning_framework,
         )
     elif tuner_config.tuner == "skopt":
         history = skopt_tune(
