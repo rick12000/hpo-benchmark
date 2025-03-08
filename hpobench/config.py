@@ -1,6 +1,6 @@
 from pydantic import BaseModel, ConfigDict, root_validator
 from typing import Union, Literal, Optional
-from confopt.estimation import (
+from confopt.acquisition import (
     MultiFitQuantileConformalSearcher,
     SingleFitQuantileConformalSearcher,
     LocallyWeightedConformalSearcher,
@@ -11,11 +11,11 @@ from confopt.estimation import (
 from hpobench.generate import ObjectiveMetricGenerator
 
 
-N_REPETITIONS_PER_TUNER_CONFIG = 5
+N_REPETITIONS_PER_TUNER_CONFIG = 20
 N_TRIALS = 35
 TIMEOUT = None
-N_WARM_STARTS = 15
-RUN_TYPE: Literal["dev", "full"] = "dev"
+N_WARM_STARTS = 10
+RUN_TYPE: Literal["dev", "full"] = "full"
 
 
 class TunerConfig(BaseModel):
@@ -138,7 +138,9 @@ OPEN_ML_IDS: list[str] = [
 ]
 
 
+default_interval_width = 0.9
 FULL_TUNING_CONFIGURATIONS = [
+    # 1. Rivals:
     # TunerConfig(
     #     tuner="optuna",
     #     sampler=CmaEsSampler(),
@@ -159,120 +161,116 @@ FULL_TUNING_CONFIGURATIONS = [
     #     sampler=GPSampler(),
     #     config_identifier="GP",
     # ),
+    # TunerConfig(
+    #     tuner="skopt",
+    #     sampler="gbrt",
+    #     config_identifier="GBRT",
+    # ),
+    # 2. Samplers:
     TunerConfig(
         tuner="confopt",
         sampler=MultiFitQuantileConformalSearcher(
             quantile_estimator_architecture="qgbm",
-            sampler=UCBSampler(interval_width=0.9, adapter_framework=None),
+            sampler=UCBSampler(
+                interval_width=default_interval_width,
+                adapter_framework="ACI",
+                c=1,
+                beta_decay="logarithmic_decay",
+            ),
         ),
-        config_identifier="QGBM UCB c=1",
+        config_identifier="ACI-QGBM UCB c=1 log_decay",
         searcher_tuning_framework=None,
     ),
     TunerConfig(
         tuner="confopt",
         sampler=MultiFitQuantileConformalSearcher(
             quantile_estimator_architecture="qgbm",
-            sampler=UCBSampler(interval_width=0.9, adapter_framework="ACI"),
+            sampler=UCBSampler(
+                interval_width=default_interval_width,
+                adapter_framework="ACI",
+                c=5,
+                beta_decay="logarithmic_decay",
+            ),
         ),
-        config_identifier="ACI-QGBM UCB c=1",
+        config_identifier="ACI-QGBM UCB c=5 log_decay",
+        searcher_tuning_framework=None,
+    ),
+    TunerConfig(
+        tuner="confopt",
+        sampler=MultiFitQuantileConformalSearcher(
+            quantile_estimator_architecture="qgbm",
+            sampler=UCBSampler(
+                interval_width=default_interval_width,
+                adapter_framework="ACI",
+                c=10,
+                beta_decay="logarithmic_decay",
+            ),
+        ),
+        config_identifier="ACI-QGBM UCB c=10 log_decay",
+        searcher_tuning_framework=None,
+    ),
+    TunerConfig(
+        tuner="confopt",
+        sampler=MultiFitQuantileConformalSearcher(
+            quantile_estimator_architecture="qgbm",
+            sampler=UCBSampler(
+                interval_width=default_interval_width,
+                adapter_framework="ACI",
+                beta_decay="logarithmic_growth",
+            ),
+        ),
+        config_identifier="ACI-QGBM UCB log_growth",
         searcher_tuning_framework=None,
     ),
     # TunerConfig(
     #     tuner="confopt",
-    #     sampler=MultiFitQuantileConformalSearcher(quantile_estimator_architecture="qgbm",sampler=UCBSampler(interval_width=0.9,adapter_framework="DtACI")),
-    #     config_identifier="DtACI-QGBM UCB",
+    #     sampler=MultiFitQuantileConformalSearcher(
+    #         quantile_estimator_architecture="qgbm",
+    #         sampler=ThompsonSampler(n_quantiles=4, enable_optimistic_sampling=False, adapter_framework="ACI"),
+    #     ),
+    #     config_identifier="ACI-QGBM TS",
+    #     searcher_tuning_framework=None,
     # ),
-    TunerConfig(
-        tuner="confopt",
-        sampler=SingleFitQuantileConformalSearcher(
-            quantile_estimator_architecture="qrf",
-            sampler=UCBSampler(interval_width=0.9, adapter_framework=None),
-        ),
-        config_identifier="QRF UCB c=1",
-        searcher_tuning_framework=None,
-    ),
-    TunerConfig(
-        tuner="confopt",
-        sampler=SingleFitQuantileConformalSearcher(
-            quantile_estimator_architecture="qrf",
-            sampler=ThompsonSampler(n_quantiles=10, enable_optimistic_sampling=True),
-        ),
-        config_identifier="QRF OBS",
-        searcher_tuning_framework=None,
-    ),
-    TunerConfig(
-        tuner="confopt",
-        sampler=LocallyWeightedConformalSearcher(
-            point_estimator_architecture="gbm",
-            variance_estimator_architecture="gbm",
-            sampler=ThompsonSampler(n_quantiles=4, enable_optimistic_sampling=False),
-        ),
-        config_identifier="GBM TS",
-        searcher_tuning_framework=None,
-    ),
-    TunerConfig(
-        tuner="confopt",
-        sampler=SingleFitQuantileConformalSearcher(
-            quantile_estimator_architecture="qknn",
-            sampler=UCBSampler(c=5, interval_width=0.9, adapter_framework=None),
-        ),
-        config_identifier="QKNN UCB c=5",
-        searcher_tuning_framework=None,
-    ),
-    TunerConfig(
-        tuner="confopt",
-        sampler=SingleFitQuantileConformalSearcher(
-            quantile_estimator_architecture="qknn",
-            sampler=UCBSampler(interval_width=0.9, adapter_framework=None),
-        ),
-        config_identifier="QKNN UCB c=1",
-        searcher_tuning_framework=None,
-    ),
-    TunerConfig(
-        tuner="confopt",
-        sampler=LocallyWeightedConformalSearcher(
-            point_estimator_architecture="gbm",
-            variance_estimator_architecture="gbm",
-            sampler=UCBSampler(c=5, interval_width=0.2, adapter_framework="ACI"),
-        ),
-        config_identifier="GBM UCB c=5",
-        searcher_tuning_framework=None,
-    ),
-    TunerConfig(
-        tuner="skopt",
-        sampler="gbrt",
-        config_identifier="GBRT",
-    ),
+    # TunerConfig(
+    #     tuner="confopt",
+    #     sampler=MultiFitQuantileConformalSearcher(
+    #         quantile_estimator_architecture="qgbm",
+    #         sampler=ThompsonSampler(n_quantiles=4, enable_optimistic_sampling=True, adapter_framework="ACI"),
+    #     ),
+    #     config_identifier="ACI-QGBM OBS",
+    #     searcher_tuning_framework=None,
+    # ),
+    # 3. Acquisitions:
 ]
 
 
 DEV_TUNING_CONFIGURATIONS = [
-    TunerConfig(
-        tuner="skopt",
-        sampler="gbrt",
-        config_identifier="GBRT",
-    ),
+    # TunerConfig(
+    #     tuner="skopt",
+    #     sampler="gbrt",
+    #     config_identifier="GBRT",
+    # ),
     TunerConfig(
         tuner="optuna",
         sampler="tpe",
         config_identifier="TPE",
     ),
-    TunerConfig(
-        tuner="confopt",
-        sampler=MultiFitQuantileConformalSearcher(
-            quantile_estimator_architecture="qgbm",
-            sampler=ThompsonSampler(n_quantiles=4, enable_optimistic_sampling=False),
-        ),
-        config_identifier="QGBM TS",
-        searcher_tuning_framework=None,
-    ),
+    # TunerConfig(
+    #     tuner="confopt",
+    #     sampler=MultiFitQuantileConformalSearcher(
+    #         quantile_estimator_architecture="qgbm",
+    #         sampler=ThompsonSampler(n_quantiles=4, enable_optimistic_sampling=False),
+    #     ),
+    #     config_identifier="QGBM TS",
+    #     searcher_tuning_framework=None,
+    # ),
     TunerConfig(
         tuner="confopt",
         sampler=SingleFitQuantileConformalSearcher(
             quantile_estimator_architecture="qknn",
-            sampler=UCBSampler(interval_width=0.9, adapter_framework=None),
+            sampler=UCBSampler(interval_width=0.8, adapter_framework="ACI"),
         ),
-        config_identifier="QKNN UCB c=1",
+        config_identifier="QKNN UCB c=5",
         searcher_tuning_framework=None,
     ),
 ]

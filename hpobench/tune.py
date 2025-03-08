@@ -10,11 +10,12 @@ from skopt.space import Real, Integer as SKInteger, Categorical as SKCategorical
 from confopt.tuning import ObjectiveConformalSearcher
 from confopt.tracking import Trial
 from hpobench.generate import ObjectiveMetricGenerator
-from confopt.estimation import (
+from confopt.acquisition import (
     MultiFitQuantileConformalSearcher,
     SingleFitQuantileConformalSearcher,
     LocallyWeightedConformalSearcher,
 )
+from confopt import ranges
 from copy import deepcopy
 
 
@@ -128,20 +129,18 @@ def confopt_artificial_objective_function(
 
 def build_confopt_search_space(
     params: dict[str, Union[IntRange, FloatRange, CategoricalRange]],
-    random_state: Optional[int] = None,
 ):
     """Creates a search space mapping for confopt tuning."""
     space = {}
     # Create a local random generator with the specified seed for reproducibility
-    local_random = random.Random(random_state)
 
     for name, p in params.items():
         if p.type == "int":
-            space[name] = list(range(p.lower, p.upper + 1))
+            space[name] = ranges.IntRange(min_value=p.lower, max_value=p.upper)
         elif p.type == "float":
-            space[name] = [local_random.uniform(p.lower, p.upper) for _ in range(1000)]
+            space[name] = ranges.FloatRange(min_value=p.lower, max_value=p.upper)
         elif p.type == "categorical":
-            space[name] = p.choices
+            space[name] = ranges.CategoricalRange(choices=p.choices)
         else:
             raise ValueError(f"Unknown parameter type: {p.type}")
     return space
@@ -162,25 +161,13 @@ def confopt_tune(
     searcher_tuning_framework: Optional[str] = None,
 ):
     objective_fn = confopt_artificial_objective_function(performance_generator)
-    confopt_params = build_confopt_search_space(params, random_state=random_state)
+    confopt_params = build_confopt_search_space(params)
     searcher = ObjectiveConformalSearcher(
         objective_function=objective_fn,
         search_space=confopt_params,
         metric_optimization="inverse",
+        warm_start_configurations=warm_start_configs,
     )
-
-    if warm_start_configs:
-        start_time = datetime.now()
-        for i, (config, performance) in enumerate(warm_start_configs):
-            searcher.study.append_trial(
-                Trial(
-                    iteration=0,
-                    timestamp=start_time + timedelta(microseconds=i),
-                    configuration=config,
-                    performance=performance,
-                )
-            )
-
     searcher.search(
         searcher=deepcopy(sampler),
         runtime_budget=timeout,

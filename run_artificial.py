@@ -121,19 +121,19 @@ elif RUN_TYPE == "full":
 
 experiment_configs = []
 if RUN_TYPE == "dev":
-    open_ml_ids = OPEN_ML_IDS[:2]
-    n_repetitions = 2
+    open_ml_ids = OPEN_ML_IDS[:5]
+    # n_repetitions = 5
 else:
     open_ml_ids = OPEN_ML_IDS
-    n_repetitions = N_REPETITIONS_PER_TUNER_CONFIG
-lc_bench_configs = setup_lcbench_configs(
-    openml_ids=open_ml_ids,
-    tuning_configurations=tuning_configurations,
-    n_warm_starts=N_WARM_STARTS,
-    n_trials=N_TRIALS,
-    timeout=TIMEOUT,
-)
-experiment_configs.extend(lc_bench_configs)
+n_repetitions = N_REPETITIONS_PER_TUNER_CONFIG
+# lc_bench_configs = setup_lcbench_configs(
+#     openml_ids=open_ml_ids,
+#     tuning_configurations=tuning_configurations,
+#     n_warm_starts=N_WARM_STARTS,
+#     n_trials=N_TRIALS,
+#     timeout=TIMEOUT,
+# )
+# experiment_configs.extend(lc_bench_configs)
 
 if RUN_TYPE == "full":
     blackbox_configs = setup_blackbox_configs(
@@ -142,17 +142,17 @@ if RUN_TYPE == "full":
         n_warm_starts=N_WARM_STARTS,
         n_trials=N_TRIALS,
         timeout=TIMEOUT,
-    )
+    )[:1]
     experiment_configs.extend(blackbox_configs)
 
-    jahs_201_configs = setup_jahs201_configs(
-        datasets=JAHS201_IDS,
-        tuning_configurations=tuning_configurations,
-        n_warm_starts=N_WARM_STARTS,
-        n_trials=N_TRIALS,
-        timeout=TIMEOUT,
-    )
-    experiment_configs.extend(jahs_201_configs)
+    # jahs_201_configs = setup_jahs201_configs(
+    #     datasets=JAHS201_IDS,
+    #     tuning_configurations=tuning_configurations,
+    #     n_warm_starts=N_WARM_STARTS,
+    #     n_trials=N_TRIALS,
+    #     timeout=TIMEOUT,
+    # )
+    # experiment_configs.extend(jahs_201_configs)
 
 
 raw_benchmark_data = pd.DataFrame()
@@ -161,19 +161,18 @@ for experiment_config in experiment_configs:
     dataset_name = experiment_config.dataset_identifier
     logger.info(f"Dataset: {dataset_name}")
 
-    # Generate one set of warm starts to use across all repetitions and tuners
-    # for fair comparison
-    consistent_warm_starts = generate_hyperparameter_combinations(
-        params=experiment_config.search_space,
-        n_combinations=experiment_config.n_warm_starts,
-        random_state=base_random_state,
-    )
-
-    # Create performance values for warm starts
-    warm_start_configs = []
-    for combination in consistent_warm_starts:
-        performance = experiment_config.generator.predict(combination)
-        warm_start_configs.append((combination, performance))
+    warm_start_configs_per_repetition = []
+    for repetition in range(n_repetitions):
+        consistent_warm_starts = generate_hyperparameter_combinations(
+            params=experiment_config.search_space,
+            n_combinations=experiment_config.n_warm_starts,
+            random_state=repetition,
+        )
+        warm_start_configs = []
+        for combination in consistent_warm_starts:
+            performance = experiment_config.generator.predict(combination)
+            warm_start_configs.append((combination, performance))
+        warm_start_configs_per_repetition.append(warm_start_configs)
 
     for tuner in experiment_config.tuning_configurations:
         logger.info(f"Tuner: {tuner}")
@@ -191,7 +190,7 @@ for experiment_config in experiment_configs:
                 n_trials=experiment_config.n_trials,
                 timeout=experiment_config.timeout,
                 params=experiment_config.search_space,
-                warm_start_configs=warm_start_configs,  # Same warm starts for all tuners/repetitions
+                warm_start_configs=warm_start_configs_per_repetition[repetition],
                 random_state=repetition_seed,
             )
 
@@ -250,17 +249,17 @@ relativized_runtime_level_collapsed_results = process_performance_records(
 #     repetition_column=repetition_column,
 #     tuner_column=tuner_column,
 #     relativize_budget=False)
-friedman_test_results, adjusted_alpha = friedman_test_runner(
-    data=relativized_runtime_level_collapsed_results,
-    budget_cross_sections=[25, 75],
-    within_col=benchmark_column,
-    across_col="dataset",
-    tuner_col=tuner_column,
-    rank_col="rank_mean",
-    budget_unit=f"normalized_{budget_unit}",
-    alpha=0.05,
-    round_decimals=0,
-)
+# friedman_test_results, adjusted_alpha = friedman_test_runner(
+#     data=relativized_runtime_level_collapsed_results,
+#     budget_cross_sections=[25, 75],
+#     within_col=benchmark_column,
+#     across_col="dataset",
+#     tuner_col=tuner_column,
+#     rank_col="rank_mean",
+#     budget_unit=f"normalized_{budget_unit}",
+#     alpha=0.05,
+#     round_decimals=0,
+# )
 
 benchmark_aggregated_relativized_runtime_level_collapsed_results = (
     aggregate_benchmark_data(
@@ -271,14 +270,15 @@ benchmark_aggregated_relativized_runtime_level_collapsed_results = (
 )
 
 budget_unit = "iteration"
-# relativized_iteration_level_collapsed_results=process_performance_records(
-#     raw_benchmark_data=raw_benchmark_data,
-#     grouping_columns=grouping_columns,
-#     performance_column=performance_column,
-#     budget_unit=budget_unit,
-#     repetition_column=repetition_column,
-#     tuner_column=tuner_column,
-#     relativize_budget=True)
+relativized_iteration_level_collapsed_results = process_performance_records(
+    raw_benchmark_data=raw_benchmark_data,
+    grouping_columns=grouping_columns,
+    performance_column=performance_column,
+    budget_unit=budget_unit,
+    repetition_column=repetition_column,
+    tuner_column=tuner_column,
+    relativize_budget=True,
+)
 iteration_level_collapsed_results = process_performance_records(
     raw_benchmark_data=raw_benchmark_data,
     grouping_columns=grouping_columns,
@@ -288,7 +288,13 @@ iteration_level_collapsed_results = process_performance_records(
     tuner_column=tuner_column,
     relativize_budget=False,
 )
-
+benchmark_aggregated_relativized_iteration_level_collapsed_results = (
+    aggregate_benchmark_data(
+        relativized_iteration_level_collapsed_results,
+        benchmark_identifier_col=benchmark_column,
+        budget_unit=f"normalized_{budget_unit}",
+    )
+)
 
 plot_path = f"cache/plots/{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}/"
 if not os.path.exists(plot_path):
@@ -319,6 +325,16 @@ plot_benchmark_data(
     data=benchmark_aggregated_relativized_runtime_level_collapsed_results,
     plot_path=plot_path,
     x_col="normalized_runtime",
+    y_col="rank_mean",
+    add_confidence_intervals=True,
+    row_measure=None,
+    col_measure="benchmark_identifier",
+)
+time.sleep(2)
+plot_benchmark_data(
+    data=benchmark_aggregated_relativized_iteration_level_collapsed_results,
+    plot_path=plot_path,
+    x_col="normalized_iteration",
     y_col="rank_mean",
     add_confidence_intervals=True,
     row_measure=None,
