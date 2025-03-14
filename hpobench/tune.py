@@ -4,7 +4,7 @@ import optuna
 from datetime import datetime, timedelta
 from hpobench.config import TunerConfig, IntRange, FloatRange, CategoricalRange
 from typing import Union, Optional, Literal
-from optuna.samplers import TPESampler, RandomSampler, CmaEsSampler
+from optuna.samplers import TPESampler, RandomSampler, CmaEsSampler, GPSampler
 from skopt import forest_minimize, gbrt_minimize, gp_minimize
 from skopt.space import Real, Integer as SKInteger, Categorical as SKCategorical
 from confopt.tuning import ObjectiveConformalSearcher
@@ -81,6 +81,8 @@ def optuna_tune(
         initialized_sampler = RandomSampler(seed=random_state)
     elif sampler == "cmaes":
         initialized_sampler = CmaEsSampler(seed=random_state, n_startup_trials=0)
+    elif sampler == "gp":
+        initialized_sampler = GPSampler(seed=random_state, n_startup_trials=0)
     else:
         raise ValueError(f"Unknown optuna sampler: {sampler}")
 

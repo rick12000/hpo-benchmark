@@ -1,11 +1,11 @@
 import numpy as np
-from typing import Union
+from typing import Union, Optional
 
 from jahs_bench import Benchmark
 from abc import ABC, abstractmethod
 
 from yahpo_gym import local_config
-from yahpo_gym import benchmark_set
+from yahpo_gym import BenchmarkSet
 
 local_config.init_config()
 local_config.set_data_path("yahpo_bench_data")
@@ -137,12 +137,34 @@ class Jahs201Generator(ObjectiveMetricGenerator):
 
 
 class YahpoGenerator(ObjectiveMetricGenerator):
-    def __init__(self, dataset: str):
-        self.generator = benchmark_set.BenchmarkSet(dataset)
+    def __init__(
+        self, dataset: str, instance: int, fidelity_space: Optional[dict] = None
+    ):
+        self.generator = BenchmarkSet(dataset, instance=instance)
+        self.fidelity_space = fidelity_space
 
     def predict(self, configuration: dict[str, Union[str, int, float, bool]]):
-        return -self.generator.objective_function(configuration)[0]["val_accuracy"]
+        filtered_configuration = configuration.copy()
+        if self.fidelity_space is not None:
+            for (
+                fidelity_param_name,
+                fidelity_param_value,
+            ) in self.fidelity_space.items():
+                filtered_configuration[fidelity_param_name] = fidelity_param_value
+
+        filtered_configuration["OpenML_task_id"] = self.generator.instance
+        return -self.generator.objective_function(filtered_configuration)[0][
+            "val_accuracy"
+        ]
 
     def predict_runtime(self, configuration: dict[str, Union[str, int, float, bool]]):
-        # TODO: Check unit of time
-        return self.generator.objective_function(configuration)[0]["time"]
+        filtered_configuration = configuration.copy()
+        if self.fidelity_space is not None:
+            for (
+                fidelity_param_name,
+                fidelity_param_value,
+            ) in self.fidelity_space.items():
+                filtered_configuration[fidelity_param_name] = fidelity_param_value
+
+        filtered_configuration["OpenML_task_id"] = self.generator.instance
+        return self.generator.objective_function(filtered_configuration)[0]["time"]

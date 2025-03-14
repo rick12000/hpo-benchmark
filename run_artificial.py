@@ -17,6 +17,8 @@ from hpobench.config import (
     N_WARM_STARTS,
     TIMEOUT,
     OPEN_ML_IDS,
+    FAST_OPEN_ML_IDS,
+    SLOW_OPEN_ML_IDS,
 )
 from hpobench.utils import generate_hyperparameter_combinations
 from hpobench.prepare import (
@@ -126,33 +128,33 @@ if RUN_TYPE == "dev":
 else:
     open_ml_ids = OPEN_ML_IDS
 n_repetitions = N_REPETITIONS_PER_TUNER_CONFIG
-# lc_bench_configs = setup_lcbench_configs(
-#     openml_ids=open_ml_ids,
+lc_bench_configs = setup_lcbench_configs(
+    openml_ids=open_ml_ids,
+    tuning_configurations=tuning_configurations,
+    n_warm_starts=N_WARM_STARTS,
+    n_trials=N_TRIALS,
+    timeout=TIMEOUT,
+)
+experiment_configs.extend(lc_bench_configs)
+
+# if RUN_TYPE == "full":
+# blackbox_configs = setup_blackbox_configs(
+#     functions=BLACK_BOX_IDS,
 #     tuning_configurations=tuning_configurations,
 #     n_warm_starts=N_WARM_STARTS,
 #     n_trials=N_TRIALS,
 #     timeout=TIMEOUT,
 # )
-# experiment_configs.extend(lc_bench_configs)
+# experiment_configs.extend(blackbox_configs)
 
-if RUN_TYPE == "full":
-    blackbox_configs = setup_blackbox_configs(
-        functions=BLACK_BOX_IDS,
-        tuning_configurations=tuning_configurations,
-        n_warm_starts=N_WARM_STARTS,
-        n_trials=N_TRIALS,
-        timeout=TIMEOUT,
-    )[:1]
-    experiment_configs.extend(blackbox_configs)
-
-    # jahs_201_configs = setup_jahs201_configs(
-    #     datasets=JAHS201_IDS,
-    #     tuning_configurations=tuning_configurations,
-    #     n_warm_starts=N_WARM_STARTS,
-    #     n_trials=N_TRIALS,
-    #     timeout=TIMEOUT,
-    # )
-    # experiment_configs.extend(jahs_201_configs)
+# jahs_201_configs = setup_jahs201_configs(
+#     datasets=JAHS201_IDS,
+#     tuning_configurations=tuning_configurations,
+#     n_warm_starts=N_WARM_STARTS,
+#     n_trials=N_TRIALS,
+#     timeout=TIMEOUT,
+# )
+# experiment_configs.extend(jahs_201_configs)
 
 
 raw_benchmark_data = pd.DataFrame()
@@ -223,6 +225,7 @@ data_path = cache_path + f"data/{run_start}"
 if not os.path.exists(data_path):
     os.makedirs(data_path)
 raw_benchmark_data.to_csv(f"{data_path}/raw_benchmark_data.csv", index=False)
+
 
 # Below analysis requires that raw_benchmark_data is reported at iteration level:
 grouping_columns = ["benchmark_identifier", "dataset", "tuner", "repetition"]
@@ -303,10 +306,7 @@ if not os.path.exists(plot_path):
 run_plots(
     data=iteration_level_collapsed_results,
     x_col="iteration",
-    y_cols=[
-        "cumulative_breach_rate",
-        "rolling_breach_rate",
-    ],
+    y_cols=["cumulative_breach_rate", "rolling_breach_rate", "rank"],
     col_measure="dataset",
     row_measure=None,
     plot_path=plot_path,

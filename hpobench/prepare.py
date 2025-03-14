@@ -6,6 +6,8 @@ from hpobench.config import (
     JAHS201_SEARCH_SPACE,
     BLACK_BOX_SEARCH_SPACE,
 )
+from hpobench.config import IntRange, CategoricalRange, FloatRange
+
 
 logger = logging.getLogger(__name__)
 
@@ -35,21 +37,56 @@ def setup_lcbench_configs(
     for openml_id in openml_ids:
         logger.info(f"Setting up lcbench datasource ID {openml_id}...")
 
-        # Get search space from YAHPO generator
-        search_space = parse_config_space(
-            s=str(
-                YahpoGenerator(dataset="lcbench").generator.get_opt_space(
-                    drop_fidelity_params=False
-                )
-            ),
-            openml_id=openml_id,
+        yahpo_generator = YahpoGenerator(dataset="lcbench", instance=openml_id)
+
+        yahpo_param_string = yahpo_generator.generator.get_opt_space(
+            drop_fidelity_params=False, seed=1234
         )
+
+        opt_space_dict = {}
+        for hyperparameter in yahpo_param_string.get_hyperparameters():
+            if hasattr(hyperparameter, "sequence"):
+                # For categorical parameters
+                opt_space_dict[hyperparameter.name] = hyperparameter.sequence
+            elif hasattr(hyperparameter, "lower") and hasattr(hyperparameter, "upper"):
+                # For numerical parameters (float, integer)
+                opt_space_dict[hyperparameter.name] = {
+                    "lower": hyperparameter.lower,
+                    "upper": hyperparameter.upper,
+                    "default": hyperparameter.default_value,
+                    "type": type(hyperparameter).__name__,
+                }
+            else:
+                # For other types
+                opt_space_dict[hyperparameter.name] = {
+                    "default": hyperparameter.default_value
+                }
+
+        opt_space_dict.pop("OpenML_task_id")
+
+        filtered_op_space_dict = {}
+        fidelity_space = {}
+        fidelity_param_names = yahpo_generator.generator.config.fidelity_params
+        for param_name, param_metadata in opt_space_dict.items():
+            if param_name in fidelity_param_names:
+                fidelity_space[param_name] = param_metadata["upper"]
+            else:
+                if param_metadata["type"] == "UniformIntegerHyperparameter":
+                    filtered_op_space_dict[param_name] = IntRange(
+                        lower=param_metadata["lower"], upper=param_metadata["upper"]
+                    )
+                elif param_metadata["type"] == "UniformFloatHyperparameter":
+                    filtered_op_space_dict[param_name] = FloatRange(
+                        lower=param_metadata["lower"], upper=param_metadata["upper"]
+                    )
+
+        yahpo_generator.fidelity_space = fidelity_space
 
         # Create experiment config
         experiment_configs.append(
             ExperimentConfig(
-                search_space=search_space,
-                generator=YahpoGenerator(dataset="lcbench"),
+                search_space=filtered_op_space_dict,
+                generator=yahpo_generator,
                 tuning_configurations=tuning_configurations,
                 n_warm_starts=n_warm_starts,
                 n_trials=n_trials,
