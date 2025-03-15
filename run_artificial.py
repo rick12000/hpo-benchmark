@@ -22,7 +22,7 @@ from hpobench.config import (
 )
 from hpobench.utils import generate_hyperparameter_combinations
 from hpobench.prepare import (
-    setup_lcbench_configs,
+    setup_yahpo_instance_configs,
     setup_blackbox_configs,
     setup_jahs201_configs,
 )
@@ -128,8 +128,8 @@ if RUN_TYPE == "dev":
 else:
     open_ml_ids = OPEN_ML_IDS
 n_repetitions = N_REPETITIONS_PER_TUNER_CONFIG
-lc_bench_configs = setup_lcbench_configs(
-    openml_ids=open_ml_ids,
+lc_bench_configs = setup_yahpo_instance_configs(
+    dataset="rbv2_rpart",
     tuning_configurations=tuning_configurations,
     n_warm_starts=N_WARM_STARTS,
     n_trials=N_TRIALS,

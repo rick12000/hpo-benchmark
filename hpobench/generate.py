@@ -1,5 +1,5 @@
 import numpy as np
-from typing import Union, Optional
+from typing import Union, Optional, Dict, Any
 
 from jahs_bench import Benchmark
 from abc import ABC, abstractmethod
@@ -137,25 +137,82 @@ class Jahs201Generator(ObjectiveMetricGenerator):
 
 
 class YahpoGenerator(ObjectiveMetricGenerator):
+    """Class for wrapping yahpo gym generators."""
+
     def __init__(
-        self, dataset: str, instance: int, fidelity_space: Optional[dict] = None
+        self,
+        dataset: str,
+        instance_value: Any,
+        instance_name: str,
+        fidelity_space: Dict,
+        config_space=None,
     ):
-        self.generator = BenchmarkSet(dataset, instance=instance)
+        """Initialize YAHPO generator.
+
+        Args:
+            dataset: YAHPO dataset name
+            instance_value: YAHPO instance value
+            instance_name: Name of the instance parameter
+            fidelity_space: Dictionary of fidelity parameters and their values
+            config_space: Full ConfigSpace object from YAHPO
+        """
+        self.dataset = dataset
+        self.instance_name = instance_name
+        self.generator = BenchmarkSet(dataset, instance=instance_value)
+
+        # Store the full ConfigSpace for validation
+        self.config_space = config_space
+
+        # Store fidelity parameters
         self.fidelity_space = fidelity_space
 
-    def predict(self, configuration: dict[str, Union[str, int, float, bool]]):
-        filtered_configuration = configuration.copy()
-        if self.fidelity_space is not None:
-            for (
-                fidelity_param_name,
-                fidelity_param_value,
-            ) in self.fidelity_space.items():
-                filtered_configuration[fidelity_param_name] = fidelity_param_value
+    def predict(self, configuration):
+        """Predict the performance of a configuration using the YAHPO generator.
 
-        filtered_configuration["OpenML_task_id"] = self.generator.instance
-        return -self.generator.objective_function(filtered_configuration)[0][
-            "val_accuracy"
-        ]
+        Args:
+            configuration: Configuration to evaluate
+
+        Returns:
+            Negative validation accuracy (to be minimized)
+        """
+        filtered_configuration = {}
+
+        # Only include parameters that are in the config space
+        # for param_name, param_value in configuration.items():
+        #     if param_name in self.generator.cs_params:
+        #         filtered_configuration[param_name] = param_value
+        filtered_configuration = configuration.copy()
+        # Add fidelity parameters
+        for fidelity_param_name, fidelity_param_value in self.fidelity_space.items():
+            filtered_configuration[fidelity_param_name] = fidelity_param_value
+
+        # Add instance name parameter
+        if self.instance_name:
+            filtered_configuration[self.instance_name] = self.generator.instance
+
+        # Validate and clean configuration using ConfigSpace
+        # if self.config_space:
+        #     # Create a valid configuration by sampling defaults for missing parameters
+        #     sample_config = self.config_space.sample_configuration()
+
+        #     # Update with our filtered configuration values
+        #     for param_name, param_value in filtered_configuration.items():
+        #         if param_name in self.config_space.get_hyperparameter_names():
+        #             sample_config[param_name] = param_value
+
+        #     # Use the cleaned configuration
+        #     cleaned_configuration = sample_config.get_dictionary()
+        # else:
+        #     cleaned_configuration = filtered_configuration
+
+        cleaned_configuration = filtered_configuration
+        # TODO: Make more robust, use a mapping from benchmark to metric to use:
+        # Call the objective function
+        objective_results = self.generator.objective_function(cleaned_configuration)[0]
+        if "auc" in objective_results:
+            return -objective_results["acc"]
+        else:
+            return -objective_results["val_accuracy"]
 
     def predict_runtime(self, configuration: dict[str, Union[str, int, float, bool]]):
         filtered_configuration = configuration.copy()
@@ -166,5 +223,10 @@ class YahpoGenerator(ObjectiveMetricGenerator):
             ) in self.fidelity_space.items():
                 filtered_configuration[fidelity_param_name] = fidelity_param_value
 
-        filtered_configuration["OpenML_task_id"] = self.generator.instance
-        return self.generator.objective_function(filtered_configuration)[0]["time"]
+        filtered_configuration[self.instance_name] = self.generator.instance
+
+        results = self.generator.objective_function(filtered_configuration)[0]
+        if "time" in results:
+            return results["time"]
+        else:
+            return results["timetrain"] + results["timepredict"]

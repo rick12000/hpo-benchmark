@@ -1,5 +1,5 @@
 from hpobench.prepare import (
-    setup_lcbench_configs,
+    setup_yahpo_instance_configs,
     setup_jahs201_configs,
     setup_blackbox_configs,
 )
@@ -14,8 +14,8 @@ from hpobench.config import DEV_TUNING_CONFIGURATIONS
 def test_setup_lcbench_configs():
     openml_ids = ["123", "456"]
 
-    configs = setup_lcbench_configs(
-        openml_ids=openml_ids,
+    configs = setup_yahpo_instance_configs(
+        instances=openml_ids,
         tuning_configurations=DEV_TUNING_CONFIGURATIONS,
         n_warm_starts=5,
         n_trials=10,
