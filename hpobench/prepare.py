@@ -91,7 +91,7 @@ def setup_yahpo_instance_configs(
             instance_value=instance_value,
             instance_name=instance_names,
             fidelity_space=fidelity_space,
-            config_space=filtered_op_space_dict,  # Pass the full config space
+            config_space=yahpo_config_space,  # Pass the full ConfigSpace object with conditions
         )
 
         # Create experiment config

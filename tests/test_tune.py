@@ -3,7 +3,7 @@ import pandas as pd
 from hpobench.generate import BlackBoxGenerator
 from hpobench.config import FloatRange, TunerConfig
 from hpobench.tune import optuna_tune, confopt_tune, skopt_tune, tune
-from confopt.estimation import (
+from confopt.acquisition import (
     LocallyWeightedConformalSearcher,
     SingleFitQuantileConformalSearcher,
     MultiFitQuantileConformalSearcher,

@@ -1,3 +1,4 @@
+from sympy import N
 from hpobench.prepare import (
     setup_yahpo_instance_configs,
     setup_jahs201_configs,
@@ -11,21 +12,22 @@ from hpobench.config import (
 from hpobench.config import DEV_TUNING_CONFIGURATIONS
 
 
-def test_setup_lcbench_configs():
-    openml_ids = ["123", "456"]
+def test_setup_yahpo_instance_configs():
+
+    n_instances = 5
 
     configs = setup_yahpo_instance_configs(
-        instances=openml_ids,
+        dataset="lcbench",
         tuning_configurations=DEV_TUNING_CONFIGURATIONS,
         n_warm_starts=5,
         n_trials=10,
         timeout=3600,
+        n_instances=n_instances,
     )
 
-    assert len(configs) == len(openml_ids)
+    assert len(configs) == n_instances
     assert all(isinstance(c, ExperimentConfig) for c in configs)
     assert all(c.benchmark_identifier == "lcbench" for c in configs)
-    assert [c.dataset_identifier for c in configs] == openml_ids
 
 
 def test_setup_jahs201_configs():

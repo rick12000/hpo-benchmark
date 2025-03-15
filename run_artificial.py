@@ -129,12 +129,12 @@ else:
     open_ml_ids = OPEN_ML_IDS
 n_repetitions = N_REPETITIONS_PER_TUNER_CONFIG
 lc_bench_configs = setup_yahpo_instance_configs(
-    dataset="lcbench",
+    dataset="nb301",
     tuning_configurations=tuning_configurations,
     n_warm_starts=N_WARM_STARTS,
     n_trials=N_TRIALS,
     timeout=TIMEOUT,
-    n_instances=5,
+    n_instances=3,
 )
 experiment_configs.extend(lc_bench_configs)
 

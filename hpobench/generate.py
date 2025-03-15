@@ -154,7 +154,7 @@ class YahpoGenerator(ObjectiveMetricGenerator):
             instance_value: YAHPO instance value
             instance_name: Name of the instance parameter
             fidelity_space: Dictionary of fidelity parameters and their values
-            config_space: Full ConfigSpace object from YAHPO
+            config_space: Full ConfigSpace object from YAHPO with conditions
         """
         self.dataset = dataset
         self.instance_name = instance_name
@@ -166,6 +166,40 @@ class YahpoGenerator(ObjectiveMetricGenerator):
         # Store fidelity parameters
         self.fidelity_space = fidelity_space
 
+    def is_parameter_active(self, configuration: dict, param_name: str) -> bool:
+        """Check if a parameter should be active given the configuration.
+
+        Args:
+            configuration: Configuration dictionary
+            param_name: Parameter name to check
+
+        Returns:
+            True if the parameter should be active, False otherwise
+        """
+        if self.config_space is None:
+            return True  # If no config space, assume all parameters are active
+
+        # Get conditions for this parameter
+        conditions = self.config_space.get_conditions()
+        param_conditions = [c for c in conditions if c.child.name == param_name]
+
+        if not param_conditions:
+            return True  # If no conditions, parameter is always active
+
+        # Check all conditions for this parameter
+        for condition in param_conditions:
+            parent_name = condition.parent.name
+            if parent_name not in configuration:
+                return False
+
+            parent_value = configuration[parent_name]
+
+            # Check if condition is satisfied
+            if not condition.evaluate({parent_name: parent_value}):
+                return False
+
+        return True
+
     def predict(self, configuration):
         """Predict the performance of a configuration using the YAHPO generator.
 
@@ -175,47 +209,15 @@ class YahpoGenerator(ObjectiveMetricGenerator):
         Returns:
             Negative validation accuracy (to be minimized)
         """
+        # Create a filtered configuration with only active parameters
         filtered_configuration = {}
 
-        # Only include parameters that are in the config space
-        # for param_name, param_value in configuration.items():
-        #     if param_name in self.generator.cs_params:
-        #         filtered_configuration[param_name] = param_value
-        filtered_configuration = configuration.copy()
+        # Copy active parameters from the input configuration
+        for param_name, param_value in configuration.items():
+            if self.is_parameter_active(configuration, param_name):
+                filtered_configuration[param_name] = param_value
+
         # Add fidelity parameters
-        for fidelity_param_name, fidelity_param_value in self.fidelity_space.items():
-            filtered_configuration[fidelity_param_name] = fidelity_param_value
-
-        # Add instance name parameter
-        if self.instance_name:
-            filtered_configuration[self.instance_name] = self.generator.instance
-
-        # Validate and clean configuration using ConfigSpace
-        # if self.config_space:
-        #     # Create a valid configuration by sampling defaults for missing parameters
-        #     sample_config = self.config_space.sample_configuration()
-
-        #     # Update with our filtered configuration values
-        #     for param_name, param_value in filtered_configuration.items():
-        #         if param_name in self.config_space.get_hyperparameter_names():
-        #             sample_config[param_name] = param_value
-
-        #     # Use the cleaned configuration
-        #     cleaned_configuration = sample_config.get_dictionary()
-        # else:
-        #     cleaned_configuration = filtered_configuration
-
-        cleaned_configuration = filtered_configuration
-        # TODO: Make more robust, use a mapping from benchmark to metric to use:
-        # Call the objective function
-        objective_results = self.generator.objective_function(cleaned_configuration)[0]
-        if "auc" in objective_results:
-            return -objective_results["acc"]
-        else:
-            return -objective_results["val_accuracy"]
-
-    def predict_runtime(self, configuration: dict[str, Union[str, int, float, bool]]):
-        filtered_configuration = configuration.copy()
         if self.fidelity_space is not None:
             for (
                 fidelity_param_name,
@@ -223,10 +225,39 @@ class YahpoGenerator(ObjectiveMetricGenerator):
             ) in self.fidelity_space.items():
                 filtered_configuration[fidelity_param_name] = fidelity_param_value
 
+        # Add instance name parameter
+        if self.instance_name:
+            filtered_configuration[self.instance_name] = self.generator.instance
+
+        # Call the objective function
+        objective_results = self.generator.objective_function(filtered_configuration)[0]
+        if "auc" in objective_results:
+            return -objective_results["acc"]
+        else:
+            return -objective_results["val_accuracy"]
+
+    def predict_runtime(self, configuration: dict[str, Union[str, int, float, bool]]):
+        # Filter the configuration to only include active parameters
+        filtered_configuration = {}
+        for param_name, param_value in configuration.items():
+            if self.is_parameter_active(configuration, param_name):
+                filtered_configuration[param_name] = param_value
+
+        # Add fidelity parameters
+        if self.fidelity_space is not None:
+            for (
+                fidelity_param_name,
+                fidelity_param_value,
+            ) in self.fidelity_space.items():
+                filtered_configuration[fidelity_param_name] = fidelity_param_value
+
+        # Add instance name
         filtered_configuration[self.instance_name] = self.generator.instance
 
         results = self.generator.objective_function(filtered_configuration)[0]
         if "time" in results:
             return results["time"]
+        elif "runtime" in results:
+            return results["runtime"]
         else:
             return results["timetrain"] + results["timepredict"]
