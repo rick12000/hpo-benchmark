@@ -4,7 +4,7 @@ from scipy.stats import friedmanchisquare
 import logging
 from hpobench.utils import q10, q90
 from copy import deepcopy
-from typing import Literal
+from typing import Literal, Dict, Any, Union, List, Callable, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -403,31 +403,97 @@ def friedman_test_runner(
     return results_df, adjusted_alpha
 
 
+def bootstrap_aggregate(
+    group_data: pd.Series, n_bootstraps: int = 100, random_state: Optional[int] = None
+) -> Dict[str, float]:
+    """
+    Perform bootstrap aggregation on a group of values.
+
+    Args:
+        group_data: Series of values to bootstrap
+        n_bootstraps: Number of bootstrap samples to generate
+        random_state: Random seed for reproducibility
+
+    Returns:
+        Dictionary with actual sample mean, and 10th and 90th percentiles from bootstrap distribution
+    """
+    if len(group_data) == 0:
+        return {"mean": np.nan, "q10": np.nan, "q90": np.nan}
+
+    # Calculate the actual sample mean directly
+    sample_mean = np.mean(group_data)
+
+    np.random.seed(random_state)
+    bootstrap_means = []
+
+    for _ in range(n_bootstraps):
+        # Sample with replacement
+        bootstrap_sample = np.random.choice(
+            group_data, size=len(group_data), replace=True
+        )
+        bootstrap_means.append(np.mean(bootstrap_sample))
+
+    return {
+        "mean": sample_mean,  # Use actual sample mean, not mean of bootstrap means
+        "q10": np.percentile(bootstrap_means, 10),
+        "q90": np.percentile(bootstrap_means, 90),
+    }
+
+
 def aggregate_benchmark_data(
     data,
     benchmark_identifier_col="benchmark_identifier",
     budget_unit="runtime",
     tuner_col="tuner",
+    n_bootstraps: int = 100,
+    metrics: List[str] = ["rank_mean"],
+    random_state: int = 42,
 ):
+    """
+    Aggregate benchmark data using bootstrap sampling.
+
+    Args:
+        data: DataFrame containing benchmark data
+        benchmark_identifier_col: Column name for benchmark identifier
+        budget_unit: Column name for budget unit (e.g., runtime, iteration)
+        tuner_col: Column name for tuner identifier
+        n_bootstraps: Number of bootstrap iterations
+        metrics: List of metrics to aggregate
+        random_state: Random seed for reproducibility
+
+    Returns:
+        DataFrame with bootstrap-aggregated metrics
+    """
     data_copy = data.copy()
-    aggregations = {
-        "rank_mean": ["mean", q10, q90],
-    }
-    aggregated_data = data_copy.groupby(
-        [benchmark_identifier_col, budget_unit, tuner_col], as_index=False
-    ).agg(aggregations)
+    results = []
 
-    # Flatten the multi-level column names
-    aggregated_data.columns = [
-        "_".join(col) if isinstance(col, tuple) else col
-        for col in aggregated_data.columns
-    ]
+    # Group the data
+    grouped = data_copy.groupby([benchmark_identifier_col, budget_unit, tuner_col])
 
-    # Clean up column names by removing trailing underscores
-    aggregated_data.columns = [
-        col if col[-1] != "_" else col[:-1] for col in aggregated_data.columns
-    ]
-    return aggregated_data
+    # Process each group
+    for group_name, group_data in grouped:
+        group_result = {
+            benchmark_identifier_col: group_name[0],
+            budget_unit: group_name[1],
+            tuner_col: group_name[2],
+        }
+
+        # Apply bootstrapping to each metric
+        for metric in metrics:
+            if metric in group_data.columns:
+                bootstrap_stats = bootstrap_aggregate(
+                    group_data[metric],
+                    n_bootstraps=n_bootstraps,
+                    random_state=random_state,
+                )
+
+                group_result[f"{metric}_mean"] = bootstrap_stats["mean"]
+                group_result[f"{metric}_q10"] = bootstrap_stats["q10"]
+                group_result[f"{metric}_q90"] = bootstrap_stats["q90"]
+
+        results.append(group_result)
+
+    return pd.DataFrame(results)
 
 
 def process_performance_records(

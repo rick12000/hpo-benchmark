@@ -11,7 +11,7 @@ from confopt.acquisition import (
 from hpobench.generate import ObjectiveMetricGenerator
 
 
-N_REPETITIONS_PER_TUNER_CONFIG = 3
+N_REPETITIONS_PER_TUNER_CONFIG = 10
 N_TRIALS = 50
 TIMEOUT = None
 N_WARM_STARTS = 10
@@ -368,17 +368,17 @@ FULL_TUNING_CONFIGURATIONS = [
     #     config_identifier="ACI-MFQENS TS",
     #     searcher_tuning_framework=None,
     # ),
-    TunerConfig(
-        tuner="confopt",
-        sampler=MultiFitQuantileConformalSearcher(
-            quantile_estimator_architecture="ql",
-            sampler=ThompsonSampler(
-                n_quantiles=4, enable_optimistic_sampling=False, adapter_framework="ACI"
-            ),
-        ),
-        config_identifier="ACI-QL TS",
-        searcher_tuning_framework=None,
-    ),
+    # TunerConfig(
+    #     tuner="confopt",
+    #     sampler=MultiFitQuantileConformalSearcher(
+    #         quantile_estimator_architecture="ql",
+    #         sampler=ThompsonSampler(
+    #             n_quantiles=4, enable_optimistic_sampling=False, adapter_framework="ACI"
+    #         ),
+    #     ),
+    #     config_identifier="ACI-QL TS",
+    #     searcher_tuning_framework=None,
+    # ),
     # TunerConfig(
     #     tuner="confopt",
     #     sampler=SingleFitQuantileConformalSearcher(

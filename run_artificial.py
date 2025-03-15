@@ -129,17 +129,18 @@ else:
     open_ml_ids = OPEN_ML_IDS
 n_repetitions = N_REPETITIONS_PER_TUNER_CONFIG
 lc_bench_configs = setup_yahpo_instance_configs(
-    dataset="rbv2_rpart",
+    dataset="lcbench",
     tuning_configurations=tuning_configurations,
     n_warm_starts=N_WARM_STARTS,
     n_trials=N_TRIALS,
     timeout=TIMEOUT,
+    n_instances=5,
 )
 experiment_configs.extend(lc_bench_configs)
 
 # if RUN_TYPE == "full":
 # blackbox_configs = setup_blackbox_configs(
-#     functions=BLACK_BOX_IDS,
+#     functions=BLACK_BOX_IDS[:2],
 #     tuning_configurations=tuning_configurations,
 #     n_warm_starts=N_WARM_STARTS,
 #     n_trials=N_TRIALS,
