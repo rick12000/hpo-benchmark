@@ -34,7 +34,6 @@ from hpobench.process import (
     process_performance_records,
     friedman_test_runner,
     nemenyi_pairwise_test,
-    pairwise_rank_test,
 )
 from hpobench.generate import ObjectiveMetricGenerator
 
@@ -280,20 +279,6 @@ nemenyi_results = nemenyi_pairwise_test(
     budget_unit=f"normalized_{budget_unit}",
     alpha=0.05,
     round_decimals=0,
-)
-
-# Also perform direct pairwise comparison with FDR correction
-pairwise_results = pairwise_rank_test(
-    data=relativized_runtime_level_collapsed_results,
-    budget_cross_sections=testing_budget_cross_sections,
-    within_col=benchmark_column,
-    across_col="dataset",
-    tuner_col=tuner_column,
-    rank_col="rank_mean",
-    budget_unit=f"normalized_{budget_unit}",
-    alpha=0.05,
-    round_decimals=0,
-    correction_method="holm",
 )
 
 # Save pairwise comparison results
