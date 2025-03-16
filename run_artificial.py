@@ -33,6 +33,8 @@ from hpobench.process import (
     aggregate_benchmark_data,
     process_performance_records,
     friedman_test_runner,
+    nemenyi_pairwise_test,
+    pairwise_rank_test,
 )
 from hpobench.generate import ObjectiveMetricGenerator
 
@@ -129,12 +131,12 @@ else:
     open_ml_ids = OPEN_ML_IDS
 n_repetitions = N_REPETITIONS_PER_TUNER_CONFIG
 lc_bench_configs = setup_yahpo_instance_configs(
-    dataset="nb301",
+    dataset="rbv2_svm",
     tuning_configurations=tuning_configurations,
     n_warm_starts=N_WARM_STARTS,
     n_trials=N_TRIALS,
     timeout=TIMEOUT,
-    n_instances=3,
+    n_instances=60,
 )
 experiment_configs.extend(lc_bench_configs)
 
@@ -253,17 +255,65 @@ relativized_runtime_level_collapsed_results = process_performance_records(
 #     repetition_column=repetition_column,
 #     tuner_column=tuner_column,
 #     relativize_budget=False)
-# friedman_test_results, adjusted_alpha = friedman_test_runner(
-#     data=relativized_runtime_level_collapsed_results,
-#     budget_cross_sections=[25, 75],
-#     within_col=benchmark_column,
-#     across_col="dataset",
-#     tuner_col=tuner_column,
-#     rank_col="rank_mean",
-#     budget_unit=f"normalized_{budget_unit}",
-#     alpha=0.05,
-#     round_decimals=0,
-# )
+testing_budget_cross_sections = [50, 100]
+friedman_test_results, adjusted_alpha = friedman_test_runner(
+    data=relativized_runtime_level_collapsed_results,
+    budget_cross_sections=testing_budget_cross_sections,
+    within_col=benchmark_column,
+    across_col="dataset",
+    tuner_col=tuner_column,
+    rank_col="rank_mean",
+    budget_unit=f"normalized_{budget_unit}",
+    alpha=0.05,
+    round_decimals=0,
+)
+
+
+# Add Nemenyi pairwise test using critical difference approach
+nemenyi_results = nemenyi_pairwise_test(
+    data=relativized_runtime_level_collapsed_results,
+    budget_cross_sections=testing_budget_cross_sections,
+    within_col=benchmark_column,
+    across_col="dataset",
+    tuner_col=tuner_column,
+    rank_col="rank_mean",
+    budget_unit=f"normalized_{budget_unit}",
+    alpha=0.05,
+    round_decimals=0,
+)
+
+# Also perform direct pairwise comparison with FDR correction
+pairwise_results = pairwise_rank_test(
+    data=relativized_runtime_level_collapsed_results,
+    budget_cross_sections=testing_budget_cross_sections,
+    within_col=benchmark_column,
+    across_col="dataset",
+    tuner_col=tuner_column,
+    rank_col="rank_mean",
+    budget_unit=f"normalized_{budget_unit}",
+    alpha=0.05,
+    round_decimals=0,
+    correction_method="holm",
+)
+
+# Save pairwise comparison results
+if not nemenyi_results.empty:
+    nemenyi_results.to_csv(f"{data_path}/nemenyi_pairwise_results.csv", index=False)
+
+    # Optional: Print summary of significant differences with Nemenyi test
+    significant_pairs = nemenyi_results[nemenyi_results["significant"]]
+    if not significant_pairs.empty:
+        print(
+            f"Found {len(significant_pairs)} significantly different tuner pairs (Nemenyi test)"
+        )
+        for _, row in significant_pairs.iterrows():
+            print(
+                f"At {row[f'normalized_{budget_unit}']}% budget, "
+                f"{row['better_tuner']} significantly outperforms "
+                f"{row['tuner_1'] if row['better_tuner'] == row['tuner_2'] else row['tuner_2']} "
+                f"(p-value: {row['p_value']:.4f})"
+            )
+
 
 benchmark_aggregated_relativized_runtime_level_collapsed_results = (
     aggregate_benchmark_data(

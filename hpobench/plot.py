@@ -28,7 +28,7 @@ def plot_benchmark_data(
         "tab:green",
         "tab:cyan",
         "tab:olive",
-        "tab:yellow",
+        "yellow",
         "tab:magenta",
         "black",
         "teal",

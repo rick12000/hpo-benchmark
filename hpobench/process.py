@@ -5,6 +5,12 @@ import logging
 from hpobench.utils import q10, q90
 from copy import deepcopy
 from typing import Literal, Dict, Any, Union, List, Callable, Optional
+from scipy.stats import rankdata, norm
+from statsmodels.stats.multitest import multipletests
+import itertools
+
+# Add import for scikit-posthocs
+from scikit_posthocs._posthocs import posthoc_nemenyi
 
 logger = logging.getLogger(__name__)
 
@@ -614,3 +620,262 @@ def process_performance_records(
         )
 
     return collapsed_performance_data
+
+
+def nemenyi_pairwise_test(
+    data: pd.DataFrame,
+    budget_cross_sections: List[int],
+    within_col: str,
+    across_col: str,
+    tuner_col: str = "tuner",
+    rank_col: str = "rank_mean",
+    budget_unit: str = "normalized_runtime",
+    alpha: float = 0.05,
+    round_decimals: int = 0,
+) -> pd.DataFrame:
+    """
+    Perform Nemenyi post-hoc test for pairwise comparisons after Friedman test.
+    Uses the critical difference approach which already accounts for multiple testing.
+
+    Parameters:
+    data : DataFrame
+        Input dataframe containing the rank data
+    budget_cross_sections : list
+        List of normalized runtime values to analyze
+    within_col : str
+        Column name defining the groups to analyze within (e.g., 'benchmark_identifier')
+    across_col : str
+        Column name defining the blocks to compare across (e.g., 'dataset')
+    tuner_col : str
+        Column name containing tuner identifiers
+    rank_col : str
+        Column name containing rank values
+    budget_unit : str
+        Column name containing budget unit values (e.g., normalized_runtime)
+    alpha : float
+        Overall significance level
+    round_decimals : int
+        Number of decimals to round budget values to
+
+    Returns:
+    results_df : DataFrame
+        Results with pairwise comparisons, critical differences, and significance flags
+    """
+
+    # Check if required columns exist
+    required_columns = [within_col, across_col, tuner_col, budget_unit, rank_col]
+    missing_columns = [col for col in required_columns if col not in data.columns]
+    if missing_columns:
+        raise KeyError(f"Missing required columns: {missing_columns}")
+
+    # Round budget values and filter to specified cross-sections
+    data = data.copy()
+    data[budget_unit] = data[budget_unit].round(round_decimals)
+    filtered_df = data[data[budget_unit].astype(int).isin(budget_cross_sections)]
+
+    # Initialize storage for results
+    results = []
+
+    # Perform tests for each cross section
+    for budget in budget_cross_sections:
+        # Get data for current cross section
+        budget_df = filtered_df[filtered_df[budget_unit] == budget]
+
+        # Group by within-column categories
+        for within_group, group_df in budget_df.groupby(within_col):
+            try:
+                # Calculate mean ranks for each tuner
+                mean_ranks = group_df.groupby(tuner_col)[rank_col].mean().to_dict()
+
+                # Perform Nemenyi post-hoc test
+                p_value_matrix = posthoc_nemenyi(
+                    a=group_df,
+                    val_col=rank_col,
+                    group_col=tuner_col,
+                    dist="tukey",
+                    sort=True,
+                )
+
+                # Get the list of tuners from the p_value_matrix
+                tuners = p_value_matrix.index.tolist()
+
+                # Process the p-value matrix
+                for i, t1 in enumerate(tuners):
+                    for j, t2 in enumerate(tuners):
+                        if i < j:  # Only process each pair once (upper triangle)
+                            # Get the p-value from the matrix
+                            p_value = p_value_matrix.loc[t1, t2]
+
+                            # Determine if the difference is significant
+                            is_significant = p_value < alpha
+
+                            # Add the result
+                            results.append(
+                                {
+                                    budget_unit: budget,
+                                    "within_group": within_group,
+                                    "tuner_1": t1,
+                                    "tuner_2": t2,
+                                    "mean_rank_1": mean_ranks[t1],
+                                    "mean_rank_2": mean_ranks[t2],
+                                    "p_value": p_value,
+                                    "significant": is_significant,
+                                    "better_tuner": t1
+                                    if mean_ranks[t1] < mean_ranks[t2]
+                                    else t2,
+                                }
+                            )
+            except Exception as e:
+                logger.debug(
+                    f"Error processing {within_group} at budget {budget}: {str(e)}"
+                )
+                continue
+
+    results_df = pd.DataFrame(results)
+    return results_df
+
+
+def pairwise_rank_test(
+    data: pd.DataFrame,
+    budget_cross_sections: List[int],
+    within_col: str,
+    across_col: str,
+    tuner_col: str = "tuner",
+    rank_col: str = "rank_mean",
+    budget_unit: str = "normalized_runtime",
+    alpha: float = 0.05,
+    round_decimals: int = 0,
+    correction_method: str = "holm",
+) -> pd.DataFrame:
+    """
+    Perform direct pairwise comparisons of rank differences with multiple testing correction.
+
+    Parameters:
+    data : DataFrame
+        Input dataframe containing the rank data
+    budget_cross_sections : list
+        List of normalized runtime values to analyze
+    within_col : str
+        Column name defining the groups to analyze within (e.g., 'benchmark_identifier')
+    across_col : str
+        Column name defining the blocks to compare across (e.g., 'dataset')
+    tuner_col : str
+        Column name containing tuner identifiers
+    rank_col : str
+        Column name containing rank values
+    budget_unit : str
+        Column name containing budget unit values (e.g., normalized_runtime)
+    alpha : float
+        Overall significance level
+    round_decimals : int
+        Number of decimals to round budget values to
+    correction_method : str
+        Multiple comparison correction method ('bonferroni', 'holm', 'fdr_bh', etc.)
+        See statsmodels.stats.multitest.multipletests for available methods
+
+    Returns:
+    results_df : DataFrame
+        Results with pairwise comparisons, p-values, and significance flags
+    """
+    # Check if required columns exist
+    required_columns = [within_col, across_col, tuner_col, budget_unit, rank_col]
+    missing_columns = [col for col in required_columns if col not in data.columns]
+    if missing_columns:
+        raise KeyError(f"Missing required columns: {missing_columns}")
+
+    # Round budget values and filter to specified cross-sections
+    data = data.copy()
+    data[budget_unit] = data[budget_unit].round(round_decimals)
+    filtered_df = data[data[budget_unit].astype(int).isin(budget_cross_sections)]
+
+    # Initialize storage for results
+    results = []
+
+    # Perform tests for each cross section
+    for budget in budget_cross_sections:
+        # Get data for current cross section
+        budget_df = filtered_df[filtered_df[budget_unit] == budget]
+
+        # Group by within-column categories
+        for within_group, group_df in budget_df.groupby(within_col):
+            try:
+                # Pivot data for pairwise comparisons
+                pivot_df = group_df.pivot(
+                    index=across_col, columns=tuner_col, values=rank_col
+                )
+
+                # Check if we have enough data
+                if len(pivot_df) < 2 or len(pivot_df.columns) < 2:
+                    logger.debug(
+                        f"Skipping {within_group} at budget {budget}: Insufficient data for pairwise tests"
+                    )
+                    continue
+
+                tuners = pivot_df.columns.tolist()
+                k = len(tuners)
+                n = len(pivot_df)
+
+                # Perform all pairwise comparisons
+                pairs = list(itertools.combinations(tuners, 2))
+                pvals = []
+                mean_ranks = {tuner: np.mean(pivot_df[tuner]) for tuner in tuners}
+                rank_diffs = []
+
+                for t1, t2 in pairs:
+                    # Calculate rank difference
+                    rank_diff = abs(mean_ranks[t1] - mean_ranks[t2])
+                    rank_diffs.append(rank_diff)
+
+                    # Calculate p-value based on rank difference
+                    z = rank_diff / np.sqrt(k * (k + 1) / (6 * n))
+                    p_value = 2 * (1 - norm.cdf(z))
+
+                    pvals.append(p_value)
+
+                # Apply multiple comparison correction
+                if len(pvals) > 0:
+                    reject, pvals_corrected, _, _ = multipletests(
+                        pvals, alpha=alpha, method=correction_method
+                    )
+
+                    # Store results
+                    for idx, (
+                        (t1, t2),
+                        p_uncorrected,
+                        p_corrected,
+                        is_significant,
+                        rank_diff,
+                    ) in enumerate(
+                        zip(pairs, pvals, pvals_corrected, reject, rank_diffs)
+                    ):
+                        results.append(
+                            {
+                                budget_unit: budget,
+                                "within_group": within_group,
+                                "tuner_1": t1,
+                                "tuner_2": t2,
+                                "mean_rank_1": mean_ranks[t1],
+                                "mean_rank_2": mean_ranks[t2],
+                                "rank_diff": rank_diff,
+                                "p_value": p_uncorrected,
+                                "p_adjusted": p_corrected,
+                                "significant": is_significant,
+                                "correction_method": correction_method,
+                                "better_tuner": t1
+                                if mean_ranks[t1] < mean_ranks[t2]
+                                else t2,
+                            }
+                        )
+
+            except Exception as e:
+                logger.debug(
+                    f"Error processing {within_group} at budget {budget}: {str(e)}"
+                )
+                continue
+
+    # Create results dataframe
+    if not results:
+        return pd.DataFrame()
+
+    results_df = pd.DataFrame(results)
+    return results_df
