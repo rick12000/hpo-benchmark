@@ -19,7 +19,7 @@ def setup_yahpo_instance_configs(
     n_warm_starts: int,
     n_trials: int,
     timeout: int,
-    n_instances: int = None,
+    max_n_instances: int = None,
 ) -> list[ExperimentConfig]:
     """
     Set up experiment configurations for YAHPO benchmark datasets.
@@ -40,8 +40,8 @@ def setup_yahpo_instance_configs(
     instances = benchmark_set.instances
 
     # Limit to the first n_instances if specified
-    if n_instances is not None:
-        instances = instances[:n_instances]
+    if max_n_instances is not None:
+        instances = instances[:max_n_instances]
 
     for instance_value in instances:
         logger.info(

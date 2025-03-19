@@ -733,3 +733,61 @@ def nemenyi_pairwise_test(
 
     results_df = pd.DataFrame(results)
     return results_df
+
+
+def get_average_metric_per_tuner_and_dataset(
+    raw_benchmark_data: pd.DataFrame,
+    metric: str,
+    budget_unit: str,
+    budget_unit_slice: int,
+    dataset_filter: list[str] = None,
+    confidence_level: float = 0.95,
+    n_bootstrap: int = 1000,
+    dataset_col: str = "dataset",
+    tuner_col: str = "tuner",
+    benchmark_identifier_col: str = "benchmark_identifier",
+):
+    raw_benchmark_data_copy = raw_benchmark_data.copy()
+    raw_benchmark_data_copy["observation_fill_rate"] = raw_benchmark_data_copy.groupby(
+        [benchmark_identifier_col, dataset_col, tuner_col] + [budget_unit]
+    )[metric].transform(lambda x: (x.notna().sum()) / len(x))
+
+    raw_benchmark_data_copy = raw_benchmark_data_copy[
+        raw_benchmark_data_copy["observation_fill_rate"] == 1
+    ]
+
+    filtered_data = raw_benchmark_data_copy[
+        raw_benchmark_data_copy[dataset_col].isin(dataset_filter)
+    ]
+    filtered_data = filtered_data[filtered_data[budget_unit] == budget_unit_slice]
+
+    result = []
+    alpha = 1 - confidence_level
+
+    # Group data by dataset and tuner
+    grouped = filtered_data.groupby([dataset_col, tuner_col])
+
+    for name, group in grouped:
+        dataset, tuner = name
+        mean_value = group[metric].mean()
+
+        # Bootstrap confidence intervals
+        bootstrap_means = []
+        for _ in range(n_bootstrap):
+            bootstrap_sample = group[metric].sample(n=len(group), replace=True)
+            bootstrap_means.append(bootstrap_sample.mean())
+
+        lower_bound = np.percentile(bootstrap_means, alpha / 2 * 100)
+        upper_bound = np.percentile(bootstrap_means, (1 - alpha / 2) * 100)
+
+        result.append(
+            {
+                dataset_col: dataset,
+                tuner_col: tuner,
+                metric: mean_value,
+                f"{metric}_ci_lower": lower_bound,
+                f"{metric}_ci_upper": upper_bound,
+            }
+        )
+
+    return pd.DataFrame(result)

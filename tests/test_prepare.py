@@ -22,7 +22,7 @@ def test_setup_yahpo_instance_configs():
         n_warm_starts=5,
         n_trials=10,
         timeout=3600,
-        n_instances=n_instances,
+        max_n_instances=n_instances,
     )
 
     assert len(configs) == n_instances

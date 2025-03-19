@@ -7,7 +7,6 @@ import os
 import random
 import time
 from hpobench.config import (
-    BLACK_BOX_IDS,
     JAHS201_IDS,
     FULL_TUNING_CONFIGURATIONS,
     DEV_TUNING_CONFIGURATIONS,
@@ -16,14 +15,10 @@ from hpobench.config import (
     N_TRIALS,
     N_WARM_STARTS,
     TIMEOUT,
-    OPEN_ML_IDS,
-    FAST_OPEN_ML_IDS,
-    SLOW_OPEN_ML_IDS,
 )
 from hpobench.utils import generate_hyperparameter_combinations
 from hpobench.prepare import (
     setup_yahpo_instance_configs,
-    setup_blackbox_configs,
     setup_jahs201_configs,
 )
 import logging
@@ -34,6 +29,7 @@ from hpobench.process import (
     process_performance_records,
     friedman_test_runner,
     nemenyi_pairwise_test,
+    get_average_metric_per_tuner_and_dataset,
 )
 from hpobench.generate import ObjectiveMetricGenerator
 
@@ -123,41 +119,25 @@ elif RUN_TYPE == "full":
     tuning_configurations = FULL_TUNING_CONFIGURATIONS
 
 experiment_configs = []
-if RUN_TYPE == "dev":
-    open_ml_ids = OPEN_ML_IDS[:5]
-    # n_repetitions = 5
-else:
-    open_ml_ids = OPEN_ML_IDS
 n_repetitions = N_REPETITIONS_PER_TUNER_CONFIG
 lc_bench_configs = setup_yahpo_instance_configs(
-    dataset="rbv2_svm",
+    dataset="lcbench",
     tuning_configurations=tuning_configurations,
     n_warm_starts=N_WARM_STARTS,
     n_trials=N_TRIALS,
     timeout=TIMEOUT,
-    n_instances=60,
+    max_n_instances=None,
 )
 experiment_configs.extend(lc_bench_configs)
 
-# if RUN_TYPE == "full":
-# blackbox_configs = setup_blackbox_configs(
-#     functions=BLACK_BOX_IDS[:2],
-#     tuning_configurations=tuning_configurations,
-#     n_warm_starts=N_WARM_STARTS,
-#     n_trials=N_TRIALS,
-#     timeout=TIMEOUT,
-# )
-# experiment_configs.extend(blackbox_configs)
-
-# jahs_201_configs = setup_jahs201_configs(
-#     datasets=JAHS201_IDS,
-#     tuning_configurations=tuning_configurations,
-#     n_warm_starts=N_WARM_STARTS,
-#     n_trials=N_TRIALS,
-#     timeout=TIMEOUT,
-# )
-# experiment_configs.extend(jahs_201_configs)
-
+jahs_201_configs = setup_jahs201_configs(
+    datasets=JAHS201_IDS,
+    tuning_configurations=tuning_configurations,
+    n_warm_starts=N_WARM_STARTS,
+    n_trials=N_TRIALS,
+    timeout=TIMEOUT,
+)
+experiment_configs.extend(jahs_201_configs)
 
 raw_benchmark_data = pd.DataFrame()
 logger.info("Running HPO benchmark...")
@@ -339,23 +319,23 @@ plot_path = f"cache/plots/{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}/"
 if not os.path.exists(plot_path):
     os.makedirs(plot_path)
 
-run_plots(
-    data=iteration_level_collapsed_results,
-    x_col="iteration",
-    y_cols=["cumulative_breach_rate", "rolling_breach_rate", "rank"],
-    col_measure="dataset",
-    row_measure=None,
-    plot_path=plot_path,
-)
-time.sleep(2)
-run_plots(
-    data=relativized_runtime_level_collapsed_results,
-    x_col="normalized_runtime",
-    y_cols=["rank", "best_performance"],
-    col_measure="dataset",
-    row_measure=None,
-    plot_path=plot_path,
-)
+# run_plots(
+#     data=iteration_level_collapsed_results,
+#     x_col="iteration",
+#     y_cols=["cumulative_breach_rate", "rolling_breach_rate", "rank"],
+#     col_measure="dataset",
+#     row_measure=None,
+#     plot_path=plot_path,
+# )
+# time.sleep(2)
+# run_plots(
+#     data=relativized_runtime_level_collapsed_results,
+#     x_col="normalized_runtime",
+#     y_cols=["rank", "best_performance"],
+#     col_measure="dataset",
+#     row_measure=None,
+#     plot_path=plot_path,
+# )
 time.sleep(2)
 plot_benchmark_data(
     data=benchmark_aggregated_relativized_runtime_level_collapsed_results,
@@ -375,6 +355,31 @@ plot_benchmark_data(
     add_confidence_intervals=True,
     row_measure=None,
     col_measure="benchmark_identifier",
+)
+
+# %%
+
+
+dataset_filter = random.sample(raw_benchmark_data["dataset"].unique().tolist(), 3)
+
+average_searcher_training_time = get_average_metric_per_tuner_and_dataset(
+    raw_benchmark_data=raw_benchmark_data,
+    metric="searcher_training_time",
+    dataset_filter=dataset_filter,
+    budget_unit="iteration",
+    tuner_col="tuner",
+    dataset_col="dataset",
+    budget_unit_slice=30,
+)
+
+average_estimator_error = get_average_metric_per_tuner_and_dataset(
+    raw_benchmark_data=raw_benchmark_data,
+    metric="estimator_error",
+    dataset_filter=dataset_filter,
+    budget_unit="iteration",
+    tuner_col="tuner",
+    dataset_col="dataset",
+    budget_unit_slice=30,
 )
 
 # %%
