@@ -7,15 +7,13 @@ from typing import Union, Optional, Literal
 from optuna.samplers import TPESampler, RandomSampler, CmaEsSampler, GPSampler
 from skopt import forest_minimize, gbrt_minimize, gp_minimize
 from skopt.space import Real, Integer as SKInteger, Categorical as SKCategorical
-from confopt.tuning import ObjectiveConformalSearcher
-from confopt.tracking import Trial
+from confopt.tuning import ConformalTuner
 from hpobench.generate import ObjectiveMetricGenerator
-from confopt.acquisition import (
-    MultiFitQuantileConformalSearcher,
-    SingleFitQuantileConformalSearcher,
+from confopt.selection.acquisition import (
     LocallyWeightedConformalSearcher,
+    QuantileConformalSearcher,
 )
-from confopt import ranges
+from confopt import wrapping as ranges
 from copy import deepcopy
 
 
@@ -152,8 +150,7 @@ def confopt_tune(
     params: dict[str, Union[IntRange, FloatRange, CategoricalRange]],
     performance_generator: ObjectiveMetricGenerator,
     sampler: Union[
-        MultiFitQuantileConformalSearcher,
-        SingleFitQuantileConformalSearcher,
+        QuantileConformalSearcher,
         LocallyWeightedConformalSearcher,
     ],
     warm_start_configs: Optional[list[tuple[dict, float]]] = None,
@@ -164,13 +161,14 @@ def confopt_tune(
 ):
     objective_fn = confopt_artificial_objective_function(performance_generator)
     confopt_params = build_confopt_search_space(params)
-    searcher = ObjectiveConformalSearcher(
+    searcher = ConformalTuner(
         objective_function=objective_fn,
         search_space=confopt_params,
-        metric_optimization="inverse",
+        metric_optimization="minimize",
+        n_candidate_configurations=10000,
         warm_start_configurations=warm_start_configs,
     )
-    searcher.search(
+    searcher.tune(
         searcher=deepcopy(sampler),
         runtime_budget=timeout,
         max_iter=n_trials,

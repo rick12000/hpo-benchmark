@@ -126,18 +126,28 @@ lc_bench_configs = setup_yahpo_instance_configs(
     n_warm_starts=N_WARM_STARTS,
     n_trials=N_TRIALS,
     timeout=TIMEOUT,
-    max_n_instances=None,
+    max_n_instances=3,
 )
 experiment_configs.extend(lc_bench_configs)
 
-jahs_201_configs = setup_jahs201_configs(
-    datasets=JAHS201_IDS,
-    tuning_configurations=tuning_configurations,
-    n_warm_starts=N_WARM_STARTS,
-    n_trials=N_TRIALS,
-    timeout=TIMEOUT,
-)
-experiment_configs.extend(jahs_201_configs)
+# rbv2_xgboost_configs = setup_yahpo_instance_configs(
+#     dataset="rbv2_xgboost",
+#     tuning_configurations=tuning_configurations,
+#     n_warm_starts=N_WARM_STARTS,
+#     n_trials=N_TRIALS,
+#     timeout=TIMEOUT,
+#     max_n_instances=3,
+# )
+# experiment_configs.extend(rbv2_xgboost_configs)
+
+# jahs_201_configs = setup_jahs201_configs(
+#     datasets=JAHS201_IDS,
+#     tuning_configurations=tuning_configurations,
+#     n_warm_starts=N_WARM_STARTS,
+#     n_trials=N_TRIALS,
+#     timeout=TIMEOUT,
+# )
+# experiment_configs.extend(jahs_201_configs)
 
 raw_benchmark_data = pd.DataFrame()
 logger.info("Running HPO benchmark...")
@@ -319,14 +329,19 @@ plot_path = f"cache/plots/{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}/"
 if not os.path.exists(plot_path):
     os.makedirs(plot_path)
 
-# run_plots(
-#     data=iteration_level_collapsed_results,
-#     x_col="iteration",
-#     y_cols=["cumulative_breach_rate", "rolling_breach_rate", "rank"],
-#     col_measure="dataset",
-#     row_measure=None,
-#     plot_path=plot_path,
-# )
+run_plots(
+    data=iteration_level_collapsed_results,
+    x_col="iteration",
+    y_cols=[
+        "cumulative_breach_rate",
+        "rolling_breach_rate",
+        "rank",
+        "best_performance",
+    ],
+    col_measure="dataset",
+    row_measure=None,
+    plot_path=plot_path,
+)
 # time.sleep(2)
 # run_plots(
 #     data=relativized_runtime_level_collapsed_results,
@@ -360,7 +375,7 @@ plot_benchmark_data(
 # %%
 
 
-dataset_filter = random.sample(raw_benchmark_data["dataset"].unique().tolist(), 3)
+dataset_filter = random.sample(raw_benchmark_data["dataset"].unique().tolist(), 6)
 
 average_searcher_training_time = get_average_metric_per_tuner_and_dataset(
     raw_benchmark_data=raw_benchmark_data,

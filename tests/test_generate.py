@@ -20,8 +20,8 @@ def test_blackbox_generator_predict_reproducibility():
 
 
 def test_jahs201_generator_predict__reproducibility():
-    # Initialize the Jahs201Generator with a dummy dataset
-    generator = Jahs201Generator(dataset="cifar10")
+    # Initialize the Jahs201Generator with lazy=True for testing
+    generator = Jahs201Generator(dataset="cifar10", lazy=True)
 
     # Create a dummy configuration
     configuration = generate_hyperparameter_combinations(

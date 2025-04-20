@@ -133,7 +133,7 @@ def plot_benchmark_data(
 
     # Add legend
     handles, labels = ax.get_legend_handles_labels()
-    fig.legend(handles, labels, loc="upper center", ncol=3, fontsize=10)
+    fig.legend(handles, labels, loc="upper center", ncol=2, fontsize=10)
     fig.tight_layout()
 
     # Save the plot

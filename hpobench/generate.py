@@ -126,13 +126,24 @@ class BlackBoxGenerator(ObjectiveMetricGenerator):
 
 
 class Jahs201Generator(ObjectiveMetricGenerator):
-    def __init__(self, dataset: str, metrics: list[str] = ["valid-acc", "runtime"]):
-        self.generator = Benchmark(task=dataset, lazy=False, metrics=metrics)
+    def __init__(
+        self,
+        dataset: str,
+        metrics: list[str] = ["valid-acc", "runtime"],
+        lazy: bool = False,
+    ):
+        # Store dataset and metrics
+        self._dataset = dataset
+        self._metrics = metrics
+        # Initialize Benchmark with the provided lazy value
+        self.generator = Benchmark(task=self._dataset, lazy=lazy, metrics=self._metrics)
 
     def predict(self, configuration: dict[str, Union[str, int, float, bool]]):
+        # No need for _ensure_initialized anymore
         return -self.generator(configuration)[200]["valid-acc"]
 
     def predict_runtime(self, configuration: dict[str, Union[str, int, float, bool]]):
+        # No need for _ensure_initialized anymore
         return self.generator(configuration)[200]["runtime"]
 
 
