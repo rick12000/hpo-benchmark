@@ -50,7 +50,7 @@ def _run_and_save_friedman(
     )
     filepath = os.path.join(output_path, filename)
     results_df.to_csv(filepath, index=False)
-    logger.info(f"Friedman test results saved to {filepath}")
+    logger.debug(f"Friedman test results saved to {filepath}")
     return results_df, adjusted_alpha
 
 
@@ -75,11 +75,8 @@ def _run_and_save_nemenyi(
     )
     filepath = os.path.join(output_path, filename)
     results_df.to_csv(filepath, index=False)
-    logger.info(f"Nemenyi pairwise test results saved to {filepath}")
-    significant_pairs = results_df[results_df["significant"]]
-    logger.info(
-        f"Found {len(significant_pairs)} significantly different pairs (Nemenyi test)"
-    )
+    logger.debug(f"Nemenyi pairwise test results saved to {filepath}")
+
     return results_df
 
 
@@ -96,7 +93,7 @@ def _aggregate_and_save(
     )
     filepath = os.path.join(output_path, filename)
     aggregated_results.to_csv(filepath, index=False)
-    logger.info(f"Aggregated results saved to {filepath}")
+    logger.debug(f"Aggregated results saved to {filepath}")
     return aggregated_results
 
 
@@ -111,7 +108,7 @@ def _plot_and_save(
     _ensure_dir(output_path)
     plot_path = os.path.join(output_path, filename_prefix)
     plot_func(data=data, plot_path=plot_path, **plot_kwargs)
-    logger.info(f"Plots saved in {output_path} with prefix {filename_prefix}")
+    logger.debug(f"Plots saved in {output_path} with prefix {filename_prefix}")
 
 
 # --- Main Analysis Functions ---
@@ -125,8 +122,6 @@ def analyze_main_benchmark(
     data_folder: str = "data",
     plots_folder: str = "plots",
 ):
-    logger.info("Analyzing Main HPO benchmark results...")
-
     analysis_data_path = os.path.join(cache_path, data_folder, run_start_str)
     plots_base_path = os.path.join(cache_path, plots_folder, run_start_str)
     _ensure_dir(analysis_data_path)
@@ -153,7 +148,6 @@ def analyze_main_benchmark(
         tuner_column=tuner_col,
         relativize_budget=True,
     )
-    logger.info("Processed performance records (relativized runtime).")
 
     iteration_results = process_performance_records(
         raw_benchmark_data=raw_benchmark_data,
@@ -164,7 +158,6 @@ def analyze_main_benchmark(
         tuner_column=tuner_col,
         relativize_budget=False,
     )
-    logger.info("Processed performance records (iteration level).")
 
     all_friedman, all_nemenyi = [], []
     for budget in budget_cross_sections:
@@ -241,8 +234,6 @@ def analyze_main_benchmark(
         col_measure=data_col,
         row_measure=bench_col,
     )
-
-    logger.info("Main HPO benchmark analysis finished.")
 
 
 def _prepare_tuning_effect_data(
@@ -323,9 +314,6 @@ def _prepare_estimator_comparison_data(
     )
     df.dropna(subset=[metric_col], inplace=True)
 
-    # Only use estimator_architecture (do not use estimator_config)
-    # No need to create estimator_architecture from estimator_config
-
     rank_grouping_cols = ["benchmark_identifier", "dataset", "data_size", "repetition"]
     ranked_df = calculate_ranks(
         experiment_log=df,
@@ -375,7 +363,6 @@ def analyze_estimator_comparison(
     data_folder: str = "data",
     plots_folder: str = "plots",
 ):
-    logger.info("Starting Estimator Comparison Analysis (Non-Tuned)...")
     metric_col = "estimator_error"
 
     analysis_data_path = os.path.join(cache_path, data_folder, run_start_str)
@@ -436,8 +423,6 @@ def analyze_estimator_comparison(
         output_folder=data_folder,
     )
 
-    logger.info("Estimator Comparison Analysis Finished.")
-
 
 def analyze_dataset_level_benchmark(
     dataset_benchmark_data: pd.DataFrame,
@@ -449,7 +434,6 @@ def analyze_dataset_level_benchmark(
     if logger is None:
         logger = logging.getLogger(__name__)
 
-    logger.info(f"Analyzing dataset-level benchmark data for {dataset_name}...")
     plots_path = os.path.join(cache_path, "plots", run_start_str)
     _ensure_dir(plots_path)
 
@@ -482,8 +466,6 @@ def analyze_dataset_level_benchmark(
             add_confidence_intervals=True,
         )
 
-    logger.info("Dataset-level benchmark analysis finished.")
-
 
 def analyze_tuning_effect(
     results_df: pd.DataFrame,
@@ -493,7 +475,6 @@ def analyze_tuning_effect(
     data_folder: str = "data",
     plots_folder: str = "plots",
 ):
-    logger.info("Starting Tuning Effect Analysis...")
     metric_col = "estimator_error"
 
     analysis_data_path = os.path.join(cache_path, data_folder, run_start_str)
@@ -560,5 +541,3 @@ def analyze_tuning_effect(
         "Tuning effect Nemenyi pairwise results",
         output_folder=data_folder,
     )
-
-    logger.info("Tuning Effect Analysis Finished.")

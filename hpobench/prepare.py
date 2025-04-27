@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 def setup_yahpo_instance_configs(
-    dataset: str,
+    benchmark: str,
     tuning_configurations: list,
     n_warm_starts: int,
     n_trials: int,
@@ -37,7 +37,7 @@ def setup_yahpo_instance_configs(
         List of ExperimentConfig objects
     """
     experiment_configs = []
-    benchmark_set = BenchmarkSet(dataset)
+    benchmark_set = BenchmarkSet(benchmark)
     instances = benchmark_set.instances
 
     # Determine the primary metric for this benchmark set
@@ -61,10 +61,10 @@ def setup_yahpo_instance_configs(
 
     for instance_value in instances:
         logger.info(
-            f"Setting up YAHPO benchmark '{dataset}' with instance '{instance_value}'..."
+            f"Setting up YAHPO benchmark '{benchmark}' with instance '{instance_value}'..."
         )
 
-        instance_benchmark_set = BenchmarkSet(dataset, instance=instance_value)
+        instance_benchmark_set = BenchmarkSet(benchmark, instance=instance_value)
 
         # Get configuration space with fidelity parameters
         yahpo_config_space = instance_benchmark_set.get_opt_space(
@@ -103,7 +103,7 @@ def setup_yahpo_instance_configs(
 
         # Create experiment generator
         experiment_generator = YahpoGenerator(
-            dataset=dataset,
+            dataset=benchmark,
             instance_value=instance_value,
             instance_name=instance_names,
             fidelity_space=fidelity_space,
@@ -119,7 +119,7 @@ def setup_yahpo_instance_configs(
                 n_warm_starts=n_warm_starts,
                 n_trials=n_trials,
                 timeout=timeout,
-                benchmark_identifier=dataset,
+                benchmark_identifier=benchmark,
                 dataset_identifier=instance_value,
                 metric=primary_metric,  # <-- Assign the determined metric
             )

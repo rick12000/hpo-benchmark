@@ -17,7 +17,7 @@ def test_setup_yahpo_instance_configs():
     n_instances = 5
 
     configs = setup_yahpo_instance_configs(
-        dataset="lcbench",
+        benchmark="lcbench",
         tuning_configurations=DEV_TUNING_CONFIGURATIONS,
         n_warm_starts=5,
         n_trials=10,
