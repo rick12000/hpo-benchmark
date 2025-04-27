@@ -12,7 +12,7 @@ from confopt.selection.acquisition import (
 from hpobench.generate import ObjectiveMetricGenerator
 
 
-N_REPETITIONS_PER_TUNER_CONFIG = 5
+N_REPETITIONS_PER_TUNER_CONFIG = 3
 N_TRIALS = 50
 TIMEOUT = None
 N_WARM_STARTS = 15
@@ -57,6 +57,7 @@ class ExperimentConfig(BaseModel):
     n_warm_starts: int
     benchmark_identifier: str
     dataset_identifier: str
+    metric: Optional[str] = None
     n_trials: Optional[int] = None
     timeout: Optional[float] = None
 
@@ -69,6 +70,34 @@ class ExperimentConfig(BaseModel):
                 "At least one of 'n_trials' or 'timeout' must be specified."
             )
         return values
+
+
+default_interval_width = 0.9
+default_sampler = LowerBoundSampler(
+    interval_width=default_interval_width,
+    adapter="DtACI",
+    c=1,
+    beta_decay="logarithmic_decay",
+)
+
+_QUANTILE_ARCHITECTURES = ["qrf"]
+_FRAMEWORKS = [
+    (None, ""),
+    ("fixed", " TUNED-F"),
+]
+STATIC_TUNING_CONFIGURATIONS: list[TunerConfig] = [
+    TunerConfig(
+        tuner="confopt",
+        sampler=QuantileConformalSearcher(
+            quantile_estimator_architecture=arch,
+            sampler=default_sampler,
+        ),
+        config_identifier=f"{arch.upper()}{suffix}",
+        searcher_tuning_framework=framework,
+    )
+    for arch in _QUANTILE_ARCHITECTURES
+    for framework, suffix in _FRAMEWORKS
+]
 
 
 JAHS201_SEARCH_SPACE = {
@@ -88,9 +117,7 @@ JAHS201_SEARCH_SPACE = {
     "TrivialAugment": CategoricalRange(type="categorical", choices=[True, False]),
     "W": CategoricalRange(type="categorical", choices=[16]),
     "WeightDecay": FloatRange(type="float", lower=0.00001, upper=0.01),
-    "epoch": CategoricalRange(
-        type="categorical", choices=[200]
-    ),  # IntRange(type="int", lower=5, upper=200),
+    "epoch": CategoricalRange(type="categorical", choices=[200]),
 }
 
 
@@ -103,7 +130,6 @@ JAHS201_IDS: list[str] = ["cifar10", "fashion_mnist", "colorectal_histology"]
 BLACK_BOX_IDS: list[str] = ["rastrigin", "shekel", "weierstrass", "griewank", "ackley"]
 
 
-default_interval_width = 0.9
 FULL_TUNING_CONFIGURATIONS = [
     # 1. Rivals:
     # TunerConfig(
@@ -149,7 +175,7 @@ FULL_TUNING_CONFIGURATIONS = [
     TunerConfig(
         tuner="confopt",
         sampler=QuantileConformalSearcher(
-            quantile_estimator_architecture="qgbm",
+            quantile_estimator_architecture="qrf",
             sampler=LowerBoundSampler(
                 interval_width=default_interval_width,
                 adapter="DtACI",
@@ -188,40 +214,42 @@ FULL_TUNING_CONFIGURATIONS = [
     #     config_identifier="ACI-QGBM UCB c=2 inverse_square_root_decay",
     #     searcher_tuning_framework=None,
     # ),
-    TunerConfig(
-        tuner="confopt",
-        sampler=QuantileConformalSearcher(
-            quantile_estimator_architecture="qgbm",
-            sampler=ExpectedImprovementSampler(
-                n_quantiles=4, num_ei_samples=100, adapter="DtACI"
-            ),
-        ),
-        config_identifier="QGBM EI",
-        searcher_tuning_framework=None,
-    ),
     # TunerConfig(
     #     tuner="confopt",
     #     sampler=QuantileConformalSearcher(
     #         quantile_estimator_architecture="qrf",
     #         sampler=InformationGainSampler(
-    #             n_candidates=10,
-    #             n_y_samples_per_x=3,
+    #             n_X_candidates=10,
+    #             adapter="DtACI",
+    #             n_y_candidates_per_x=3,
+    #             sampling_strategy="thompson"
     #             )
     #     ),
-    #     config_identifier="QRF ES",
+    #     config_identifier="QGBM ES",
     #     searcher_tuning_framework=None,
     # ),
-    TunerConfig(
-        tuner="confopt",
-        sampler=QuantileConformalSearcher(
-            quantile_estimator_architecture="qgbm",
-            sampler=ThompsonSampler(
-                n_quantiles=4, enable_optimistic_sampling=False, adapter="DtACI"
-            ),
-        ),
-        config_identifier="ACI-QGBM TS",
-        searcher_tuning_framework=None,
-    ),
+    # TunerConfig(
+    #     tuner="confopt",
+    #     sampler=QuantileConformalSearcher(
+    #         quantile_estimator_architecture="qrf",
+    #         sampler=ExpectedImprovementSampler(
+    #             n_quantiles=4, num_ei_samples=100, adapter="DtACI"
+    #         ),
+    #     ),
+    #     config_identifier="QGBM EI",
+    #     searcher_tuning_framework=None,
+    # ),
+    # TunerConfig(
+    #     tuner="confopt",
+    #     sampler=QuantileConformalSearcher(
+    #         quantile_estimator_architecture="qrf",
+    #         sampler=ThompsonSampler(
+    #             n_quantiles=4, enable_optimistic_sampling=False, adapter="DtACI"
+    #         ),
+    #     ),
+    #     config_identifier="ACI-QGBM TS",
+    #     searcher_tuning_framework=None,
+    # ),
     # TunerConfig(
     #     tuner="confopt",
     #     sampler=QuantileConformalSearcher(
@@ -360,27 +388,45 @@ FULL_TUNING_CONFIGURATIONS = [
     # ),
 ]
 
+# Configurations specifically for dataset-level benchmarks
+# One with tuning disabled and one with tuning enabled using same estimator architecture
+DATASET_BENCHMARK_TUNING_CONFIGURATIONS = [
+    # Configuration with tuning disabled
+    TunerConfig(
+        tuner="confopt",
+        sampler=QuantileConformalSearcher(
+            quantile_estimator_architecture="qrf",
+            sampler=LowerBoundSampler(
+                interval_width=default_interval_width,
+                adapter="DtACI",
+                c=1,
+            ),
+        ),
+        config_identifier="QRF-static",
+        searcher_tuning_framework=None,  # No tuning
+    ),
+    # Same configuration but with tuning enabled
+    TunerConfig(
+        tuner="confopt",
+        sampler=QuantileConformalSearcher(
+            quantile_estimator_architecture="qrf",
+            sampler=LowerBoundSampler(
+                interval_width=default_interval_width,
+                adapter="DtACI",
+                c=1,
+            ),
+        ),
+        config_identifier="QRF-tuned",
+        searcher_tuning_framework="fixed",  # Fixed tuning framework
+    ),
+]
 
 DEV_TUNING_CONFIGURATIONS = [
-    # TunerConfig(
-    #     tuner="skopt",
-    #     sampler="gbrt",
-    #     config_identifier="GBRT",
-    # ),
     TunerConfig(
         tuner="optuna",
         sampler="tpe",
         config_identifier="TPE",
     ),
-    # TunerConfig(
-    #     tuner="confopt",
-    #     sampler=QuantileConformalSearcher(
-    #         quantile_estimator_architecture="qgbm",
-    #         sampler=ThompsonSampler(n_quantiles=4, enable_optimistic_sampling=False),
-    #     ),
-    #     config_identifier="QGBM TS",
-    #     searcher_tuning_framework=None,
-    # ),
     TunerConfig(
         tuner="confopt",
         sampler=QuantileConformalSearcher(

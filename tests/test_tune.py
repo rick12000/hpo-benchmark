@@ -112,8 +112,10 @@ def test_confopt_tune_reproducibility(
     """Test that confopt_tune produces the same results when called with the same random seed."""
     # Create the sampler instance with the given parameters
     internal_sampler = sampler_class(**sampler_params)
-    estimator_params["sampler"] = internal_sampler
-    sampler = estimator_class(**estimator_params)
+    # Create a copy for the first run to avoid modifying the fixture input
+    estimator_params_1 = estimator_params.copy()
+    estimator_params_1["sampler"] = internal_sampler
+    sampler = estimator_class(**estimator_params_1)  # Use the copied params
 
     random_state = 42
 

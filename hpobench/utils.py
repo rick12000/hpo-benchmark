@@ -2,6 +2,12 @@ import ast
 from hpobench.config import IntRange, CategoricalRange, FloatRange
 import random
 from typing import Optional, Union
+import pandas as pd
+import os
+import logging
+from hpobench.generate import ObjectiveMetricGenerator
+
+logger = logging.getLogger(__name__)
 
 
 def q10(x):
@@ -109,3 +115,53 @@ def parse_config_space(s, openml_id: str):
     config_dict["OpenML_task_id"] = CategoricalRange(choices=[openml_id])
 
     return config_dict
+
+
+def save_analysis_results(
+    df: pd.DataFrame,
+    cache_path: str,
+    run_start_str: str,
+    filename: str,
+    description: str,
+    output_folder: str = "data",
+):
+    if df is not None and not df.empty:
+        analysis_data_path = os.path.join(cache_path, output_folder, run_start_str)
+        os.makedirs(analysis_data_path, exist_ok=True)
+        full_filename = os.path.join(analysis_data_path, filename)
+        try:
+            df.to_csv(full_filename, index=False)
+            logger.info(f"{description} saved to {full_filename}")
+        except Exception as e:
+            logger.error(
+                f"Failed to save {description} to {full_filename}: {e}", exc_info=True
+            )
+    else:
+        logger.warning(f"Skipping save for {description}: DataFrame is empty or None.")
+
+
+def add_runtime(
+    experiment_log: pd.DataFrame,
+    tune_start,
+    performance_generator: ObjectiveMetricGenerator,
+):
+    """Adds cumulative generator runtime and total runtime to the experiment log."""
+    experiment_log_copy = experiment_log.copy()
+
+    # Calculate cumulative runtime for the generator predictions
+    experiment_log_copy["generator_runtime"] = experiment_log_copy[
+        "configurations"
+    ].apply(lambda x: performance_generator.predict_runtime(x))
+    experiment_log_copy["generator_runtime"] = experiment_log_copy[
+        "generator_runtime"
+    ].cumsum()
+
+    # Calculate total runtime (tuner time + generator time)
+    experiment_log_copy["runtime"] = (
+        experiment_log_copy["end_time"] - tune_start
+    ).dt.total_seconds()  # Use total_seconds() for float representation
+    experiment_log_copy["runtime"] = (
+        experiment_log_copy["runtime"] + experiment_log_copy["generator_runtime"]
+    )
+
+    return experiment_log_copy
