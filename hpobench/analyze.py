@@ -248,9 +248,6 @@ def _prepare_tuning_effect_data(
     else:
         df["tuning_framework"] = "None"
 
-    # Optionally, create a holistic identifier (not strictly needed for current logic)
-    # df['holistic_id'] = df['estimator_architecture'] + '_' + df['tuning_framework']
-
     rank_grouping_cols = [
         "benchmark_identifier",
         "dataset",
@@ -276,45 +273,22 @@ def _prepare_tuning_effect_data(
         ranked_df.groupby(avg_rank_cols, observed=True)["rank"].mean().reset_index()
     )
 
-    filtered = dataset_avg_ranks[
-        dataset_avg_ranks["tuning_framework"].isin(["None", "fixed"])
-    ].copy()
-
-    group_cols = [
-        "benchmark_identifier",
-        "dataset",
-        "data_size",
-        "estimator_architecture",
-    ]
-    valid_groups = filtered.groupby(group_cols)["tuning_framework"].nunique()
-    valid_groups = valid_groups[valid_groups == 2].index
-    filtered = filtered[filtered.set_index(group_cols).index.isin(valid_groups)]
-
-    group_min_datasets = filtered.groupby(
-        ["benchmark_identifier", "data_size", "estimator_architecture"]
-    )["dataset"].nunique()
-    group_min_datasets = group_min_datasets[group_min_datasets >= 3].index
-    filtered = filtered[
-        filtered.set_index(
-            ["benchmark_identifier", "data_size", "estimator_architecture"]
-        ).index.isin(group_min_datasets)
-    ]
-
-    return filtered
+    return dataset_avg_ranks
 
 
 def _prepare_estimator_comparison_data(
     results_df: pd.DataFrame, metric_col: str
 ) -> pd.DataFrame:
     df = results_df.copy()
-    df = (
-        df[df["tuning_framework"].fillna("None") == "None"].copy()
-        if "tuning_framework" in df.columns
-        else df
-    )
-    df.dropna(subset=[metric_col], inplace=True)
+    df["tuning_framework"] = df["tuning_framework"].fillna("None")
 
-    rank_grouping_cols = ["benchmark_identifier", "dataset", "data_size", "repetition"]
+    rank_grouping_cols = [
+        "benchmark_identifier",
+        "dataset",
+        "data_size",
+        "repetition",
+        "tuning_framework",
+    ]
     ranked_df = calculate_ranks(
         experiment_log=df,
         ranking_columns=rank_grouping_cols,
@@ -326,31 +300,12 @@ def _prepare_estimator_comparison_data(
         "benchmark_identifier",
         "dataset",
         "data_size",
+        "tuning_framework",
         "estimator_architecture",
     ]
     dataset_avg_ranks = (
         ranked_df.groupby(avg_rank_cols, observed=True)["rank"].mean().reset_index()
     )
-
-    group_min_datasets = dataset_avg_ranks.groupby(
-        ["benchmark_identifier", "data_size"]
-    )["dataset"].nunique()
-    group_min_datasets = group_min_datasets[group_min_datasets >= 3].index
-    dataset_avg_ranks = dataset_avg_ranks[
-        dataset_avg_ranks.set_index(["benchmark_identifier", "data_size"]).index.isin(
-            group_min_datasets
-        )
-    ]
-
-    group_min_estimators = dataset_avg_ranks.groupby(
-        ["benchmark_identifier", "data_size"]
-    )["estimator_architecture"].nunique()
-    group_min_estimators = group_min_estimators[group_min_estimators >= 2].index
-    dataset_avg_ranks = dataset_avg_ranks[
-        dataset_avg_ranks.set_index(["benchmark_identifier", "data_size"]).index.isin(
-            group_min_estimators
-        )
-    ]
 
     return dataset_avg_ranks
 
@@ -381,7 +336,7 @@ def analyze_estimator_comparison(
         output_folder=data_folder,
     )
 
-    breakout_cols = ["benchmark_identifier", "data_size"]
+    breakout_cols = ["benchmark_identifier", "data_size", "tuning_framework"]
     friedman_results, _ = _run_and_save_friedman(
         data=prepared_df,
         breakout_col=breakout_cols,
@@ -393,7 +348,7 @@ def analyze_estimator_comparison(
         filename="estimator_comparison_friedman.csv",
         logger=logger,
     )
-    nemenyi_results = _run_and_save_nemenyi(
+    _run_and_save_nemenyi(
         data=prepared_df,
         breakout_col=breakout_cols,
         across_col="dataset",
@@ -403,24 +358,6 @@ def analyze_estimator_comparison(
         output_path=analysis_data_path,
         filename="estimator_comparison_nemenyi.csv",
         logger=logger,
-    )
-
-    # No summary or plot_df, just save raw results
-    save_analysis_results(
-        friedman_results,
-        cache_path,
-        run_start_str,
-        "estimator_comparison_friedman_results.csv",
-        "Estimator comparison friedman results",
-        output_folder=data_folder,
-    )
-    save_analysis_results(
-        nemenyi_results,
-        cache_path,
-        run_start_str,
-        "estimator_comparison_nemenyi_pairwise.csv",
-        "Estimator comparison Nemenyi pairwise results",
-        output_folder=data_folder,
     )
 
 
@@ -512,7 +449,7 @@ def analyze_tuning_effect(
         filename="tuning_effect_friedman.csv",
         logger=logger,
     )
-    nemenyi_results = _run_and_save_nemenyi(
+    _run_and_save_nemenyi(
         data=filtered_df,
         breakout_col=breakout_cols,
         across_col="dataset",
@@ -522,22 +459,4 @@ def analyze_tuning_effect(
         output_path=analysis_data_path,
         filename="tuning_effect_nemenyi.csv",
         logger=logger,
-    )
-
-    # Removed: call to _summarize_tuning_effect and usage of its outputs
-    save_analysis_results(
-        friedman_results,
-        cache_path,
-        run_start_str,
-        "tuning_effect_friedman_results.csv",
-        "Tuning effect friedman results",
-        output_folder=data_folder,
-    )
-    save_analysis_results(
-        nemenyi_results,
-        cache_path,
-        run_start_str,
-        "tuning_effect_nemenyi_pairwise.csv",
-        "Tuning effect Nemenyi pairwise results",
-        output_folder=data_folder,
     )

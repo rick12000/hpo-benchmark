@@ -12,7 +12,7 @@ from confopt.selection.acquisition import (
 from hpobench.generate import ObjectiveMetricGenerator
 
 
-N_REPETITIONS_PER_TUNER_CONFIG = 3
+N_REPETITIONS_PER_TUNER_CONFIG = 5
 N_TRIALS = 50
 TIMEOUT = None
 N_WARM_STARTS = 15
@@ -80,7 +80,19 @@ default_sampler = LowerBoundSampler(
     beta_decay="logarithmic_decay",
 )
 
-_QUANTILE_ARCHITECTURES = ["qrf"]
+_QUANTILE_ARCHITECTURES = [
+    # "qgbm",
+    "qrf",
+    # "qknn",
+    # "ql",
+    # "qlgbm",
+    "qgp",
+    "qens1",
+    "qens2",
+    "qens3",
+    "qens4",
+    "qens5",
+]
 _FRAMEWORKS = [
     (None, ""),
     ("fixed", " TUNED-F"),
