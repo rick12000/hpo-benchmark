@@ -11,7 +11,13 @@ import matplotlib
 from hpobench.utils import q10, q90, save_analysis_results
 from hpobench.generate import ObjectiveMetricGenerator
 from hpobench.tune import confopt_tune
-from hpobench.plot import plot_benchmark_data, plot_rank_analysis, run_plots
+from hpobench.plot import (
+    plot_benchmark_data,
+    plot_rank_analysis,
+    run_plots,
+    plot_estimator_rank_vs_datasize,
+    plot_tuning_rank_comparison,
+)
 from hpobench.process import (
     process_performance_records,
     aggregate_benchmark_data,
@@ -310,6 +316,65 @@ def _prepare_estimator_comparison_data(
     return dataset_avg_ranks
 
 
+def _calculate_win_percentage(
+    data: pd.DataFrame,
+    breakout_cols: List[str],
+    dataset_col: str,
+    entity_col: str,
+    rank_col: str,
+) -> pd.DataFrame:
+    """Calculates the win percentage for each entity across datasets within breakout groups."""
+    df = data.copy()
+    grouping_cols = breakout_cols + [dataset_col]
+
+    # Identify the minimum rank within each dataset and breakout group
+    df["min_rank"] = df.groupby(grouping_cols)[rank_col].transform("min")
+
+    # Mark winners (rank == min_rank)
+    df["is_winner"] = (df[rank_col] == df["min_rank"]).astype(int)
+
+    # Aggregate win counts per entity within each breakout group
+    win_counts = (
+        df.groupby(breakout_cols + [entity_col], observed=True)["is_winner"]
+        .sum()
+        .reset_index(name="win_count")
+    )
+
+    # Count total number of unique datasets within each breakout group
+    total_datasets = (
+        df.groupby(breakout_cols, observed=True)[dataset_col]
+        .nunique()
+        .reset_index(name="total_datasets")
+    )
+
+    # Ensure all entity combinations within each breakout group are present
+    all_combos = df[breakout_cols + [entity_col]].drop_duplicates()
+
+    # Merge win counts with all combinations
+    win_analysis = pd.merge(
+        all_combos, win_counts, on=breakout_cols + [entity_col], how="left"
+    )
+
+    # Merge with total dataset counts
+    win_analysis = pd.merge(win_analysis, total_datasets, on=breakout_cols, how="left")
+
+    # Fill NaN win counts with 0 (for entities that never won)
+    win_analysis["win_count"] = win_analysis["win_count"].fillna(0).astype(int)
+
+    # Calculate win percentage
+    # Avoid division by zero if total_datasets is somehow 0
+    win_analysis["win_percentage"] = np.where(
+        win_analysis["total_datasets"] > 0,
+        (win_analysis["win_count"] / win_analysis["total_datasets"]) * 100,
+        0,
+    )
+    win_analysis["win_percentage"] = win_analysis["win_percentage"].fillna(0)
+
+    return win_analysis[
+        breakout_cols + [entity_col, "win_count", "total_datasets", "win_percentage"]
+    ]
+
+
 def analyze_estimator_comparison(
     results_df: pd.DataFrame,
     cache_path: str,
@@ -321,9 +386,11 @@ def analyze_estimator_comparison(
     metric_col = "estimator_error"
 
     analysis_data_path = os.path.join(cache_path, data_folder, run_start_str)
-    plots_path = os.path.join(cache_path, plots_folder)
+    estimator_plots_path = os.path.join(
+        cache_path, plots_folder, run_start_str, "estimator_analysis"
+    )
     _ensure_dir(analysis_data_path)
-    _ensure_dir(plots_path)
+    _ensure_dir(estimator_plots_path)
 
     prepared_df = _prepare_estimator_comparison_data(results_df, metric_col)
 
@@ -335,6 +402,27 @@ def analyze_estimator_comparison(
         "Estimator comparison dataset average ranks",
         output_folder=data_folder,
     )
+
+    plot_agg_cols = [
+        "benchmark_identifier",
+        "data_size",
+        "tuning_framework",
+        "estimator_architecture",
+    ]
+    plot_data = (
+        prepared_df.groupby(plot_agg_cols, observed=True)["rank"].mean().reset_index()
+    )
+
+    plot_estimator_rank_vs_datasize(
+        data=plot_data,
+        plot_base_path=estimator_plots_path,
+        x_col="data_size",
+        y_col="rank",
+        group_col="estimator_architecture",
+        tuning_col="tuning_framework",
+        benchmark_col="benchmark_identifier",
+    )
+    logger.info(f"Estimator rank vs data size plots saved in {estimator_plots_path}")
 
     breakout_cols = ["benchmark_identifier", "data_size", "tuning_framework"]
     friedman_results, _ = _run_and_save_friedman(
@@ -358,6 +446,22 @@ def analyze_estimator_comparison(
         output_path=analysis_data_path,
         filename="estimator_comparison_nemenyi.csv",
         logger=logger,
+    )
+
+    win_percentage_results = _calculate_win_percentage(
+        data=prepared_df,
+        breakout_cols=breakout_cols,
+        dataset_col="dataset",
+        entity_col="estimator_architecture",
+        rank_col="rank",
+    )
+    save_analysis_results(
+        win_percentage_results,
+        cache_path,
+        run_start_str,
+        "estimator_comparison_win_percentage.csv",
+        "Estimator comparison win percentages across datasets",
+        output_folder=data_folder,
     )
 
 
@@ -415,13 +519,14 @@ def analyze_tuning_effect(
     metric_col = "estimator_error"
 
     analysis_data_path = os.path.join(cache_path, data_folder, run_start_str)
-    plots_path = os.path.join(cache_path, plots_folder)
+    tuning_plots_path = os.path.join(
+        cache_path, plots_folder, run_start_str, "tuning_effect"
+    )
     _ensure_dir(analysis_data_path)
-    _ensure_dir(plots_path)
+    _ensure_dir(tuning_plots_path)
 
     filtered_df = _prepare_tuning_effect_data(results_df, metric_col)
 
-    # Create combined key for statistical tests
     filtered_df["estimator_and_tuning_framework"] = (
         filtered_df["tuning_framework"].astype(str)
         + "|"
@@ -437,6 +542,18 @@ def analyze_tuning_effect(
         output_folder=data_folder,
     )
 
+    plot_agg_cols_tuning = [
+        "benchmark_identifier",
+        "data_size",
+        "estimator_architecture",
+        "tuning_framework",
+    ]
+    plot_data_tuning = (
+        filtered_df.groupby(plot_agg_cols_tuning, observed=True)["rank"]
+        .mean()
+        .reset_index()
+    )
+
     breakout_cols = ["benchmark_identifier", "data_size"]
     friedman_results, _ = _run_and_save_friedman(
         data=filtered_df,
@@ -449,7 +566,7 @@ def analyze_tuning_effect(
         filename="tuning_effect_friedman.csv",
         logger=logger,
     )
-    _run_and_save_nemenyi(
+    nemenyi_df = _run_and_save_nemenyi(
         data=filtered_df,
         breakout_col=breakout_cols,
         across_col="dataset",
@@ -460,3 +577,16 @@ def analyze_tuning_effect(
         filename="tuning_effect_nemenyi.csv",
         logger=logger,
     )
+
+    plot_tuning_rank_comparison(
+        data=plot_data_tuning,
+        nemenyi_results=nemenyi_df,
+        plot_base_path=tuning_plots_path,
+        data_size_col="data_size",
+        rank_col="rank",
+        estimator_col="estimator_architecture",
+        tuning_col="tuning_framework",
+        benchmark_col="benchmark_identifier",
+        alpha=alpha,
+    )
+    logger.info(f"Tuning rank comparison plots saved in {tuning_plots_path}")

@@ -95,7 +95,7 @@ if __name__ == "__main__":
                 n_trials=2,
                 timeout=timeout,
                 logger=logger,
-                max_n_instances_per_benchmark=30,
+                max_n_instances_per_benchmark=3,
             )
             result_df = run_main_benchmark(
                 experiment_configs=static_experiment_configs,
