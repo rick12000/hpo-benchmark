@@ -1,5 +1,6 @@
 import os
 import pandas as pd
+import warnings
 
 from hpobench.config import (
     FULL_TUNING_CONFIGURATIONS,
@@ -24,14 +25,21 @@ from hpobench.orchestrate import (
     run_main_benchmark,
 )
 
+warnings.filterwarnings(
+    "ignore",
+    message="Maximum number of iterations .* reached",
+    module="statsmodels.regression.quantile_regression",
+)
+
+
 if __name__ == "__main__":
     CACHE_PATH = "cache/"
     BASE_RANDOM_STATE = 42
 
     # Section control dictionary
     run_sections = {
-        "run_main_benchmark": False,
-        "run_static_analysis": True,
+        "run_main_benchmark": True,
+        "run_static_analysis": False,
         "run_tuning_benchmark": False,
     }
 
@@ -60,7 +68,7 @@ if __name__ == "__main__":
             n_trials=n_trials,
             timeout=timeout,
             logger=logger,
-            max_n_instances_per_benchmark=3,
+            max_n_instances_per_benchmark=1,
         )
 
         raw_benchmark_data = run_main_benchmark(

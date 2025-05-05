@@ -19,19 +19,40 @@ def collapse_per_budget(
     metrics=["rank", "best_performance"],
     budget_unit="runtime",
 ):
+    """
+    Aggregate data by budget unit while preserving meaningful column naming.
+
+    Returns a DataFrame with metrics aggregated with mean, q10, and q90 values
+    but without adding "_mean" to the base metric name.
+    """
+    # Create aggregations dictionary
     aggregations = {}
     for metric in metrics:
-        aggregations[metric] = ["mean", q10, q90]
+        aggregations[metric] = [
+            ("mean", "mean"),  # Use "mean" instead of empty string
+            ("q10", q10),
+            ("q90", q90),
+        ]
+
+    # Group by experiment aggregators and budget unit
     processed_benchmark_data = raw_benchmark_data.groupby(
         experiment_aggregators + [budget_unit], as_index=False
     ).agg(aggregations)
-    processed_benchmark_data.columns = [
-        "_".join(col) if isinstance(col, tuple) else col
-        for col in processed_benchmark_data.columns
-    ]
-    processed_benchmark_data.columns = [
-        col if col[-1] != "_" else col[:-1] for col in processed_benchmark_data.columns
-    ]
+
+    # Process column names to have the desired format
+    new_columns = []
+    for col in processed_benchmark_data.columns:
+        if isinstance(col, tuple):
+            metric, agg_name = col
+            if agg_name == "mean":
+                new_columns.append(metric)
+            elif agg_name in ["q10", "q90"]:
+                new_columns.append(f"{metric}_{agg_name}")
+            else:
+                new_columns.append(metric)
+        else:
+            new_columns.append(col)
+    processed_benchmark_data.columns = new_columns
     return processed_benchmark_data
 
 
@@ -347,7 +368,7 @@ def bootstrap_aggregate(
     group_data: pd.Series, n_bootstraps: int = 100, random_state: Optional[int] = None
 ) -> Dict[str, float]:
     if len(group_data) == 0:
-        return {"mean": np.nan, "q10": np.nan, "q90": np.nan}
+        return {"value": np.nan, "q10": np.nan, "q90": np.nan}
     sample_mean = np.mean(group_data)
     np.random.seed(random_state)
     bootstrap_means = []
@@ -357,7 +378,7 @@ def bootstrap_aggregate(
         )
         bootstrap_means.append(np.mean(bootstrap_sample))
     return {
-        "mean": sample_mean,
+        "value": sample_mean,
         "q10": np.percentile(bootstrap_means, 10),
         "q90": np.percentile(bootstrap_means, 90),
     }
@@ -386,7 +407,8 @@ def aggregate_benchmark_data(
                     n_bootstraps=n_bootstraps,
                     random_state=random_state,
                 )
-                group_result[f"{metric}_mean"] = bootstrap_stats["mean"]
+                # Remove the "_mean" suffix and use the metric name directly
+                group_result[f"{metric}"] = bootstrap_stats["value"]
                 group_result[f"{metric}_q10"] = bootstrap_stats["q10"]
                 group_result[f"{metric}_q90"] = bootstrap_stats["q90"]
         results.append(group_result)

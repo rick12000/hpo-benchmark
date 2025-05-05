@@ -61,7 +61,7 @@ def setup_environment(cache_path: str = "cache/") -> tuple[str, logging.Logger]:
 
 
 def load_benchmark_configs(
-    benchmarks: list[Literal["jahs201", "lcbench"]],
+    benchmarks: list[Literal["jahs201", "lcbench", "rbv2_xgboost"]],
     tuning_configurations,
     n_warm_starts,
     n_trials,
@@ -72,16 +72,17 @@ def load_benchmark_configs(
     logger.info("Setting up benchmark instances...")
     experiment_configs = []
 
-    if "lcbench" in benchmarks:
-        configs = setup_yahpo_instance_configs(
-            benchmark="lcbench",
-            tuning_configurations=tuning_configurations,
-            n_warm_starts=n_warm_starts,
-            n_trials=n_trials,
-            timeout=timeout,
-            max_n_instances=max_n_instances_per_benchmark,
-        )
-        experiment_configs.extend(configs)
+    for benchmark in benchmarks:
+        if benchmark in ["rbv2_xgboost", "lcbench"]:
+            configs = setup_yahpo_instance_configs(
+                benchmark=benchmark,
+                tuning_configurations=tuning_configurations,
+                n_warm_starts=n_warm_starts,
+                n_trials=n_trials,
+                timeout=timeout,
+                max_n_instances=max_n_instances_per_benchmark,
+            )
+            experiment_configs.extend(configs)
 
     if "jahs201" in benchmarks:
         all_datasets = ["cifar10", "fashion_mnist", "colorectal_histology"]
@@ -164,9 +165,15 @@ def run_main_benchmark(
                 historical_performance[
                     "tuning_framework"
                 ] = tuner.searcher_tuning_framework
+                if tuner.tuner == "confopt":
+                    estimator_architecture = (
+                        tuner.searcher.quantile_estimator_architecture
+                    )
+                else:
+                    estimator_architecture = None
                 historical_performance[
                     "estimator_architecture"
-                ] = tuner.sampler.quantile_estimator_architecture
+                ] = estimator_architecture
 
                 raw_benchmark_data = pd.concat(
                     [raw_benchmark_data, historical_performance], axis=0

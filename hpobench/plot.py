@@ -19,6 +19,8 @@ def plot_benchmark_data(
     plot_path: str,
     x_col: str = "runtime",
     y_col: str = "best_performance",
+    y_col_lower: Optional[str] = None,
+    y_col_upper: Optional[str] = None,
     row_measure: Optional[str] = "dataset",
     col_measure: Optional[str] = "model",
     add_confidence_intervals: bool = True,
@@ -34,7 +36,7 @@ def plot_benchmark_data(
         "tab:cyan",
         "tab:olive",
         "yellow",
-        "tab:magenta",
+        "magenta",  # Changed from "tab:magenta" to "magenta"
         "black",
         "teal",
         "gold",
@@ -52,6 +54,8 @@ def plot_benchmark_data(
         plot_path (str): The base path to save the plot.
         x_col (str): The column to use for the x-axis. Defaults to "runtime".
         y_col (str): The column to use for the y-axis. Defaults to "best_performance".
+        y_col_lower (Optional[str]): The column to use for the lower confidence bound. If None, will use "{y_col}_q10" if available.
+        y_col_upper (Optional[str]): The column to use for the upper confidence bound. If None, will use "{y_col}_q90" if available.
         row_measure (Optional[str]): The column to determine subplot rows. Defaults to "dataset".
         col_measure (Optional[str]): The column to determine subplot columns. Defaults to "model".
         add_confidence_intervals (bool): Whether to add confidence intervals. Defaults to True.
@@ -63,6 +67,12 @@ def plot_benchmark_data(
     # Ensure at least one of row_measure or col_measure is provided
     if row_measure is None and col_measure is None:
         raise ValueError("At least one of row_measure or col_measure must be provided.")
+
+    # Set default values for confidence interval columns if not provided
+    if y_col_lower is None and f"{y_col}_q10" in data.columns:
+        y_col_lower = f"{y_col}_q10"
+    if y_col_upper is None and f"{y_col}_q90" in data.columns:
+        y_col_upper = f"{y_col}_q90"
 
     plt.clf()
 
@@ -108,24 +118,36 @@ def plot_benchmark_data(
                 tuner_idx = list(subset["tuner"].unique()).index(tuner)
                 ax.plot(
                     tuner_data[x_col],
-                    tuner_data[f"{y_col}_mean"],
+                    tuner_data[y_col],
                     label=tuner,
                     alpha=0.8,
                     color=color_palette[tuner_idx] if color_palette else None,
                 )
 
-                if add_confidence_intervals:
-                    # Add shaded region for q10 to q90
+                if (
+                    add_confidence_intervals
+                    and y_col_lower is not None
+                    and y_col_upper is not None
+                ):
+                    # Add shaded region for confidence intervals
                     ax.fill_between(
                         tuner_data[x_col],
-                        tuner_data[f"{y_col}_q10"],
-                        tuner_data[f"{y_col}_q90"],
+                        tuner_data[y_col_lower],
+                        tuner_data[y_col_upper],
                         alpha=0.2,
                     )
 
             # Set y-axis limits based on data range
-            y_min = subset[f"{y_col}_q10"].min()
-            y_max = subset[f"{y_col}_q90"].max()
+            y_min = (
+                subset[y_col_lower].min()
+                if y_col_lower is not None and y_col_lower in subset.columns
+                else subset[y_col].min()
+            )
+            y_max = (
+                subset[y_col_upper].max()
+                if y_col_upper is not None and y_col_upper in subset.columns
+                else subset[y_col].max()
+            )
             ax.set_ylim((y_min, y_max))
 
             # Add titles and labels
@@ -157,11 +179,17 @@ def run_plots(data, x_col, y_cols, col_measure, row_measure, plot_path):
     """Generates and saves plots for specified y-columns."""
     for y_col in y_cols:
         try:
+            # Set lower and upper interval columns explicitly if they exist
+            y_col_lower = f"{y_col}_q10" if f"{y_col}_q10" in data.columns else None
+            y_col_upper = f"{y_col}_q90" if f"{y_col}_q90" in data.columns else None
+
             plot_benchmark_data(
                 data,
                 plot_path,
                 x_col=x_col,
                 y_col=y_col,
+                y_col_lower=y_col_lower,
+                y_col_upper=y_col_upper,
                 add_confidence_intervals=True,
                 col_measure=col_measure,
                 row_measure=row_measure,
@@ -170,25 +198,47 @@ def run_plots(data, x_col, y_cols, col_measure, row_measure, plot_path):
             time.sleep(2)
         except Exception as e:
             # Log the error instead of crashing
-            # Assuming logger is configured elsewhere or passed as an argument
-            print(f"Error plotting {y_col}: {e}")  # Replace with logger if available
+            logger.error(f"Error plotting {y_col}: {e}")
 
 
 def plot_tuning_effect(
     plot_df: pd.DataFrame,
     budget_col: str,
-    performance_col_base: str,
-    tuner_col: str,
-    estimator_name: str,
-    dataset_name: str,
-    plot_file_path: str,
+    performance_col: str,
+    performance_col_lower: Optional[str] = None,
+    performance_col_upper: Optional[str] = None,
+    tuner_col: str = "tuner",
+    estimator_name: str = "",
+    dataset_name: str = "",
+    plot_file_path: str = "",
     color_palette: Optional[List[str]] = None,
 ):
+    """
+    Plot the effect of different tuners on performance metrics over time.
+
+    Args:
+        plot_df (pd.DataFrame): DataFrame containing the data to plot
+        budget_col (str): Column name for the budget/x-axis (e.g., runtime, iteration)
+        performance_col (str): Column name for the performance metric
+        performance_col_lower (Optional[str]): Column name for lower confidence interval
+        performance_col_upper (Optional[str]): Column name for upper confidence interval
+        tuner_col (str): Column name identifying different tuners
+        estimator_name (str): Name of the estimator for the plot title
+        dataset_name (str): Name of the dataset for the plot title
+        plot_file_path (str): Path to save the plot
+        color_palette (Optional[List[str]]): Custom color palette
+    """
     if plot_df.empty:
         logger.warning(
             f"Skipping plot for {estimator_name} on {dataset_name}: Data is empty."
         )
         return
+
+    # Set default values for confidence interval columns if not provided
+    if performance_col_lower is None and f"{performance_col}_q10" in plot_df.columns:
+        performance_col_lower = f"{performance_col}_q10"
+    if performance_col_upper is None and f"{performance_col}_q90" in plot_df.columns:
+        performance_col_upper = f"{performance_col}_q90"
 
     plt.clf()
     fig, ax = plt.subplots(figsize=(8, 5))
@@ -203,16 +253,14 @@ def plot_tuning_effect(
             for i, tuner in enumerate(tuners)
         }
 
-    mean_col = f"{performance_col_base}_mean"
-    lower_ci_col = f"{performance_col_base}_ci_lower"
-    upper_ci_col = f"{performance_col_base}_ci_upper"
+    required_cols = [budget_col, performance_col]
+    if performance_col_lower and performance_col_upper:
+        required_cols.extend([performance_col_lower, performance_col_upper])
 
-    if not all(
-        col in plot_df.columns
-        for col in [budget_col, mean_col, lower_ci_col, upper_ci_col]
-    ):
+    missing_cols = [col for col in required_cols if col not in plot_df.columns]
+    if missing_cols:
         logger.error(
-            f"Missing required columns for plotting in {plot_file_path}. Required: {budget_col, mean_col, lower_ci_col, upper_ci_col}"
+            f"Missing required columns for plotting in {plot_file_path}. Missing: {missing_cols}"
         )
         return
 
@@ -220,17 +268,20 @@ def plot_tuning_effect(
         group = group.sort_values(by=budget_col)
         ax.plot(
             group[budget_col],
-            group[mean_col],
+            group[performance_col],
             label=str(tuner),
             color=colors.get(tuner),
         )
-        ax.fill_between(
-            group[budget_col],
-            group[lower_ci_col],
-            group[upper_ci_col],
-            alpha=0.2,
-            color=colors.get(tuner),
-        )
+
+        # Add confidence intervals if columns are provided
+        if performance_col_lower is not None and performance_col_upper is not None:
+            ax.fill_between(
+                group[budget_col],
+                group[performance_col_lower],
+                group[performance_col_upper],
+                alpha=0.2,
+                color=colors.get(tuner),
+            )
 
     budget_label = budget_col.replace("_", " ").title()
     if budget_col == "normalized_runtime":
@@ -240,9 +291,7 @@ def plot_tuning_effect(
         f"Tuning Effect Over Time\nEstimator: {estimator_name}, Dataset: {dataset_name}"
     )
     ax.set_xlabel(budget_label)
-    ax.set_ylabel(
-        f"Mean {performance_col_base.replace('_', ' ').title()} (Lower is Better)"
-    )
+    ax.set_ylabel(f"{performance_col.replace('_', ' ').title()} (Lower is Better)")
     ax.legend()
     ax.grid(True)
     plt.tight_layout()
@@ -261,6 +310,8 @@ def plot_rank_analysis(
     plot_path: str,
     x_col: str = "data_size",
     y_col: str = "rank",
+    y_col_lower: Optional[str] = None,
+    y_col_upper: Optional[str] = None,
     group_col: str = "estimator_architecture",
     title: str = "Performance Across Data Sizes",
     ylabel: str = "Average Rank\n(Lower is Better)",
@@ -291,6 +342,10 @@ def plot_rank_analysis(
         Column to use for the x-axis, default is "data_size"
     y_col : str
         Column to use for the y-axis, default is "rank"
+    y_col_lower : Optional[str]
+        Column for lower confidence interval, if None, will use "{y_col}_q10" if available
+    y_col_upper : Optional[str]
+        Column for upper confidence interval, if None, will use "{y_col}_q90" if available
     group_col : str
         Column to use for grouping data into different lines/colors, default is "estimator_architecture"
     title : str
@@ -324,6 +379,12 @@ def plot_rank_analysis(
     annotation_text : Optional[str]
         Optional text to add at the bottom of the plot (e.g., explaining markers)
     """
+    # Set default values for confidence interval columns if not provided
+    if y_col_lower is None and f"{y_col}_q10" in plot_df.columns:
+        y_col_lower = f"{y_col}_q10"
+    if y_col_upper is None and f"{y_col}_q90" in plot_df.columns:
+        y_col_upper = f"{y_col}_q90"
+
     plt.figure(figsize=figsize)
 
     # Get unique groups and create color palette
@@ -347,6 +408,16 @@ def plot_rank_analysis(
             linewidth=2,
             markersize=marker_size,
         )
+
+        # Add confidence intervals if provided
+        if y_col_lower is not None and y_col_upper is not None:
+            plt.fill_between(
+                group_data[x_col],
+                group_data[y_col_lower],
+                group_data[y_col_upper],
+                alpha=0.2,
+                color=colors[i],
+            )
 
         # Add markers for significant points if requested
         if significant_col is not None:

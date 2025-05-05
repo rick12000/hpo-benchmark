@@ -176,7 +176,7 @@ def analyze_main_benchmark(
             breakout_col=[bench_col],
             across_col=data_col,
             entity_col=tuner_col,
-            rank_col="rank_mean",
+            rank_col="rank",  # Use "rank" instead of "rank_mean"
             alpha=alpha,
             output_path=analysis_data_path,
             filename=f"friedman_test_{budget}.csv",
@@ -190,7 +190,7 @@ def analyze_main_benchmark(
             breakout_col=[bench_col],
             across_col=data_col,
             entity_col=tuner_col,
-            rank_col="rank_mean",
+            rank_col="rank",  # Use "rank" instead of "rank_mean"
             alpha=alpha,
             output_path=analysis_data_path,
             filename=f"nemenyi_pairwise_{budget}.csv",
@@ -222,7 +222,7 @@ def analyze_main_benchmark(
         filename_prefix="rank_vs_norm_runtime",
         logger=logger,
         x_col=norm_runtime_unit,
-        y_cols=["rank_mean"],
+        y_cols=["rank"],  # Use base metric name without suffix
         col_measure=bench_col,
         row_measure=None,
     )
@@ -236,9 +236,44 @@ def analyze_main_benchmark(
         filename_prefix="perf_vs_iter",
         logger=logger,
         x_col=iter_unit,
-        y_cols=["best_performance_mean", "rank_mean"],
+        y_cols=["best_performance", "rank"],  # Use base metric names without suffixes
         col_measure=data_col,
         row_measure=bench_col,
+    )
+
+    # Add runtime-level performance plot (similar to iteration plot on line 230)
+    _plot_and_save(
+        plot_func=run_plots,
+        data=relativized_results,
+        output_path=os.path.join(plots_base_path, "per_dataset_performance_vs_runtime"),
+        filename_prefix="perf_vs_runtime",
+        logger=logger,
+        x_col=runtime_unit,
+        y_cols=["best_performance", "rank"],  # Use base metric names without suffixes
+        col_measure=data_col,
+        row_measure=bench_col,
+    )
+
+    # Add iteration-level aggregated rank plot (similar to runtime plot on line 218)
+    iteration_aggregated_results = _aggregate_and_save(
+        data=iteration_results,
+        grouping_cols=[bench_col, iter_unit, tuner_col],
+        metrics=["rank"],
+        output_path=analysis_data_path,
+        filename="aggregated_iteration_benchmark_results.csv",
+        logger=logger,
+    )
+
+    _plot_and_save(
+        plot_func=run_plots,
+        data=iteration_aggregated_results,
+        output_path=os.path.join(plots_base_path, "aggregated_rank_vs_iteration"),
+        filename_prefix="rank_vs_iteration",
+        logger=logger,
+        x_col=iter_unit,
+        y_cols=["rank"],  # Use base metric name without suffix
+        col_measure=bench_col,
+        row_measure=None,
     )
 
 

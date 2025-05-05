@@ -278,7 +278,7 @@ def tune(
         history = optuna_tune(
             params=params,
             performance_generator=performance_generator,
-            sampler=tuner_config.sampler,
+            sampler=tuner_config.searcher,
             warm_start_configs=warm_start_configs,
             random_state=random_state,
             n_trials=n_trials,
@@ -288,7 +288,7 @@ def tune(
         history = confopt_tune(
             params=params,
             performance_generator=performance_generator,
-            sampler=tuner_config.sampler,
+            sampler=tuner_config.searcher,
             warm_start_configs=warm_start_configs,
             random_state=random_state,
             n_trials=n_trials,
@@ -299,7 +299,7 @@ def tune(
         history = skopt_tune(
             params=params,
             performance_generator=performance_generator,
-            sampler=tuner_config.sampler,
+            sampler=tuner_config.searcher,
             warm_start_configs=warm_start_configs,
             random_state=random_state,
             n_trials=n_trials,
