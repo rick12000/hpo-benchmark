@@ -454,7 +454,7 @@ def process_performance_records(
         ranked_performance_data = calculate_ranks(
             experiment_log=aligned_performance_data,
             ranking_columns=ranking_columns,
-            metric_column=performance_column,
+            metric_column="best_performance",
         )
         aggregated_data = accumulate_breaches(
             experiment_log=ranked_performance_data,
@@ -479,7 +479,7 @@ def process_performance_records(
         aggregated_data = calculate_ranks(
             experiment_log=aligned_benchmark_data_time,
             ranking_columns=ranking_columns,
-            metric_column=performance_column,
+            metric_column="best_performance",
         )
     if relativize_budget:
         standardized_performance_data = standardize_budget_unit(

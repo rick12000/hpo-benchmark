@@ -68,7 +68,7 @@ if __name__ == "__main__":
             n_trials=n_trials,
             timeout=timeout,
             logger=logger,
-            max_n_instances_per_benchmark=1,
+            max_n_instances_per_benchmark=5,
         )
 
         raw_benchmark_data = run_main_benchmark(

@@ -112,7 +112,7 @@ def create_sampler_config_id(
     return config_id
 
 
-N_REPETITIONS_PER_TUNER_CONFIG = 1
+N_REPETITIONS_PER_TUNER_CONFIG = 10
 N_TRIALS = 85
 TIMEOUT = None
 N_WARM_STARTS = 15
@@ -340,8 +340,9 @@ ARCHITECTURE_VARIATION_CONFIGURATIONS = []
 # Define architectures to loop through
 ARCHITECTURE_LIST = [
     "qrf",
-    "qknn",
-    #  "qens1",
+    # "qknn",
+    "qens1",
+    "qgp",
     #  "qens2",
     #  "qens3",
     #  "qens4",
@@ -511,11 +512,11 @@ COMPETING_TUNING_CONFIGURATIONS = [
     #     searcher="random",
     #     config_identifier="RS",
     # ),
-    # TunerConfig(
-    #     tuner="optuna",
-    #     searcher="gp",
-    #     config_identifier="GP",
-    # ),
+    TunerConfig(
+        tuner="optuna",
+        searcher="gp",
+        config_identifier="GP",
+    ),
     # TunerConfig(
     #     tuner="skopt",
     #     searcher="gbrt",
