@@ -119,6 +119,11 @@ def run_main_benchmark(
         dataset_name = experiment_config.dataset_identifier
         logger.info(f"Dataset: {dataset_name}")
 
+        # Initialize the generator for this dataset
+        logger.info(f"Initializing generator for dataset: {dataset_name}...")
+        experiment_config.generator.initialize()
+        logger.info(f"Generator initialization complete for dataset: {dataset_name}")
+
         warm_start_configs_per_repetition = []
         for repetition in range(n_repetitions):
             consistent_warm_starts = generate_hyperparameter_combinations(
@@ -186,6 +191,13 @@ def run_main_benchmark(
                     os.path.join(data_path, "incremental_raw_benchmark_data.csv"),
                     index=False,
                 )
+
+        # Help free memory by allowing Python's garbage collector to clean up
+        # after we're done with this dataset's generator
+        experiment_config.generator = None
+        import gc
+
+        gc.collect()
 
     final_data_path = os.path.join(cache_path, f"data/{run_start_str}")
     os.makedirs(final_data_path, exist_ok=True)

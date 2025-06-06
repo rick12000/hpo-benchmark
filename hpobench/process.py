@@ -346,8 +346,8 @@ def nemenyi_pairwise_test(
                     results.append(
                         {
                             **group_dict,
-                            "entity_1": e1,
-                            "entity_2": e2,
+                            "entity1": e1,
+                            "entity2": e2,
                             "mean_rank_1": rank1,
                             "mean_rank_2": rank2,
                             "p_value": p_value,

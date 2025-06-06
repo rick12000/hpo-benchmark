@@ -113,7 +113,7 @@ def create_sampler_config_id(
 
 
 N_REPETITIONS_PER_TUNER_CONFIG = 10
-N_TRIALS = 85
+N_TRIALS = 60
 TIMEOUT = None
 N_WARM_STARTS = 15
 RUN_TYPE: Literal["dev", "full"] = "full"
@@ -290,7 +290,7 @@ SAMPLERS = [
     #     n_y_candidates_per_x=4,
     #     sampling_strategy="thompson"
     # ),
-    # MaxValueEntropySearchSampler(n_quantiles=8, adapter="DtACI", n_min_samples=500, n_y_samples=30, sampling_strategy="uniform", entropy_method = "distance"),
+    # MaxValueEntropySearchSampler(n_quantiles=8, adapter="DtACI", n_min_samples=100, n_y_samples=30, sampling_strategy="uniform", entropy_method = "distance"),
     # LowerBoundSampler with logarithmic decay
     LowerBoundSampler(
         interval_width=default_interval_width,
@@ -301,13 +301,13 @@ SAMPLERS = [
     # ExpectedImprovementSampler
     ExpectedImprovementSampler(n_quantiles=8, num_ei_samples=100, adapter="DtACI"),
     # ThompsonSampler (regular)
-    ThompsonSampler(n_quantiles=8, enable_optimistic_sampling=False, adapter="DtACI"),
-    # ThompsonSampler (optimistic)
+    # ThompsonSampler(n_quantiles=8, enable_optimistic_sampling=False, adapter="DtACI"),
+    # # ThompsonSampler (optimistic)
     ThompsonSampler(n_quantiles=8, enable_optimistic_sampling=True, adapter="DtACI"),
 ]
 
 # Define quantile estimator architecture to use for all samplers
-QUANTILE_ARCH = "qrf"
+QUANTILE_ARCH = "qens1"
 
 # Create configurations systematically
 SAMPLER_VARIATION_CONFIGURATIONS = []
@@ -339,24 +339,21 @@ ARCHITECTURE_VARIATION_CONFIGURATIONS = []
 
 # Define architectures to loop through
 ARCHITECTURE_LIST = [
-    "qrf",
+    # "qrf",
     # "qknn",
     "qens1",
-    "qgp",
+    # "qgp",
     #  "qens2",
-    #  "qens3",
-    #  "qens4",
+    "qens3",
+    "qens4",
     #  "qens5"
 ]
 
 # Create a fixed LowerBoundSampler with explicit parameters
-fixed_sampler = LowerBoundSampler(
-    interval_width=default_interval_width,
-    adapter="DtACI",
-    c=1,
-    beta_decay="logarithmic_decay",
-    beta_max=10.0,
+fixed_sampler = ExpectedImprovementSampler(
+    n_quantiles=8, num_ei_samples=100, adapter=None
 )
+
 # fixed_sampler = ThompsonSampler(n_quantiles=8, enable_optimistic_sampling=False, adapter="DtACI")
 
 # Loop through architectures and create configurations
@@ -497,6 +494,11 @@ DEV_TUNING_CONFIGURATIONS = [
 
 # Competing (non-confopt) configurations for comparison
 COMPETING_TUNING_CONFIGURATIONS = [
+    TunerConfig(
+        tuner="skopt",
+        searcher="gp",
+        config_identifier="GP",
+    ),
     # TunerConfig(
     #     tuner="optuna",
     #     searcher="cmaes",
@@ -512,16 +514,16 @@ COMPETING_TUNING_CONFIGURATIONS = [
     #     searcher="random",
     #     config_identifier="RS",
     # ),
-    TunerConfig(
-        tuner="optuna",
-        searcher="gp",
-        config_identifier="GP",
-    ),
     # TunerConfig(
-    #     tuner="skopt",
-    #     searcher="gbrt",
-    #     config_identifier="GBRT",
+    #     tuner="optuna",
+    #     searcher="gp",
+    #     config_identifier="GP",
     # ),
+    TunerConfig(
+        tuner="skopt",
+        searcher="gbrt",
+        config_identifier="GBRT",
+    ),
 ]
 
 # Append competing configurations to the full list

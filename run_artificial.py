@@ -62,13 +62,13 @@ if __name__ == "__main__":
     # Main Benchmark Section
     if run_sections["run_main_benchmark"]:
         experiment_configs = load_benchmark_configs(
-            benchmarks=["lcbench"],
+            benchmarks=["jahs201"],
             tuning_configurations=tuning_configurations,
             n_warm_starts=n_warm_starts,
             n_trials=n_trials,
             timeout=timeout,
             logger=logger,
-            max_n_instances_per_benchmark=5,
+            max_n_instances_per_benchmark=1,
         )
 
         raw_benchmark_data = run_main_benchmark(

@@ -151,10 +151,11 @@ def setup_jahs201_configs(
     experiment_configs = []
 
     for dataset in datasets:
+        # Use lazy=True to defer actual generator initialization
         experiment_configs.append(
             ExperimentConfig(
                 search_space=JAHS201_SEARCH_SPACE,
-                generator=Jahs201Generator(dataset=dataset),
+                generator=Jahs201Generator(dataset=dataset, lazy=True),
                 tuning_configurations=tuning_configurations,
                 n_warm_starts=n_warm_starts,
                 n_trials=n_trials,

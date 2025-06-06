@@ -74,7 +74,9 @@ def optuna_tune(
 ):
     # Initialize appropriate sampler based on string input
     if sampler == "tpe":
-        initialized_sampler = TPESampler(seed=random_state, n_startup_trials=0)
+        initialized_sampler = TPESampler(
+            seed=random_state, n_startup_trials=0, n_ei_candidates=10000
+        )
     elif sampler == "random":
         initialized_sampler = RandomSampler(seed=random_state)
     elif sampler == "cmaes":
@@ -167,6 +169,7 @@ def confopt_tune(
         metric_optimization="minimize",
         n_candidate_configurations=10000,
         warm_start_configurations=warm_start_configs,
+        dynamic_sampling=True,
     )
     searcher.tune(
         searcher=deepcopy(sampler),
@@ -235,7 +238,15 @@ def skopt_tune(
     n_calls = (n_trials or 0) + len(warm_start_configs)
     if sampler == "gp":
         result = gp_minimize(
-            objective, space, n_calls=n_calls, x0=x0, y0=y0, random_state=random_state
+            objective,
+            space,
+            n_calls=n_calls,
+            x0=x0,
+            y0=y0,
+            random_state=random_state,
+            acq_func="EI",
+            acq_optimizer="sampling",
+            n_points=10000,
         )
     elif sampler == "forest":
         result = forest_minimize(

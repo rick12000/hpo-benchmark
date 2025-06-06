@@ -96,6 +96,10 @@ class ObjectiveMetricGenerator(ABC):
     def predict_runtime(self, configuration: dict[str, Union[str, int, float, bool]]):
         pass
 
+    def initialize(self):
+        """Initialize the generator if needed. Default implementation does nothing."""
+        pass
+
 
 class BlackBoxGenerator(ObjectiveMetricGenerator):
     def __init__(self, generator: str):
@@ -130,20 +134,37 @@ class Jahs201Generator(ObjectiveMetricGenerator):
         self,
         dataset: str,
         metrics: list[str] = ["valid-acc", "runtime"],
-        lazy: bool = False,
+        lazy: bool = True,  # Default to lazy loading
     ):
         # Store dataset and metrics
         self._dataset = dataset
         self._metrics = metrics
-        # Initialize Benchmark with the provided lazy value
-        self.generator = Benchmark(task=self._dataset, lazy=lazy, metrics=self._metrics)
+        self._lazy = lazy
+        self._initialized = False
+        # Only initialize benchmark if not lazy
+        if not self._lazy:
+            self._initialize_generator()
+        else:
+            self.generator = None
+
+    def _initialize_generator(self):
+        """Initialize the JAHS-201 benchmark generator if not already initialized."""
+        if not self._initialized:
+            self.generator = Benchmark(
+                task=self._dataset, lazy=False, metrics=self._metrics
+            )
+            self._initialized = True
+
+    def initialize(self):
+        """Public method to initialize the generator."""
+        self._initialize_generator()
 
     def predict(self, configuration: dict[str, Union[str, int, float, bool]]):
-        # No need for _ensure_initialized anymore
+        self._initialize_generator()
         return -self.generator(configuration)[200]["valid-acc"]
 
     def predict_runtime(self, configuration: dict[str, Union[str, int, float, bool]]):
-        # No need for _ensure_initialized anymore
+        self._initialize_generator()
         return self.generator(configuration)[200]["runtime"]
 
 
