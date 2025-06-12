@@ -11,3 +11,8 @@ syne-tune[basic]
 huggingface_hub
 ucimlrepo
 cmaes
+
+pytest==7.4.2
+pre-commit==3.4.0
+autoflake
+pytest-xdist

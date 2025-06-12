@@ -1,15 +1,11 @@
 import pandas as pd
-import numpy as np
 from datetime import datetime
 import os
 import logging
 import optuna
-from typing import Literal, Dict, Any, Optional, List, Union
-import traceback
+from typing import Literal
 
-from sqlalchemy import literal
-from .config import (
-    STATIC_TUNING_CONFIGURATIONS,
+from .config.config import (
     ExperimentConfig,
 )
 from .utils import (
@@ -19,11 +15,8 @@ from .utils import (
 from .prepare import (
     setup_yahpo_instance_configs,
     setup_jahs201_configs,
-    create_performance_generator,
 )
 from .tune import tune
-from .generate import YahpoGenerator, ObjectiveMetricGenerator
-import random
 
 logger = logging.getLogger(__name__)
 os.environ["SYNETUNE_FOLDER"] = "cache/syne-tune"
@@ -121,7 +114,7 @@ def run_main_benchmark(
 
         # Initialize the generator for this dataset
         logger.info(f"Initializing generator for dataset: {dataset_name}...")
-        experiment_config.generator.initialize()
+        experiment_config.objective_function.initialize()
         logger.info(f"Generator initialization complete for dataset: {dataset_name}")
 
         warm_start_configs_per_repetition = []
@@ -133,7 +126,7 @@ def run_main_benchmark(
             )
             warm_start_configs = []
             for combination in consistent_warm_starts:
-                performance = experiment_config.generator.predict(combination)
+                performance = experiment_config.objective_function.predict(combination)
                 warm_start_configs.append((combination, performance))
             warm_start_configs_per_repetition.append(warm_start_configs)
 
@@ -145,7 +138,7 @@ def run_main_benchmark(
                 repetition_seed = base_random_state + repetition
 
                 historical_performance = tune(
-                    performance_generator=experiment_config.generator,
+                    performance_generator=experiment_config.objective_function,
                     tuner_config=tuner,
                     n_trials=experiment_config.n_trials,
                     timeout=experiment_config.timeout,
@@ -157,7 +150,7 @@ def run_main_benchmark(
                 historical_performance = add_runtime(
                     experiment_log=historical_performance,
                     tune_start=tune_start,
-                    performance_generator=experiment_config.generator,
+                    performance_generator=experiment_config.objective_function,
                 )
 
                 # Add extra columns for estimator error analysis
@@ -194,7 +187,7 @@ def run_main_benchmark(
 
         # Help free memory by allowing Python's garbage collector to clean up
         # after we're done with this dataset's generator
-        experiment_config.generator = None
+        experiment_config.objective_function = None
         import gc
 
         gc.collect()

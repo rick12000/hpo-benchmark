@@ -1,19 +1,11 @@
 import pandas as pd
 import numpy as np
-from scipy.stats import friedmanchisquare
 import logging
 import os
-from copy import deepcopy
-from typing import Literal, Dict, List, Optional, Callable, Tuple
-from scikit_posthocs import posthoc_nemenyi
-import matplotlib.pyplot as plt
-import matplotlib
-from hpobench.utils import q10, q90, save_analysis_results
-from hpobench.generate import ObjectiveMetricGenerator
-from hpobench.tune import confopt_tune
+from typing import List, Optional, Callable, Tuple
+from hpobench.utils import save_analysis_results
 from hpobench.plot import (
     plot_benchmark_data,
-    plot_rank_analysis,
     run_plots,
     plot_estimator_rank_vs_datasize,
     plot_tuning_rank_comparison,

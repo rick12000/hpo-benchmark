@@ -1,11 +1,10 @@
-import os
 import pandas as pd
 import warnings
 
-from hpobench.config import (
+from hpobench.config.config import (
     FULL_TUNING_CONFIGURATIONS,
     DEV_TUNING_CONFIGURATIONS,
-    DATASET_BENCHMARK_TUNING_CONFIGURATIONS,
+    TUNING_PATH_CONFIGURATIONS,
     RUN_TYPE,
     N_REPETITIONS_PER_TUNER_CONFIG,
     N_TRIALS,
@@ -38,9 +37,9 @@ if __name__ == "__main__":
 
     # Section control dictionary
     run_sections = {
-        "run_main_benchmark": True,
-        "run_static_analysis": False,
-        "run_tuning_benchmark": False,
+        "run_main_benchmark": False,
+        "run_static_analysis": True,
+        "run_tuning_benchmark": True,
     }
 
     run_start_str, logger = setup_environment(cache_path=CACHE_PATH)
@@ -62,13 +61,13 @@ if __name__ == "__main__":
     # Main Benchmark Section
     if run_sections["run_main_benchmark"]:
         experiment_configs = load_benchmark_configs(
-            benchmarks=["jahs201"],
+            benchmarks=["lcbench"],
             tuning_configurations=tuning_configurations,
             n_warm_starts=n_warm_starts,
             n_trials=n_trials,
             timeout=timeout,
             logger=logger,
-            max_n_instances_per_benchmark=1,
+            max_n_instances_per_benchmark=7,
         )
 
         raw_benchmark_data = run_main_benchmark(
@@ -169,7 +168,7 @@ if __name__ == "__main__":
 
         dataset_experiment_configs = load_benchmark_configs(
             benchmarks=["lcbench"],
-            tuning_configurations=DATASET_BENCHMARK_TUNING_CONFIGURATIONS,
+            tuning_configurations=TUNING_PATH_CONFIGURATIONS,
             n_warm_starts=n_warm_starts,
             n_trials=n_trials,
             timeout=timeout,

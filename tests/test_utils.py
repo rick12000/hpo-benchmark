@@ -1,14 +1,14 @@
 import pytest
 from hpobench.utils import generate_hyperparameter_combinations
-from hpobench.config import IntRange, FloatRange, CategoricalRange
+from hpobench.config.config import IntRange, FloatRange, CategoricalRange
 
 
 @pytest.mark.parametrize("n_combinations", [1, 2, 3, 4, 5])
 def test_generate_hyperparameter_combinations(n_combinations):
     # Test params with all types
     params = {
-        "int_param": IntRange(type="int", lower=1, upper=10),
-        "float_param": FloatRange(type="float", lower=0.0, upper=1.0),
+        "int_param": IntRange(lower=1, upper=10),
+        "float_param": FloatRange(lower=0.0, upper=1.0),
         "cat_param": CategoricalRange(choices=["a", "b", "c"]),
     }
 
@@ -39,15 +39,15 @@ def test_generate_hyperparameter_combinations(n_combinations):
         assert combo["cat_param"] in ["a", "b", "c"]
 
     # Test invalid parameter type
-    invalid_params = {"invalid": FloatRange(type="invalid", lower=0, upper=1)}
+    invalid_params = {"invalid": FloatRange(lower=0, upper=1)}
     with pytest.raises(ValueError):
-        generate_hyperparameter_combinations(invalid_params, n_combinations=1)
+        generate_hyperparameter_combinations(dict(invalid_params), n_combinations=1)
 
 
 def test_generate_hyperparameter_combinations_same_seed():
     params = {
-        "int_param": IntRange(type="int", lower=1, upper=10),
-        "float_param": FloatRange(type="float", lower=0.0, upper=1.0),
+        "int_param": IntRange(lower=1, upper=10),
+        "float_param": FloatRange(lower=0.0, upper=1.0),
         "cat_param": CategoricalRange(choices=["a", "b", "c"]),
     }
     n_combinations = 5

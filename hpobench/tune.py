@@ -1,81 +1,164 @@
 import pandas as pd
-import random
 import optuna
-from datetime import datetime, timedelta
-from hpobench.config import TunerConfig, IntRange, FloatRange, CategoricalRange
-from typing import Union, Optional, Literal
+from datetime import datetime
+from hpobench.config.config import TunerConfig, IntRange, FloatRange, CategoricalRange
+from typing import Union, Optional, Literal, Any
 from optuna.samplers import TPESampler, RandomSampler, CmaEsSampler, GPSampler
 from skopt import forest_minimize, gbrt_minimize, gp_minimize
 from skopt.space import Real, Integer as SKInteger, Categorical as SKCategorical
 from confopt.tuning import ConformalTuner
-from hpobench.generate import ObjectiveMetricGenerator
+from hpobench.generation.generate import ObjectiveMetricGenerator
 from confopt.selection.acquisition import (
     LocallyWeightedConformalSearcher,
     QuantileConformalSearcher,
 )
 from confopt import wrapping as ranges
 from copy import deepcopy
+from functools import partial
+
+# Constants:
+SKOPT_GP_ACQ_FUNC = "EI"
+SKOPT_GP_ACQ_OPTIMIZER = "sampling"
+CONFOPT_USE_DYNAMIC_SAMPLING = True
+CONFOPT_RETRAINING_FREQUENCY = 1
+N_CANDIDATES = 10000
+
+
+def build_history_entry(
+    end_time: Optional[Any] = None,
+    performance: Optional[Any] = None,
+    configurations: Optional[Any] = None,
+    iteration: Optional[int] = None,
+    breach_status: Optional[Any] = None,
+    estimator_error: Optional[Any] = None,
+    searcher_training_time: Optional[Any] = None,
+) -> dict[str, Any]:
+    """Standardizes the history entry structure for all tuners.
+
+    Args:
+        end_time: Timestamp when the trial finished.
+        performance: Performance metric value.
+        configurations: Parameter configuration dictionary.
+        iteration: Iteration number (1-based).
+        breach_status: Breach status for conformal methods.
+        estimator_error: Error from estimator, if available.
+        searcher_training_time: Time spent training the searcher, if available.
+
+    Returns:
+        Dictionary with standardized keys for tuning history.
+    """
+    return {
+        "end_time": end_time,
+        "performance": performance,
+        "configurations": configurations,
+        "iteration": iteration,
+        "breach_status": breach_status,
+        "estimator_error": estimator_error,
+        "searcher_training_time": searcher_training_time,
+    }
 
 
 def set_optuna_params(
-    trial, params: dict[str, Union[IntRange, FloatRange, CategoricalRange]]
-):
-    """Maps parameter definitions to optuna suggestions."""
-    optuna_params = {}
-    for name, p in params.items():
-        if p.type == "int":
-            optuna_params[name] = trial.suggest_int(name, p.lower, p.upper)
-        elif p.type == "float":
-            optuna_params[name] = trial.suggest_float(name, p.lower, p.upper)
-        elif p.type == "categorical":
-            optuna_params[name] = trial.suggest_categorical(name, p.choices)
+    trial: optuna.trial.Trial,
+    raw_params: dict[str, Union[IntRange, FloatRange, CategoricalRange]],
+) -> dict[str, Any]:
+    """Suggests parameter values for an Optuna trial based on parameter definitions.
+
+    Args:
+        trial: Optuna trial object.
+        raw_params: Dictionary mapping parameter names to IntRange, FloatRange, or CategoricalRange.
+
+    Returns:
+        Dictionary mapping parameter names to suggested values.
+    """
+    optuna_params: dict[str, Any] = {}
+    for name, param in raw_params.items():
+        if isinstance(param, IntRange):
+            optuna_params[name] = trial.suggest_int(name, param.lower, param.upper)
+        elif isinstance(param, FloatRange):
+            optuna_params[name] = trial.suggest_float(name, param.lower, param.upper)
+        elif isinstance(param, CategoricalRange):
+            optuna_params[name] = trial.suggest_categorical(name, param.choices)
         else:
-            raise ValueError(f"Unknown parameter type: {p.type}")
+            raise ValueError(f"Unknown parameter type: {type(param)}")
     return optuna_params
 
 
 def optuna_artificial_objective(
-    trial, params, performance_generator: ObjectiveMetricGenerator
-):
+    trial: optuna.trial.Trial,
+    params: dict[str, Union[IntRange, FloatRange, CategoricalRange]],
+    performance_generator: ObjectiveMetricGenerator,
+) -> float:
+    """Objective function for Optuna using a synthetic performance generator.
+
+    Args:
+        trial: Optuna trial object.
+        params: Dictionary mapping parameter names to IntRange, FloatRange, or CategoricalRange.
+        performance_generator: ObjectiveMetricGenerator instance.
+
+    Returns:
+        Predicted performance as a float.
+    """
     return performance_generator.predict(configuration=set_optuna_params(trial, params))
 
 
 def build_optuna_distributions(
-    params: dict[str, Union[IntRange, FloatRange, CategoricalRange]]
-):
-    """Creates a distribution mapping for warm-start trials in optuna."""
-    dists = {}
-    for name, p in params.items():
-        if p.type == "int":
+    raw_params: dict[str, Union[IntRange, FloatRange, CategoricalRange]]
+) -> dict[str, optuna.distributions.BaseDistribution]:
+    """Builds Optuna distributions for warm-start trials.
+
+    Args:
+        raw_params: Dictionary mapping parameter names to IntRange, FloatRange, or CategoricalRange.
+
+    Returns:
+        Dictionary mapping parameter names to Optuna distributions.
+    """
+    dists: dict[str, optuna.distributions.BaseDistribution] = {}
+    for name, param in raw_params.items():
+        if isinstance(param, IntRange):
             dists[name] = optuna.distributions.IntUniformDistribution(
-                low=p.lower, high=p.upper
+                low=param.lower, high=param.upper
             )
-        elif p.type == "float":
+        elif isinstance(param, FloatRange):
             dists[name] = optuna.distributions.UniformDistribution(
-                low=p.lower, high=p.upper
+                low=param.lower, high=param.upper
             )
-        elif p.type == "categorical":
+        elif isinstance(param, CategoricalRange):
             dists[name] = optuna.distributions.CategoricalDistribution(
-                choices=p.choices
+                choices=param.choices
             )
         else:
-            raise ValueError(f"Unknown parameter type: {p.type}")
+            raise ValueError(f"Unknown parameter type: {type(param)}")
     return dists
 
 
 def optuna_tune(
-    params: dict[str, Union[IntRange, FloatRange, CategoricalRange]],
+    raw_params: dict[str, Union[IntRange, FloatRange, CategoricalRange]],
     performance_generator: ObjectiveMetricGenerator,
     sampler: Union[str, Literal["tpe", "random", "cmaes"]],
     warm_start_configs: Optional[list[tuple[dict, float]]] = None,
     random_state: Optional[int] = None,
     n_trials: Optional[int] = None,
     timeout: Optional[float] = None,
-):
-    # Initialize appropriate sampler based on string input
+) -> pd.DataFrame:
+    """Runs Optuna tuning with a synthetic objective.
+
+    Args:
+        raw_params: Dictionary mapping parameter names to IntRange, FloatRange, or CategoricalRange.
+        performance_generator: ObjectiveMetricGenerator instance.
+        sampler: Sampler name for Optuna.
+        warm_start_configs: Optional list of (config, loss) tuples for warm start.
+        random_state: Optional random seed.
+        n_trials: Optional number of trials.
+        timeout: Optional time budget in seconds.
+
+    Returns:
+        DataFrame with tuning history.
+    """
+    # NOTE: 0 start up trials because this benchmark repository uses warm-starting:
     if sampler == "tpe":
         initialized_sampler = TPESampler(
-            seed=random_state, n_startup_trials=0, n_ei_candidates=10000
+            seed=random_state, n_startup_trials=0, n_ei_candidates=N_CANDIDATES
         )
     elif sampler == "random":
         initialized_sampler = RandomSampler(seed=random_state)
@@ -87,7 +170,7 @@ def optuna_tune(
         raise ValueError(f"Unknown optuna sampler: {sampler}")
 
     study = optuna.create_study(direction="minimize", sampler=initialized_sampler)
-    distributions = build_optuna_distributions(params)
+    distributions = build_optuna_distributions(raw_params)
     if warm_start_configs:
         for config, loss in warm_start_configs:
             trial = optuna.trial.create_trial(
@@ -98,182 +181,304 @@ def optuna_tune(
             )
             study.add_trial(trial)
 
+    if n_trials is not None:
+        if warm_start_configs is not None:
+            adj_n_trials = n_trials - len(warm_start_configs)
+        else:
+            adj_n_trials = n_trials
+    else:
+        adj_n_trials = n_trials
+
     study.optimize(
-        lambda trial: optuna_artificial_objective(trial, params, performance_generator),
-        n_trials=n_trials,
+        lambda trial: optuna_artificial_objective(
+            trial, raw_params, performance_generator
+        ),
+        n_trials=adj_n_trials,
         timeout=timeout,
         n_jobs=1,
     )
 
     history = [
-        {
-            "end_time": t.datetime_complete,
-            "performance": t.value,
-            "configurations": t.params,
-            "iteration": i + 1,
-            "breach_status": None,
-            "estimator_error": None,
-            "searcher_training_time": None,
-        }
-        for i, t in enumerate(study.trials)
+        build_history_entry(
+            end_time=trial.datetime_complete,
+            performance=trial.value,
+            configurations=trial.params,
+            iteration=idx + 1,
+        )
+        for idx, trial in enumerate(study.trials)
     ]
     return pd.DataFrame(history)  # Remove best_value from return value
 
 
-def confopt_artificial_objective_function(
+def confopt_objective_function(
     performance_generator: ObjectiveMetricGenerator,
-):
-    """Returns an objective function for confopt tuning."""
+) -> Any:
+    """Returns a callable objective function for confopt.
+
+    Args:
+        performance_generator: ObjectiveMetricGenerator instance.
+
+    Returns:
+        Callable that takes a configuration and returns predicted performance.
+    """
     return lambda configuration: performance_generator.predict(
         configuration=configuration
     )
 
 
-def build_confopt_search_space(
-    params: dict[str, Union[IntRange, FloatRange, CategoricalRange]],
-):
-    """Creates a search space mapping for confopt tuning."""
-    space = {}
-    # Create a local random generator with the specified seed for reproducibility
+def setup_confopt_params(
+    raw_params: dict[str, Union[IntRange, FloatRange, CategoricalRange]],
+) -> dict[str, Any]:
+    """Builds confopt search space from parameter definitions.
 
-    for name, p in params.items():
-        if p.type == "int":
-            space[name] = ranges.IntRange(min_value=p.lower, max_value=p.upper)
-        elif p.type == "float":
-            space[name] = ranges.FloatRange(min_value=p.lower, max_value=p.upper)
-        elif p.type == "categorical":
-            space[name] = ranges.CategoricalRange(choices=p.choices)
+    Args:
+        raw_params: Dictionary mapping parameter names to IntRange, FloatRange, or CategoricalRange.
+
+    Returns:
+        Dictionary mapping parameter names to confopt range objects.
+    """
+    confopt_params: dict[str, Any] = {}
+    for name, param in raw_params.items():
+        if isinstance(param, IntRange):
+            confopt_params[name] = ranges.IntRange(
+                min_value=param.lower, max_value=param.upper
+            )
+        elif isinstance(param, FloatRange):
+            confopt_params[name] = ranges.FloatRange(
+                min_value=param.lower, max_value=param.upper
+            )
+        elif isinstance(param, CategoricalRange):
+            confopt_params[name] = ranges.CategoricalRange(choices=param.choices)
         else:
-            raise ValueError(f"Unknown parameter type: {p.type}")
-    return space
+            raise ValueError(f"Unknown parameter type: {type(param)}")
+    return confopt_params
 
 
 def confopt_tune(
-    params: dict[str, Union[IntRange, FloatRange, CategoricalRange]],
+    raw_params: dict[str, Union[IntRange, FloatRange, CategoricalRange]],
     performance_generator: ObjectiveMetricGenerator,
-    sampler: Union[
-        QuantileConformalSearcher,
-        LocallyWeightedConformalSearcher,
-    ],
+    sampler: Union[QuantileConformalSearcher, LocallyWeightedConformalSearcher],
     warm_start_configs: Optional[list[tuple[dict, float]]] = None,
     random_state: Optional[int] = None,
     n_trials: Optional[int] = None,
     timeout: Optional[float] = None,
     searcher_tuning_framework: Optional[str] = None,
-):
-    objective_fn = confopt_artificial_objective_function(performance_generator)
-    confopt_params = build_confopt_search_space(params)
+) -> pd.DataFrame:
+    """Runs confopt tuning with a synthetic objective.
+
+    Args:
+        raw_params: Dictionary mapping parameter names to IntRange, FloatRange, or CategoricalRange.
+        performance_generator: ObjectiveMetricGenerator instance.
+        sampler: Conformal searcher instance.
+        warm_start_configs: Optional list of (config, loss) tuples for warm start.
+        random_state: Optional random seed.
+        n_trials: Optional number of trials.
+        timeout: Optional time budget in seconds.
+        searcher_tuning_framework: Optional tuning framework string.
+
+    Returns:
+        DataFrame with tuning history.
+    """
+    objective_fn = confopt_objective_function(performance_generator)
+    confopt_params = setup_confopt_params(raw_params)
     searcher = ConformalTuner(
         objective_function=objective_fn,
         search_space=confopt_params,
         metric_optimization="minimize",
-        n_candidate_configurations=10000,
+        n_candidate_configurations=N_CANDIDATES,
         warm_start_configurations=warm_start_configs,
-        dynamic_sampling=True,
+        dynamic_sampling=CONFOPT_USE_DYNAMIC_SAMPLING,
     )
+
+    if n_trials is not None:
+        if warm_start_configs is not None:
+            adj_n_trials = n_trials - len(warm_start_configs)
+        else:
+            adj_n_trials = n_trials
+    else:
+        adj_n_trials = n_trials
+
+    # NOTE: Zero random searches because this benchmark repository uses warm-starting:
     searcher.tune(
         searcher=deepcopy(sampler),
-        runtime_budget=timeout,
-        max_iter=n_trials,
+        runtime_budget=int(timeout) if timeout is not None else None,
+        max_iter=adj_n_trials,
         n_random_searches=0,
-        conformal_retraining_frequency=1,
+        conformal_retraining_frequency=CONFOPT_RETRAINING_FREQUENCY,
         verbose=False,
         random_state=random_state,
-        searcher_tuning_framework=searcher_tuning_framework,
+        searcher_tuning_framework=searcher_tuning_framework
+        if searcher_tuning_framework in ("reward_cost", "fixed")
+        else None,
     )
 
     history = [
-        {
-            "end_time": trial.timestamp,
-            "performance": trial.performance,
-            "configurations": trial.configuration,
-            "iteration": i + 1,
-            "breach_status": trial.breached_interval,
-            "estimator_error": trial.primary_estimator_error,
-            "searcher_training_time": trial.searcher_runtime,
-        }
-        for i, trial in enumerate(searcher.study.trials)
+        build_history_entry(
+            end_time=trial.timestamp,
+            performance=trial.performance,
+            configurations=trial.configuration,
+            iteration=idx + 1,
+            breach_status=trial.breached_interval,
+            estimator_error=trial.primary_estimator_error,
+            searcher_training_time=trial.searcher_runtime,
+        )
+        for idx, trial in enumerate(searcher.study.trials)
     ]
-    return pd.DataFrame(history)  # Remove None from return value
+    return pd.DataFrame(history)
 
 
-def build_skopt_space(params: dict[str, Union[IntRange, FloatRange, CategoricalRange]]):
-    """Creates a search space and a list of parameter names for skopt tuning."""
-    space = []
-    names = []
-    for name, p in params.items():
-        if p.type == "int":
-            space.append(SKInteger(p.lower, p.upper, name=name))
-        elif p.type == "float":
-            space.append(Real(p.lower, p.upper, name=name))
-        elif p.type == "categorical":
-            space.append(SKCategorical(p.choices, name=name))
+def setup_skopt_params(
+    raw_params: dict[str, Union[IntRange, FloatRange, CategoricalRange]]
+) -> tuple[list[Any], list[str]]:
+    """Creates skopt search space and parameter name list.
+
+    Args:
+        raw_params: Dictionary mapping parameter names to IntRange, FloatRange, or CategoricalRange.
+
+    Returns:
+        Tuple of (skopt space list, parameter name list).
+    """
+    skopt_params: list[Any] = []
+    skopt_param_names: list[str] = []
+    for name, param in raw_params.items():
+        if isinstance(param, IntRange):
+            skopt_params.append(SKInteger(param.lower, param.upper, name=name))
+        elif isinstance(param, FloatRange):
+            skopt_params.append(Real(param.lower, param.upper, name=name))
+        elif isinstance(param, CategoricalRange):
+            skopt_params.append(SKCategorical(param.choices, name=name))
         else:
-            raise ValueError(f"Unknown parameter type: {p.type}")
-        names.append(name)
-    return space, names
+            raise ValueError(f"Unknown parameter type: {type(param)}")
+        skopt_param_names.append(name)
+
+    return skopt_params, skopt_param_names
+
+
+def skopt_objective(
+    param_values: list[Any],
+    param_names: list[str],
+    performance_generator: ObjectiveMetricGenerator,
+    runtimes: list[datetime],
+) -> float:
+    """Objective function for skopt using a synthetic performance generator.
+
+    Args:
+        param_values: List of parameter values.
+        param_names: List of parameter names.
+        performance_generator: ObjectiveMetricGenerator instance.
+        runtimes: List to append runtime timestamps.
+
+    Returns:
+        Predicted performance as float.
+    """
+    params_dict = dict(zip(param_names, param_values))
+    result = performance_generator.predict(configuration=params_dict)
+    runtimes.append(datetime.now())
+    return result
 
 
 def skopt_tune(
-    params: dict[str, Union[IntRange, FloatRange, CategoricalRange]],
+    raw_params: dict[str, Union[IntRange, FloatRange, CategoricalRange]],
     performance_generator: ObjectiveMetricGenerator,
     sampler: str,
     warm_start_configs: Optional[list[tuple[dict, float]]] = None,
     random_state: Optional[int] = None,
     n_trials: Optional[int] = None,
     timeout: Optional[float] = None,
-):
-    space, param_names = build_skopt_space(params)
-    warm_start_configs = warm_start_configs or []
-    x0 = [[config[name] for name in param_names] for config, _ in warm_start_configs]
-    y0 = [loss for _, loss in warm_start_configs]
-    runtimes = []
+) -> pd.DataFrame:
+    """Runs skopt tuning with a synthetic objective.
 
-    def objective(values):
-        params_dict = dict(zip(param_names, values))
-        result = performance_generator.predict(configuration=params_dict)
-        runtimes.append(datetime.now())
-        return result
+    Args:
+        raw_params: Dictionary mapping parameter names to IntRange, FloatRange, or CategoricalRange.
+        performance_generator: ObjectiveMetricGenerator instance.
+        sampler: Sampler name for skopt.
+        warm_start_configs: Optional list of (config, loss) tuples for warm start.
+        random_state: Optional random seed.
+        n_trials: Optional number of trials.
+        timeout: Optional time budget in seconds.
 
-    n_calls = (n_trials or 0) + len(warm_start_configs)
+    Returns:
+        DataFrame with tuning history.
+    """
+    # TODO: Here until timeout implemented:
+    n_trials_placeholder = 100
+
+    skopt_params, param_names = setup_skopt_params(raw_params)
+    if warm_start_configs is not None:
+        x0 = [
+            [config[name] for name in param_names] for config, _ in warm_start_configs
+        ]
+        y0 = [loss for _, loss in warm_start_configs]
+    else:
+        x0 = []
+        y0 = []
+
+    n_calls = n_trials or n_trials_placeholder
+
+    runtimes: list[datetime] = []
+    objective_fn = partial(
+        skopt_objective,
+        param_names=param_names,
+        performance_generator=performance_generator,
+        runtimes=runtimes,
+    )
+
+    # NOTE: n_initial_points is set to 0 because this benchmark repository uses warm-starting:
     if sampler == "gp":
         result = gp_minimize(
-            objective,
-            space,
+            objective_fn,
+            skopt_params,
+            n_initial_points=0,
             n_calls=n_calls,
             x0=x0,
             y0=y0,
             random_state=random_state,
-            acq_func="EI",
-            acq_optimizer="sampling",
-            n_points=10000,
+            acq_func=SKOPT_GP_ACQ_FUNC,
+            acq_optimizer=SKOPT_GP_ACQ_OPTIMIZER,
+            n_points=N_CANDIDATES,
         )
     elif sampler == "forest":
         result = forest_minimize(
-            objective, space, n_calls=n_calls, x0=x0, y0=y0, random_state=random_state
+            objective_fn,
+            skopt_params,
+            n_initial_points=0,
+            n_calls=n_calls,
+            x0=x0,
+            y0=y0,
+            random_state=random_state,
+            acq_func=SKOPT_GP_ACQ_FUNC,
+            n_points=N_CANDIDATES,
         )
     elif sampler == "gbrt":
         result = gbrt_minimize(
-            objective, space, n_calls=n_calls, x0=x0, y0=y0, random_state=random_state
+            objective_fn,
+            skopt_params,
+            n_initial_points=0,
+            n_calls=n_calls,
+            x0=x0,
+            y0=y0,
+            random_state=random_state,
+            acq_func=SKOPT_GP_ACQ_FUNC,
+            n_points=N_CANDIDATES,
         )
     else:
         raise ValueError(f"Unknown scikit-opt method: {sampler}")
 
+    if result is not None:
+        zipped = zip(result.func_vals, result.x_iters, runtimes)
+    else:
+        zipped = []
+
     history = [
-        {
-            "end_time": rt,
-            "performance": perf,
-            "iteration": i + 1,
-            "configurations": dict(zip(param_names, params_list)),
-            "breach_status": None,
-            "estimator_error": None,
-            "searcher_training_time": None,
-        }
-        for i, (perf, params_list, rt) in enumerate(
-            zip(result.func_vals, result.x_iters, runtimes)
+        build_history_entry(
+            end_time=end_time,
+            performance=performance,
+            iteration=idx + 1,
+            configurations=dict(zip(param_names, params_list)),
         )
+        for idx, (performance, params_list, end_time) in enumerate(zipped)
     ]
-    return pd.DataFrame(history)  # Remove best_value from return value
+    return pd.DataFrame(history)
 
 
 def tune(
@@ -284,38 +489,57 @@ def tune(
     random_state: Optional[int] = None,
     n_trials: Optional[int] = None,
     timeout: Optional[float] = None,
-):
+) -> pd.DataFrame:
+    """Unified tuning interface for optuna, confopt, and skopt.
+
+    Args:
+        performance_generator: ObjectiveMetricGenerator instance.
+        tuner_config: TunerConfig object specifying tuner and searcher.
+        params: Dictionary mapping parameter names to IntRange, FloatRange, or CategoricalRange.
+        warm_start_configs: Optional list of (config, loss) tuples for warm start.
+        random_state: Optional random seed.
+        n_trials: Optional number of trials.
+        timeout: Optional time budget in seconds.
+
+    Returns:
+        DataFrame with tuning history.
+    """
+    # Shared arguments for all tuner functions:
+    shared_kwargs = {
+        "params": params,
+        "performance_generator": performance_generator,
+        "warm_start_configs": warm_start_configs,
+        "random_state": random_state,
+        "n_trials": n_trials,
+        "timeout": timeout,
+    }
+
     if tuner_config.tuner == "optuna":
+        if not isinstance(tuner_config.searcher, str):
+            raise ValueError("Optuna tuner requires a string searcher.")
         history = optuna_tune(
-            params=params,
-            performance_generator=performance_generator,
             sampler=tuner_config.searcher,
-            warm_start_configs=warm_start_configs,
-            random_state=random_state,
-            n_trials=n_trials,
-            timeout=timeout,
+            **shared_kwargs,
         )
     elif tuner_config.tuner == "confopt":
+        if not isinstance(
+            tuner_config.searcher,
+            (QuantileConformalSearcher, LocallyWeightedConformalSearcher),
+        ):
+            raise ValueError("Confopt tuner requires a conformal searcher instance.")
         history = confopt_tune(
-            params=params,
-            performance_generator=performance_generator,
             sampler=tuner_config.searcher,
-            warm_start_configs=warm_start_configs,
-            random_state=random_state,
-            n_trials=n_trials,
-            timeout=timeout,
             searcher_tuning_framework=tuner_config.searcher_tuning_framework,
+            **shared_kwargs,
         )
     elif tuner_config.tuner == "skopt":
+        if not isinstance(tuner_config.searcher, str):
+            raise ValueError("Skopt tuner requires a string searcher.")
         history = skopt_tune(
-            params=params,
-            performance_generator=performance_generator,
             sampler=tuner_config.searcher,
-            warm_start_configs=warm_start_configs,
-            random_state=random_state,
-            n_trials=n_trials,
-            timeout=timeout,
+            **shared_kwargs,
         )
     else:
         raise ValueError(f"Unknown tuner: {tuner_config.tuner}")
-    return history  # Remove best_value from return value
+
+    return history

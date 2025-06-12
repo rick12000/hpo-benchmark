@@ -1,15 +1,13 @@
-from sympy import N
 from hpobench.prepare import (
     setup_yahpo_instance_configs,
     setup_jahs201_configs,
     setup_blackbox_configs,
 )
-from hpobench.config import (
+from hpobench.config.types import (
     ExperimentConfig,
-    JAHS201_SEARCH_SPACE,
-    BLACK_BOX_SEARCH_SPACE,
 )
-from hpobench.config import DEV_TUNING_CONFIGURATIONS
+from hpobench.config.benchmark_data import JAHS201_SEARCH_SPACE, BLACK_BOX_SEARCH_SPACE
+from hpobench.config.config import DEV_TUNING_CONFIGURATIONS
 
 
 def test_setup_yahpo_instance_configs():

@@ -1,8 +1,8 @@
 import pytest
 import pandas as pd
 import numpy as np
-from hpobench.generate import BlackBoxGenerator
-from hpobench.config import FloatRange
+from hpobench.generation.generate import BlackBoxGenerator
+from hpobench.config.config import FloatRange
 
 
 @pytest.fixture
@@ -206,8 +206,8 @@ def dummy_yahpo_generator():
 def small_param_space():
     """Create a small parameter search space for testing."""
     return {
-        "x": FloatRange(type="float", lower=0, upper=100.0),
-        "y": FloatRange(type="float", lower=0, upper=100.0),
+        "x": FloatRange(lower=0, upper=100.0),
+        "y": FloatRange(lower=0, upper=100.0),
     }
 
 
