@@ -1,7 +1,8 @@
 import pandas as pd
 import optuna
 from datetime import datetime
-from hpobench.config.config import TunerConfig, IntRange, FloatRange, CategoricalRange
+from hpobench.config.types import TunerConfig
+from hpobench.config.types import IntRange, FloatRange, CategoricalRange
 from typing import Union, Optional, Literal, Any
 from optuna.samplers import TPESampler, RandomSampler, CmaEsSampler, GPSampler
 from skopt import forest_minimize, gbrt_minimize, gp_minimize

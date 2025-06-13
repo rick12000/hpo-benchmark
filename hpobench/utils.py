@@ -1,5 +1,5 @@
 import ast
-from hpobench.config.config import IntRange, CategoricalRange, FloatRange
+from hpobench.config.types import IntRange, CategoricalRange, FloatRange
 import random
 from typing import Optional, Union
 import pandas as pd

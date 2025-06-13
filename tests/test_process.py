@@ -1,1072 +1,565 @@
 import pandas as pd
 import numpy as np
 import pytest
+import json
+from pathlib import Path
+from copy import deepcopy
 from pandas.testing import assert_frame_equal
 from hpobench.process import (
-    # collapse_per_budget,
-    # accumulate_breaches,
+    process_performance_records,
     accumulate_performances,
+    align_tuners,
     calculate_ranks,
     time_discretize_benchmark_data,
-    # standardize_budget_unit,
-    align_tuners,
-    # aggregate_benchmark_data,
-    # process_performance_records,
+    standardize_budget_unit,
+    collapse_per_budget,
+    accumulate_breaches,
 )
 
 
+def load_test_data(filename):
+    """Load test data from JSON file"""
+    with open(Path("tests/test_data") / filename, "r") as f:
+        df_dict = json.load(f)
+    df = pd.DataFrame(df_dict["data"], columns=df_dict["columns"])
+    # Convert None back to NaN
+    df = df.replace({None: np.nan})
+    return df
+
+
 @pytest.mark.parametrize("budget_unit", ["iteration", "runtime"])
-def test_accumulate_performance(
+@pytest.mark.parametrize("relativize_budget", [True, False])
+def test_process_performance_records(
     dummy_experiment_data,
     grouping_columns,
+    performance_column,
     budget_unit,
-    performance_column,
+    relativize_budget,
 ):
-    accumulated_performances = accumulate_performances(
-        experiment_log=dummy_experiment_data,
-        grouping_columns=grouping_columns,
-        budget_unit=budget_unit,
+    """Test the full process_performance_records function"""
+    result = process_performance_records(
+        raw_benchmark_data=dummy_experiment_data,
+        aggregators=grouping_columns,
         performance_column=performance_column,
-    )
-    print(budget_unit)
-    print(accumulated_performances)
-    assert len(accumulated_performances) == len(dummy_experiment_data)
-    assert accumulated_performances.shape[1] == dummy_experiment_data.shape[1] + 1
-
-    if budget_unit == "runtime":
-        expected_output = {
-            "performance": [
-                -83.3992,
-                -91.3902,
-                -89.9583,
-                -88.5413,
-                -79.0829,
-                -87.9277,
-                -80.241,
-                -87.4604,
-                -84.0319,
-                -71.6547,
-                -89.9583,
-                -88.5413,
-                -79.0829,
-                -83.757,
-                -81.358,
-                -87.4604,
-                -84.0319,
-                -71.6547,
-                -84.2562,
-                -84.0319,
-                -71.6547,
-                -89.9583,
-                -88.5413,
-                -79.0829,
-                -88.5413,
-                -79.0829,
-                -83.757,
-            ],
-            "iteration": [
-                1,
-                2,
-                3,
-                4,
-                5,
-                6,
-                1,
-                2,
-                3,
-                4,
-                1,
-                2,
-                3,
-                4,
-                5,
-                1,
-                2,
-                3,
-                4,
-                1,
-                2,
-                1,
-                2,
-                1,
-                2,
-                1,
-                2,
-            ],
-            "breach_status": [
-                np.nan,
-                1,
-                0,
-                0,
-                1,
-                1,
-                0,
-                0,
-                1,
-                1,
-                np.nan,
-                np.nan,
-                np.nan,
-                np.nan,
-                np.nan,
-                np.nan,
-                np.nan,
-                np.nan,
-                np.nan,
-                np.nan,
-                np.nan,
-                np.nan,
-                np.nan,
-                np.nan,
-                np.nan,
-                np.nan,
-                np.nan,
-            ],
-            "runtime": [
-                256.8546,
-                257.8,
-                259.8,
-                259.9,
-                260,
-                260.1,
-                254.2,
-                257.5,
-                258,
-                259,
-                257.1,
-                258.2,
-                258.3,
-                258.5,
-                259.1,
-                256,
-                257.2,
-                258.5,
-                258.9,
-                50,
-                50.5,
-                50.1,
-                52,
-                50.3,
-                52.2,
-                50.3,
-                50.8,
-            ],
-            "benchmark_identifier": ["lcbench"] * 19 + ["nahs201"] * 8,
-            "dataset": [3945] * 19 + ["cifar10"] * 8,
-            "tuner": ["GBRT"] * 6
-            + ["GBRT"] * 4
-            + ["TPE"] * 5
-            + ["TPE"] * 4
-            + ["GBRT"] * 4
-            + ["TPE"] * 4,
-            "repetition": [1] * 6
-            + [2] * 4
-            + [1] * 5
-            + [2] * 4
-            + [1] * 2
-            + [2] * 2
-            + [1] * 2
-            + [2] * 2,
-            "best_performance": [
-                -83.3992,
-                -91.3902,
-                -91.3902,
-                -91.3902,
-                -91.3902,
-                -91.3902,
-                -80.241,
-                -87.4604,
-                -87.4604,
-                -87.4604,
-                -89.9583,
-                -89.9583,
-                -89.9583,
-                -89.9583,
-                -89.9583,
-                -87.4604,
-                -87.4604,
-                -87.4604,
-                -87.4604,
-                -84.0319,
-                -84.0319,
-                -89.9583,
-                -89.9583,
-                -79.0829,
-                -88.5413,
-                -79.0829,
-                -83.757,
-            ],
-        }
-
-        expected_output = pd.DataFrame(expected_output)
-        assert_frame_equal(
-            accumulated_performances.reset_index(drop=True),
-            expected_output,
-            atol=0.01,
-            check_dtype=False,
-        )
-
-    elif budget_unit == "iteration":
-        expected_output = {
-            "performance": [
-                -83.3992,
-                -91.3902,
-                -89.9583,
-                -88.5413,
-                -79.0829,
-                -87.9277,
-                -80.241,
-                -87.4604,
-                -84.0319,
-                -71.6547,
-                -89.9583,
-                -88.5413,
-                -79.0829,
-                -83.757,
-                -81.358,
-                -87.4604,
-                -84.0319,
-                -71.6547,
-                -84.2562,
-                -84.0319,
-                -71.6547,
-                -89.9583,
-                -88.5413,
-                -79.0829,
-                -88.5413,
-                -79.0829,
-                -83.757,
-            ],
-            "iteration": [
-                1,
-                2,
-                3,
-                4,
-                5,
-                6,
-                1,
-                2,
-                3,
-                4,
-                1,
-                2,
-                3,
-                4,
-                5,
-                1,
-                2,
-                3,
-                4,
-                1,
-                2,
-                1,
-                2,
-                1,
-                2,
-                1,
-                2,
-            ],
-            "breach_status": [
-                np.nan,
-                1,
-                0,
-                0,
-                1,
-                1,
-                0,
-                0,
-                1,
-                1,
-                np.nan,
-                np.nan,
-                np.nan,
-                np.nan,
-                np.nan,
-                np.nan,
-                np.nan,
-                np.nan,
-                np.nan,
-                np.nan,
-                np.nan,
-                np.nan,
-                np.nan,
-                np.nan,
-                np.nan,
-                np.nan,
-                np.nan,
-            ],
-            "runtime": [
-                256.8546,
-                257.8,
-                259.8,
-                259.9,
-                260,
-                260.1,
-                254.2,
-                257.5,
-                258,
-                259,
-                257.1,
-                258.2,
-                258.3,
-                258.5,
-                259.1,
-                256,
-                257.2,
-                258.5,
-                258.9,
-                50,
-                50.5,
-                50.1,
-                52,
-                50.3,
-                52.2,
-                50.3,
-                50.8,
-            ],
-            "benchmark_identifier": ["lcbench"] * 19 + ["nahs201"] * 8,
-            "dataset": [3945] * 19 + ["cifar10"] * 8,
-            "tuner": ["GBRT"] * 10 + ["TPE"] * 9 + ["GBRT"] * 4 + ["TPE"] * 4,
-            "repetition": [1] * 6
-            + [2] * 4
-            + [1] * 5
-            + [2] * 4
-            + [1] * 2
-            + [2] * 2
-            + [1] * 2
-            + [2] * 2,
-            "best_performance": [
-                -83.3992,
-                -91.3902,
-                -91.3902,
-                -91.3902,
-                -91.3902,
-                -91.3902,
-                -80.241,
-                -87.4604,
-                -87.4604,
-                -87.4604,
-                -89.9583,
-                -89.9583,
-                -89.9583,
-                -89.9583,
-                -89.9583,
-                -87.4604,
-                -87.4604,
-                -87.4604,
-                -87.4604,
-                -84.0319,
-                -84.0319,
-                -89.9583,
-                -89.9583,
-                -79.0829,
-                -88.5413,
-                -79.0829,
-                -83.757,
-            ],
-        }
-        expected_output = pd.DataFrame(expected_output)
-        assert_frame_equal(
-            accumulated_performances.reset_index(drop=True),
-            expected_output,
-            atol=0.01,
-            check_dtype=False,
-        )
-
-    else:
-        raise ValueError(f"Invalid budget unit: {budget_unit}")
-
-
-def test_align_tuners__iteration(
-    dummy_experiment_data,
-    grouping_columns,
-    performance_column,
-    dataset_aggregators,
-    tuner_column,
-    repetition_column,
-):
-    budget_unit = "iteration"
-    accumulated_performances = accumulate_performances(
-        experiment_log=dummy_experiment_data,
-        grouping_columns=grouping_columns,
         budget_unit=budget_unit,
-        performance_column=performance_column,
+        relativize_budget=relativize_budget,
     )
-    aligned_tuners_df = align_tuners(
-        data=accumulated_performances,
-        dataset_aggregators=dataset_aggregators,
-        tuner_column=tuner_column,
-        repetition_column=repetition_column,
-        budget_unit=budget_unit,
-    )
-    expected_output = {
-        "performance": [
-            -83.3992,
-            -91.3902,
-            -89.9583,
-            -88.5413,
-            -80.241,
-            -87.4604,
-            -84.0319,
-            -71.6547,
-            -89.9583,
-            -88.5413,
-            -79.0829,
-            -83.757,
-            -87.4604,
-            -84.0319,
-            -71.6547,
-            -84.2562,
-            -84.0319,
-            -71.6547,
-            -89.9583,
-            -88.5413,
-            -79.0829,
-            -88.5413,
-            -79.0829,
-            -83.757,
-        ],
-        "iteration": [
-            1,
-            2,
-            3,
-            4,
-            1,
-            2,
-            3,
-            4,
-            1,
-            2,
-            3,
-            4,
-            1,
-            2,
-            3,
-            4,
-            1,
-            2,
-            1,
-            2,
-            1,
-            2,
-            1,
-            2,
-        ],
-        "breach_status": [
-            np.nan,
-            1,
-            0,
-            0,
-            0,
-            0,
-            1,
-            1,
-            np.nan,
-            np.nan,
-            np.nan,
-            np.nan,
-            np.nan,
-            np.nan,
-            np.nan,
-            np.nan,
-            np.nan,
-            np.nan,
-            np.nan,
-            np.nan,
-            np.nan,
-            np.nan,
-            np.nan,
-            np.nan,
-        ],
-        "runtime": [
-            256.8546,
-            257.8,
-            259.8,
-            259.9,
-            254.2,
-            257.5,
-            258,
-            259,
-            257.1,
-            258.2,
-            258.3,
-            258.5,
-            256,
-            257.2,
-            258.5,
-            258.9,
-            50,
-            50.5,
-            50.1,
-            52,
-            50.3,
-            52.2,
-            50.3,
-            50.8,
-        ],
-        "benchmark_identifier": ["lcbench"] * 16 + ["nahs201"] * 8,
-        "dataset": [3945] * 16 + ["cifar10"] * 8,
-        "tuner": ["GBRT"] * 8 + ["TPE"] * 8 + ["GBRT"] * 4 + ["TPE"] * 4,
-        "repetition": [1] * 4
-        + [2] * 4
-        + [1] * 4
-        + [2] * 4
-        + [1] * 2
-        + [2] * 2
-        + [1] * 2
-        + [2] * 2,
-        "best_performance": [
-            -83.3992,
-            -91.3902,
-            -91.3902,
-            -91.3902,
-            -80.241,
-            -87.4604,
-            -87.4604,
-            -87.4604,
-            -89.9583,
-            -89.9583,
-            -89.9583,
-            -89.9583,
-            -87.4604,
-            -87.4604,
-            -87.4604,
-            -87.4604,
-            -84.0319,
-            -84.0319,
-            -89.9583,
-            -89.9583,
-            -79.0829,
-            -88.5413,
-            -79.0829,
-            -83.757,
-        ],
-        "max_budget_per_repetition": [6] * 4 + [4] * 4 + [5] * 4 + [4] * 4 + [2] * 8,
-        "min_budget_per_repetition": [1] * 24,
-        "max_shared_budget_per_dataset": [4] * 16 + [2] * 8,
-        "min_shared_budget_per_dataset": [1] * 24,
-    }
-    expected_output = pd.DataFrame(expected_output)
+
+    # Load expected output based on parameters
+    if budget_unit == "iteration":
+        if relativize_budget:
+            expected = load_test_data("collapsed_data_iteration_relativized.json")
+        else:
+            expected = load_test_data("collapsed_data_iteration.json")
+    else:  # runtime
+        if relativize_budget:
+            expected = load_test_data("collapsed_data_runtime_relativized.json")
+        else:
+            expected = load_test_data("collapsed_data_runtime.json")
+
     assert_frame_equal(
-        aligned_tuners_df.reset_index(drop=True),
-        expected_output,
+        result.reset_index(drop=True),
+        expected.reset_index(drop=True),
         atol=0.01,
         check_dtype=False,
     )
 
 
-def test_calculate_ranks__iteration(
+def test_accumulate_performances_iteration(
     dummy_experiment_data,
     grouping_columns,
     performance_column,
-    dataset_aggregators,
+):
+    """Test accumulate_performances with iteration budget unit"""
+    result = accumulate_performances(
+        data=dummy_experiment_data,
+        aggregators=grouping_columns,
+        budget_unit="iteration",
+        performance_column=performance_column,
+    )
+
+    expected = load_test_data("accumulated_performances_iteration.json")
+    assert_frame_equal(
+        result.reset_index(drop=True),
+        expected.reset_index(drop=True),
+        atol=0.01,
+        check_dtype=False,
+    )
+
+
+def test_align_tuners_iteration(
+    dummy_experiment_data,
+    grouping_columns,
+    performance_column,
     tuner_column,
     repetition_column,
 ):
-    budget_unit = "iteration"
-    ranking_columns = grouping_columns + [budget_unit]
-    ranking_columns.remove(tuner_column)
+    """Test align_tuners with iteration budget unit"""
+    # Derive alignment_columns exactly as in process_performance_records
+    alignment_columns = deepcopy(grouping_columns)
+    alignment_columns.remove(repetition_column)
+
     accumulated_performances = accumulate_performances(
-        experiment_log=dummy_experiment_data,
-        grouping_columns=grouping_columns,
-        budget_unit=budget_unit,
+        data=dummy_experiment_data,
+        aggregators=grouping_columns,
+        budget_unit="iteration",
         performance_column=performance_column,
     )
-    aligned_tuners_df = align_tuners(
+
+    result = align_tuners(
         data=accumulated_performances,
-        dataset_aggregators=dataset_aggregators,
+        aggregators=alignment_columns,
         tuner_column=tuner_column,
         repetition_column=repetition_column,
-        budget_unit=budget_unit,
+        budget_unit="iteration",
     )
-    calculated_ranks_df = calculate_ranks(
-        experiment_log=aligned_tuners_df,
-        ranking_columns=ranking_columns,
-    )
-    expected_output = {
-        "performance": [
-            -83.3992,
-            -91.3902,
-            -89.9583,
-            -88.5413,
-            -80.241,
-            -87.4604,
-            -84.0319,
-            -71.6547,
-            -89.9583,
-            -88.5413,
-            -79.0829,
-            -83.757,
-            -87.4604,
-            -84.0319,
-            -71.6547,
-            -84.2562,
-            -84.0319,
-            -71.6547,
-            -89.9583,
-            -88.5413,
-            -79.0829,
-            -88.5413,
-            -79.0829,
-            -83.757,
-        ],
-        "iteration": [
-            1,
-            2,
-            3,
-            4,
-            1,
-            2,
-            3,
-            4,
-            1,
-            2,
-            3,
-            4,
-            1,
-            2,
-            3,
-            4,
-            1,
-            2,
-            1,
-            2,
-            1,
-            2,
-            1,
-            2,
-        ],
-        "breach_status": [
-            np.nan,
-            1,
-            0,
-            0,
-            0,
-            0,
-            1,
-            1,
-            np.nan,
-            np.nan,
-            np.nan,
-            np.nan,
-            np.nan,
-            np.nan,
-            np.nan,
-            np.nan,
-            np.nan,
-            np.nan,
-            np.nan,
-            np.nan,
-            np.nan,
-            np.nan,
-            np.nan,
-            np.nan,
-        ],
-        "runtime": [
-            256.8546,
-            257.8,
-            259.8,
-            259.9,
-            254.2,
-            257.5,
-            258,
-            259,
-            257.1,
-            258.2,
-            258.3,
-            258.5,
-            256,
-            257.2,
-            258.5,
-            258.9,
-            50,
-            50.5,
-            50.1,
-            52,
-            50.3,
-            52.2,
-            50.3,
-            50.8,
-        ],
-        "benchmark_identifier": ["lcbench"] * 16 + ["nahs201"] * 8,
-        "dataset": [3945] * 16 + ["cifar10"] * 8,
-        "tuner": ["GBRT"] * 8 + ["TPE"] * 8 + ["GBRT"] * 4 + ["TPE"] * 4,
-        "repetition": [1] * 4
-        + [2] * 4
-        + [1] * 4
-        + [2] * 4
-        + [1] * 2
-        + [2] * 2
-        + [1] * 2
-        + [2] * 2,
-        "best_performance": [
-            -83.3992,
-            -91.3902,
-            -91.3902,
-            -91.3902,
-            -80.241,
-            -87.4604,
-            -87.4604,
-            -87.4604,
-            -89.9583,
-            -89.9583,
-            -89.9583,
-            -89.9583,
-            -87.4604,
-            -87.4604,
-            -87.4604,
-            -87.4604,
-            -84.0319,
-            -84.0319,
-            -89.9583,
-            -89.9583,
-            -79.0829,
-            -88.5413,
-            -79.0829,
-            -83.757,
-        ],
-        "max_budget_per_repetition": [6] * 4 + [4] * 4 + [5] * 4 + [4] * 4 + [2] * 8,
-        "min_budget_per_repetition": [1] * 24,
-        "max_shared_budget_per_dataset": [4] * 16 + [2] * 8,
-        "min_shared_budget_per_dataset": [1] * 24,
-        "rank": [
-            2,
-            1,
-            1,
-            1,
-            2,
-            1.5,
-            1.5,
-            1.5,
-            1,
-            2,
-            2,
-            2,
-            1,
-            1.5,
-            1.5,
-            1.5,
-            1,
-            2,
-            1,
-            1,
-            2,
-            1,
-            2,
-            2,
-        ],
-    }
-    expected_output = pd.DataFrame(expected_output)
+
+    expected = load_test_data("aligned_tuners_iteration.json")
     assert_frame_equal(
-        calculated_ranks_df.reset_index(drop=True),
-        expected_output,
+        result.reset_index(drop=True),
+        expected.reset_index(drop=True),
+        atol=0.01,
+        check_dtype=False,
+    )
+
+
+def test_calculate_ranks_iteration(
+    dummy_experiment_data,
+    grouping_columns,
+    performance_column,
+    tuner_column,
+    repetition_column,
+):
+    """Test calculate_ranks with iteration budget unit"""
+    # Derive columns exactly as in process_performance_records
+    alignment_columns = deepcopy(grouping_columns)
+    alignment_columns.remove(repetition_column)
+    ranking_columns = deepcopy(grouping_columns) + ["iteration"]
+    ranking_columns.remove(tuner_column)
+
+    accumulated_performances = accumulate_performances(
+        data=dummy_experiment_data,
+        aggregators=grouping_columns,
+        budget_unit="iteration",
+        performance_column=performance_column,
+    )
+
+    aligned_tuners = align_tuners(
+        data=accumulated_performances,
+        aggregators=alignment_columns,
+        tuner_column=tuner_column,
+        repetition_column=repetition_column,
+        budget_unit="iteration",
+    )
+
+    result = calculate_ranks(
+        data=aligned_tuners,
+        aggregators=ranking_columns,
+        metric_column="best_performance",
+    )
+
+    expected = load_test_data("calculated_ranks_iteration.json")
+    assert_frame_equal(
+        result.reset_index(drop=True),
+        expected.reset_index(drop=True),
+        atol=0.01,
+        check_dtype=False,
+    )
+
+
+def test_accumulate_breaches_iteration(
+    dummy_experiment_data,
+    grouping_columns,
+    performance_column,
+    tuner_column,
+    repetition_column,
+):
+    """Test accumulate_breaches with iteration budget unit"""
+    # Derive columns exactly as in process_performance_records
+    alignment_columns = deepcopy(grouping_columns)
+    alignment_columns.remove(repetition_column)
+    ranking_columns = deepcopy(grouping_columns) + ["iteration"]
+    ranking_columns.remove(tuner_column)
+
+    accumulated_performances = accumulate_performances(
+        data=dummy_experiment_data,
+        aggregators=grouping_columns,
+        budget_unit="iteration",
+        performance_column=performance_column,
+    )
+
+    aligned_tuners = align_tuners(
+        data=accumulated_performances,
+        aggregators=alignment_columns,
+        tuner_column=tuner_column,
+        repetition_column=repetition_column,
+        budget_unit="iteration",
+    )
+
+    calculated_ranks = calculate_ranks(
+        data=aligned_tuners,
+        aggregators=ranking_columns,
+        metric_column="best_performance",
+    )
+
+    result = accumulate_breaches(
+        data=calculated_ranks,
+        aggregators=grouping_columns,
+        budget_unit="iteration",
+        breach_column="breach_status",
+    )
+
+    expected = load_test_data("accumulated_breaches_iteration.json")
+    assert_frame_equal(
+        result.reset_index(drop=True),
+        expected.reset_index(drop=True),
         atol=0.01,
         check_dtype=False,
     )
 
 
 def test_time_discretize_benchmark_data(
-    dummy_experiment_data, entity_columns, repetition_column, performance_column
-):
-    budget_unit = "runtime"
-    time_discretized_data = time_discretize_benchmark_data(
-        data=dummy_experiment_data,
-        entity_columns=entity_columns,
-        repetition_column=repetition_column,
-        budget_unit=budget_unit,
-        performance_column=performance_column,
-    )
-
-    assert time_discretized_data.shape[1] == dummy_experiment_data.shape[1]
-
-    expected_output = {
-        "runtime": [
-            257,
-            258,
-            259,
-            257,
-            258,
-            259,
-            257,
-            258,
-            259,
-            257,
-            258,
-            259,
-            50,
-            50,
-            50,
-            50,
-        ],
-        "benchmark_identifier": ["lcbench"] * 12 + ["nahs201"] * 4,
-        "dataset": [3945] * 12 + ["cifar10"] * 4,
-        "tuner": ["GBRT"] * 6 + ["TPE"] * 6 + ["GBRT"] * 2 + ["TPE"] * 2,
-        "repetition": [1, 1, 1, 2, 2, 2, 1, 1, 1, 2, 2, 2, 1, 2, 1, 2],
-        "performance": [
-            -83.3992,
-            -91.3902,
-            -91.3902,
-            -80.241,
-            -87.4604,
-            -71.6547,
-            -89.9583,
-            -88.5413,
-            -81.358,
-            -84.0319,
-            -71.6547,
-            -84.2562,
-            -84.0319,
-            -89.9583,
-            -79.0829,
-            -83.757,
-        ],
-        "best_performance": [
-            -83.3992,
-            -91.3902,
-            -91.3902,
-            -80.241,
-            -87.4604,
-            -87.4604,
-            -89.9583,
-            -89.9583,
-            -89.9583,
-            -87.4604,
-            -87.4604,
-            -87.4604,
-            -84.0319,
-            -89.9583,
-            -79.0829,
-            -83.757,
-        ],
-        "observation_fill_rate": [1] * 16,
-    }
-
-    expected_output = pd.DataFrame(expected_output)
-    assert_frame_equal(
-        time_discretized_data.reset_index(drop=True),
-        expected_output,
-        atol=0.01,
-        check_dtype=False,
-    )
-
-
-def test_align_tuners__runtime(
     dummy_experiment_data,
-    performance_column,
-    dataset_aggregators,
-    tuner_column,
-    repetition_column,
-    entity_columns,
-):
-    budget_unit = "runtime"
-    time_discretized_data = time_discretize_benchmark_data(
-        data=dummy_experiment_data,
-        entity_columns=entity_columns,
-        repetition_column=repetition_column,
-        budget_unit=budget_unit,
-        performance_column=performance_column,
-    )
-    aligned_tuners_df = align_tuners(
-        data=time_discretized_data,
-        dataset_aggregators=dataset_aggregators,
-        tuner_column=tuner_column,
-        repetition_column=repetition_column,
-        budget_unit=budget_unit,
-    )
-    expected_output = {
-        "runtime": [
-            257,
-            258,
-            259,
-            257,
-            258,
-            259,
-            257,
-            258,
-            259,
-            257,
-            258,
-            259,
-            50,
-            50,
-            50,
-            50,
-        ],
-        "benchmark_identifier": ["lcbench"] * 12 + ["nahs201"] * 4,
-        "dataset": [3945] * 12 + ["cifar10"] * 4,
-        "tuner": ["GBRT"] * 6 + ["TPE"] * 6 + ["GBRT"] * 2 + ["TPE"] * 2,
-        "repetition": [1, 1, 1, 2, 2, 2, 1, 1, 1, 2, 2, 2, 1, 2, 1, 2],
-        "performance": [
-            -83.3992,
-            -91.3902,
-            -91.3902,
-            -80.241,
-            -87.4604,
-            -71.6547,
-            -89.9583,
-            -88.5413,
-            -81.358,
-            -84.0319,
-            -71.6547,
-            -84.2562,
-            -84.0319,
-            -89.9583,
-            -79.0829,
-            -83.757,
-        ],
-        "best_performance": [
-            -83.3992,
-            -91.3902,
-            -91.3902,
-            -80.241,
-            -87.4604,
-            -87.4604,
-            -89.9583,
-            -89.9583,
-            -89.9583,
-            -87.4604,
-            -87.4604,
-            -87.4604,
-            -84.0319,
-            -89.9583,
-            -79.0829,
-            -83.757,
-        ],
-        "observation_fill_rate": [1] * 16,
-        "max_budget_per_repetition": [259] * 12 + [50] * 4,
-        "min_budget_per_repetition": [257] * 12 + [50] * 4,
-        "max_shared_budget_per_dataset": [259] * 12 + [50] * 4,
-        "min_shared_budget_per_dataset": [257] * 12 + [50] * 4,
-    }
-    expected_output = pd.DataFrame(expected_output)
-    assert_frame_equal(
-        aligned_tuners_df.reset_index(drop=True),
-        expected_output,
-        atol=0.01,
-        check_dtype=False,
-    )
-
-
-def test_calculate_ranks__runtime(
-    dummy_experiment_data,
-    performance_column,
-    dataset_aggregators,
-    tuner_column,
-    repetition_column,
-    entity_columns,
     grouping_columns,
+    repetition_column,
+    performance_column,
 ):
-    budget_unit = "runtime"
-    ranking_columns = grouping_columns + [budget_unit]
-    ranking_columns.remove(tuner_column)
-    time_discretized_data = time_discretize_benchmark_data(
+    """Test time_discretize_benchmark_data"""
+    # Derive alignment_columns exactly as in process_performance_records
+    alignment_columns = deepcopy(grouping_columns)
+    alignment_columns.remove(repetition_column)
+
+    result = time_discretize_benchmark_data(
         data=dummy_experiment_data,
-        entity_columns=entity_columns,
+        entity_columns=alignment_columns,
         repetition_column=repetition_column,
-        budget_unit=budget_unit,
+        budget_unit="runtime",
         performance_column=performance_column,
     )
-    aligned_tuners_df = align_tuners(
-        data=time_discretized_data,
-        dataset_aggregators=dataset_aggregators,
+
+    expected = load_test_data("time_discretized_data.json")
+    assert_frame_equal(
+        result.reset_index(drop=True),
+        expected.reset_index(drop=True),
+        atol=0.01,
+        check_dtype=False,
+    )
+
+
+def test_align_tuners_runtime(
+    dummy_experiment_data,
+    grouping_columns,
+    repetition_column,
+    performance_column,
+    tuner_column,
+):
+    """Test align_tuners with runtime budget unit"""
+    # Derive columns exactly as in process_performance_records
+    alignment_columns = deepcopy(grouping_columns)
+    alignment_columns.remove(repetition_column)
+    dataset_columns = deepcopy(grouping_columns)
+    dataset_columns.remove(tuner_column)
+    dataset_columns.remove(repetition_column)
+
+    discretized_data = time_discretize_benchmark_data(
+        data=dummy_experiment_data,
+        entity_columns=alignment_columns,
+        repetition_column=repetition_column,
+        budget_unit="runtime",
+        performance_column=performance_column,
+    )
+
+    result = align_tuners(
+        data=discretized_data,
+        aggregators=dataset_columns,
         tuner_column=tuner_column,
         repetition_column=repetition_column,
-        budget_unit=budget_unit,
-    )
-    calculated_ranks_df = calculate_ranks(
-        experiment_log=aligned_tuners_df,
-        ranking_columns=ranking_columns,
+        budget_unit="runtime",
     )
 
-    # Define the expected output before using it
-    expected_output = {
-        "runtime": [
-            257,
-            258,
-            259,  # GBRT rep 1
-            257,
-            258,
-            259,  # GBRT rep 2
-            257,
-            258,
-            259,  # TPE rep 1
-            257,
-            258,
-            259,  # TPE rep 2
-            50,  # GBRT rep 1 (nahs)
-            50,  # GBRT rep 2 (nahs)
-            50,  # TPE rep 1 (nahs)
-            50,  # TPE rep 2 (nahs)
-        ],
-        "benchmark_identifier": ["lcbench"] * 12 + ["nahs201"] * 4,
-        "dataset": [3945] * 12 + ["cifar10"] * 4,
-        "tuner": ["GBRT"] * 6 + ["TPE"] * 6 + ["GBRT"] * 2 + ["TPE"] * 2,
-        "repetition": [1, 1, 1, 2, 2, 2, 1, 1, 1, 2, 2, 2, 1, 2, 1, 2],
-        "performance": [
-            -83.3992,
-            -91.3902,
-            -91.3902,
-            -80.241,
-            -87.4604,
-            -71.6547,
-            -89.9583,
-            -88.5413,
-            -81.358,
-            -84.0319,
-            -71.6547,
-            -84.2562,
-            -84.0319,
-            -89.9583,
-            -79.0829,
-            -83.757,
-        ],
-        "best_performance": [
-            -83.3992,
-            -91.3902,
-            -91.3902,
-            -80.241,
-            -87.4604,
-            -87.4604,
-            -89.9583,
-            -89.9583,
-            -89.9583,
-            -87.4604,
-            -87.4604,
-            -87.4604,
-            -84.0319,
-            -89.9583,
-            -79.0829,
-            -83.757,
-        ],
-        "observation_fill_rate": [1] * 16,
-        "max_budget_per_repetition": [259] * 12 + [50] * 4,
-        "min_budget_per_repetition": [257] * 12 + [50] * 4,
-        "max_shared_budget_per_dataset": [259] * 12 + [50] * 4,
-        "min_shared_budget_per_dataset": [257] * 12 + [50] * 4,
-        "rank": [
-            2,
-            1,
-            1,  # GBRT rep 1 ranks
-            2,
-            1.5,
-            1.5,  # GBRT rep 2 ranks
-            1,
-            2,
-            2,  # TPE rep 1 ranks
-            1,
-            1.5,
-            1.5,  # TPE rep 2 ranks
-            1,  # GBRT rep 1 (nahs) rank
-            1,  # GBRT rep 2 (nahs) rank
-            2,  # TPE rep 1 (nahs) rank
-            2,  # TPE rep 2 (nahs) rank
-        ],
-    }
-
-    expected_output = pd.DataFrame(expected_output)
+    expected = load_test_data("aligned_tuners_runtime.json")
     assert_frame_equal(
-        calculated_ranks_df.reset_index(drop=True),
-        expected_output,
+        result.reset_index(drop=True),
+        expected.reset_index(drop=True),
+        atol=0.01,
+        check_dtype=False,
+    )
+
+
+def test_calculate_ranks_runtime(
+    dummy_experiment_data,
+    grouping_columns,
+    repetition_column,
+    performance_column,
+    tuner_column,
+):
+    """Test calculate_ranks with runtime budget unit"""
+    # Derive columns exactly as in process_performance_records
+    alignment_columns = deepcopy(grouping_columns)
+    alignment_columns.remove(repetition_column)
+    dataset_columns = deepcopy(grouping_columns)
+    dataset_columns.remove(tuner_column)
+    dataset_columns.remove(repetition_column)
+    ranking_columns = deepcopy(grouping_columns) + ["runtime"]
+    ranking_columns.remove(tuner_column)
+
+    discretized_data = time_discretize_benchmark_data(
+        data=dummy_experiment_data,
+        entity_columns=alignment_columns,
+        repetition_column=repetition_column,
+        budget_unit="runtime",
+        performance_column=performance_column,
+    )
+
+    aligned_tuners = align_tuners(
+        data=discretized_data,
+        aggregators=dataset_columns,
+        tuner_column=tuner_column,
+        repetition_column=repetition_column,
+        budget_unit="runtime",
+    )
+
+    result = calculate_ranks(
+        data=aligned_tuners,
+        aggregators=ranking_columns,
+        metric_column="best_performance",
+    )
+
+    expected = load_test_data("calculated_ranks_runtime.json")
+    assert_frame_equal(
+        result.reset_index(drop=True),
+        expected.reset_index(drop=True),
+        atol=0.01,
+        check_dtype=False,
+    )
+
+
+def test_standardize_budget_unit_iteration(
+    dummy_experiment_data,
+    grouping_columns,
+    performance_column,
+    tuner_column,
+    repetition_column,
+):
+    """Test standardize_budget_unit with iteration budget unit"""
+    # Derive columns exactly as in process_performance_records
+    alignment_columns = deepcopy(grouping_columns)
+    alignment_columns.remove(repetition_column)
+    ranking_columns = deepcopy(grouping_columns) + ["iteration"]
+    ranking_columns.remove(tuner_column)
+
+    accumulated_performances = accumulate_performances(
+        data=dummy_experiment_data,
+        aggregators=grouping_columns,
+        budget_unit="iteration",
+        performance_column=performance_column,
+    )
+
+    aligned_tuners = align_tuners(
+        data=accumulated_performances,
+        aggregators=alignment_columns,
+        tuner_column=tuner_column,
+        repetition_column=repetition_column,
+        budget_unit="iteration",
+    )
+
+    calculated_ranks = calculate_ranks(
+        data=aligned_tuners,
+        aggregators=ranking_columns,
+        metric_column="best_performance",
+    )
+
+    accumulated_breaches = accumulate_breaches(
+        data=calculated_ranks,
+        aggregators=grouping_columns,
+        budget_unit="iteration",
+        breach_column="breach_status",
+    )
+
+    result = standardize_budget_unit(
+        data=accumulated_breaches,
+        aggregators=grouping_columns,
+        budget_unit="iteration",
+        metrics_to_keep=["rank", "best_performance"],
+    )
+
+    expected = load_test_data("standardized_data_iteration.json")
+    assert_frame_equal(
+        result.reset_index(drop=True),
+        expected.reset_index(drop=True),
+        atol=0.01,
+        check_dtype=False,
+    )
+
+
+def test_standardize_budget_unit_runtime(
+    dummy_experiment_data,
+    grouping_columns,
+    repetition_column,
+    performance_column,
+    tuner_column,
+):
+    """Test standardize_budget_unit with runtime budget unit"""
+    # Derive columns exactly as in process_performance_records
+    alignment_columns = deepcopy(grouping_columns)
+    alignment_columns.remove(repetition_column)
+    dataset_columns = deepcopy(grouping_columns)
+    dataset_columns.remove(tuner_column)
+    dataset_columns.remove(repetition_column)
+    ranking_columns = deepcopy(grouping_columns) + ["runtime"]
+    ranking_columns.remove(tuner_column)
+
+    discretized_data = time_discretize_benchmark_data(
+        data=dummy_experiment_data,
+        entity_columns=alignment_columns,
+        repetition_column=repetition_column,
+        budget_unit="runtime",
+        performance_column=performance_column,
+    )
+
+    aligned_tuners = align_tuners(
+        data=discretized_data,
+        aggregators=dataset_columns,
+        tuner_column=tuner_column,
+        repetition_column=repetition_column,
+        budget_unit="runtime",
+    )
+
+    calculated_ranks = calculate_ranks(
+        data=aligned_tuners,
+        aggregators=ranking_columns,
+        metric_column="best_performance",
+    )
+
+    result = standardize_budget_unit(
+        data=calculated_ranks,
+        aggregators=grouping_columns,
+        budget_unit="runtime",
+        metrics_to_keep=["rank", "best_performance"],
+    )
+
+    expected = load_test_data("standardized_data_runtime.json")
+    assert_frame_equal(
+        result.reset_index(drop=True),
+        expected.reset_index(drop=True),
+        atol=0.01,
+        check_dtype=False,
+    )
+
+
+def test_collapse_per_budget_iteration(
+    dummy_experiment_data,
+    grouping_columns,
+    performance_column,
+    tuner_column,
+    repetition_column,
+):
+    """Test collapse_per_budget with iteration budget unit"""
+    # Derive columns exactly as in process_performance_records
+    alignment_columns = deepcopy(grouping_columns)
+    alignment_columns.remove(repetition_column)
+    ranking_columns = deepcopy(grouping_columns) + ["iteration"]
+    ranking_columns.remove(tuner_column)
+
+    accumulated_performances = accumulate_performances(
+        data=dummy_experiment_data,
+        aggregators=grouping_columns,
+        budget_unit="iteration",
+        performance_column=performance_column,
+    )
+
+    aligned_tuners = align_tuners(
+        data=accumulated_performances,
+        aggregators=alignment_columns,
+        tuner_column=tuner_column,
+        repetition_column=repetition_column,
+        budget_unit="iteration",
+    )
+
+    calculated_ranks = calculate_ranks(
+        data=aligned_tuners,
+        aggregators=ranking_columns,
+        metric_column="best_performance",
+    )
+
+    accumulated_breaches = accumulate_breaches(
+        data=calculated_ranks,
+        aggregators=grouping_columns,
+        budget_unit="iteration",
+        breach_column="breach_status",
+    )
+
+    result = collapse_per_budget(
+        data=accumulated_breaches,
+        aggregators=alignment_columns,
+        metrics=[
+            "rank",
+            "best_performance",
+            "cumulative_breach_rate",
+            "rolling_breach_rate",
+        ],
+        budget_unit="iteration",
+    )
+
+    expected = load_test_data("collapsed_data_iteration.json")
+    assert_frame_equal(
+        result.reset_index(drop=True),
+        expected.reset_index(drop=True),
+        atol=0.01,
+        check_dtype=False,
+    )
+
+
+def test_collapse_per_budget_runtime(
+    dummy_experiment_data,
+    grouping_columns,
+    repetition_column,
+    performance_column,
+    tuner_column,
+):
+    """Test collapse_per_budget with runtime budget unit"""
+    # Derive columns exactly as in process_performance_records
+    alignment_columns = deepcopy(grouping_columns)
+    alignment_columns.remove(repetition_column)
+    dataset_columns = deepcopy(grouping_columns)
+    dataset_columns.remove(tuner_column)
+    dataset_columns.remove(repetition_column)
+    ranking_columns = deepcopy(grouping_columns) + ["runtime"]
+    ranking_columns.remove(tuner_column)
+
+    discretized_data = time_discretize_benchmark_data(
+        data=dummy_experiment_data,
+        entity_columns=alignment_columns,
+        repetition_column=repetition_column,
+        budget_unit="runtime",
+        performance_column=performance_column,
+    )
+
+    aligned_tuners = align_tuners(
+        data=discretized_data,
+        aggregators=dataset_columns,
+        tuner_column=tuner_column,
+        repetition_column=repetition_column,
+        budget_unit="runtime",
+    )
+
+    calculated_ranks = calculate_ranks(
+        data=aligned_tuners,
+        aggregators=ranking_columns,
+        metric_column="best_performance",
+    )
+
+    result = collapse_per_budget(
+        data=calculated_ranks,
+        aggregators=alignment_columns,
+        metrics=["rank", "best_performance"],
+        budget_unit="runtime",
+    )
+
+    expected = load_test_data("collapsed_data_runtime.json")
+    assert_frame_equal(
+        result.reset_index(drop=True),
+        expected.reset_index(drop=True),
         atol=0.01,
         check_dtype=False,
     )

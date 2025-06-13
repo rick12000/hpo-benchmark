@@ -4,19 +4,20 @@ import os
 import logging
 import optuna
 from typing import Literal
+import gc
 
-from .config.config import (
+from hpobench.config.types import (
     ExperimentConfig,
 )
-from .utils import (
+from hpobench.utils import (
     generate_hyperparameter_combinations,
     add_runtime,
 )
-from .prepare import (
+from hpobench.prepare import (
     setup_yahpo_instance_configs,
     setup_jahs201_configs,
 )
-from .tune import tune
+from hpobench.tune import tune
 
 logger = logging.getLogger(__name__)
 os.environ["SYNETUNE_FOLDER"] = "cache/syne-tune"
@@ -188,7 +189,6 @@ def run_main_benchmark(
         # Help free memory by allowing Python's garbage collector to clean up
         # after we're done with this dataset's generator
         experiment_config.objective_function = None
-        import gc
 
         gc.collect()
 

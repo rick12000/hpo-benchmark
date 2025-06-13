@@ -2,7 +2,7 @@ import pytest
 import pandas as pd
 import numpy as np
 from hpobench.generation.generate import BlackBoxGenerator
-from hpobench.config.config import FloatRange
+from hpobench.config.types import FloatRange
 
 
 @pytest.fixture
@@ -136,7 +136,7 @@ def dummy_experiment_data():
         + [1] * 2
         + [2] * 2,
     }
-    df_data = pd.DataFrame(data).sample(frac=1)
+    df_data = pd.DataFrame(data)
 
     return df_data
 

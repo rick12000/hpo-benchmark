@@ -3,6 +3,7 @@ import numpy as np
 import logging
 import os
 from typing import List, Optional, Callable, Tuple
+
 from hpobench.utils import save_analysis_results
 from hpobench.plot import (
     plot_benchmark_data,
@@ -10,21 +11,127 @@ from hpobench.plot import (
     plot_estimator_rank_vs_datasize,
     plot_tuning_rank_comparison,
 )
+from scikit_posthocs import posthoc_nemenyi
 from hpobench.process import (
     process_performance_records,
     aggregate_benchmark_data,
-    friedman_test_runner,
-    nemenyi_pairwise_test,
     calculate_ranks,
 )
+from scipy.stats import friedmanchisquare
 
 logger = logging.getLogger(__name__)
-
-# --- Helper Functions ---
 
 
 def _ensure_dir(path: str):
     os.makedirs(path, exist_ok=True)
+
+
+def _get_group_dict(breakout_col, within_group):
+    if breakout_col is None:
+        return {}
+    if isinstance(within_group, tuple):
+        return dict(zip(breakout_col, within_group))
+    return {breakout_col[0]: within_group}
+
+
+def friedman_test_runner(
+    data: pd.DataFrame,
+    across_col: str,
+    entity_col: str,
+    rank_col: str,
+    breakout_col: Optional[list[str]] = None,
+    alpha: float = 0.05,
+) -> tuple[pd.DataFrame, float]:
+    results = []
+    group_iter = (
+        data.groupby(breakout_col) if breakout_col is not None else [(None, data)]
+    )
+
+    for within_group, group_df in group_iter:
+        pivot_df = group_df.pivot(index=across_col, columns=entity_col, values=rank_col)
+        if pivot_df.shape[0] < 2 or pivot_df.shape[1] < 3:
+            logger.info(
+                f"Skipping {within_group}: Need at least 3 entities (columns) for Friedman test. Skipped."
+            )
+            continue
+        stat, p = friedmanchisquare(
+            *[pivot_df[col].dropna() for col in pivot_df.columns]
+        )
+        group_dict = _get_group_dict(breakout_col, within_group)
+        results.append({**group_dict, "statistic": stat, "p_value": p})
+
+    results_df = pd.DataFrame(results)
+    n_tests = len(results_df)
+    adjusted_alpha = alpha / n_tests if n_tests > 0 else alpha
+    if not results_df.empty and "p_value" in results_df.columns:
+        results_df["significant"] = results_df["p_value"] < adjusted_alpha
+        results_df["adjusted_alpha"] = adjusted_alpha
+    else:
+        results_df["significant"] = []
+        results_df["adjusted_alpha"] = adjusted_alpha
+
+    return results_df, adjusted_alpha
+
+
+def nemenyi_pairwise_test(
+    data: pd.DataFrame,
+    across_col: str,
+    entity_col: str,
+    rank_col: str,
+    breakout_col: Optional[list[str]] = None,
+    alpha: float = 0.05,
+) -> pd.DataFrame:
+    results = []
+    group_iter = (
+        data.groupby(breakout_col) if breakout_col is not None else [(None, data)]
+    )
+
+    for within_group, group_df in group_iter:
+        logger.debug(
+            f"Group: {within_group}, group_df shape: {group_df.shape}, unique {entity_col}: {group_df[entity_col].unique()}"
+        )
+        if group_df[entity_col].nunique() < 2:
+            logger.debug(
+                f"Skipping {within_group}: Need at least 2 entities for Nemenyi test"
+            )
+            continue
+
+        mean_ranks = group_df.groupby(entity_col)[rank_col].mean()
+        logger.debug(f"Mean ranks: {mean_ranks}")
+        p_value_matrix = posthoc_nemenyi(
+            a=group_df, val_col=rank_col, group_col=entity_col, dist="tukey", sort=True
+        )
+        logger.debug(
+            f"p_value_matrix shape: {p_value_matrix.shape}, index: {p_value_matrix.index.tolist()}"
+        )
+        entities = p_value_matrix.index.tolist()
+        group_dict = _get_group_dict(breakout_col, within_group)
+
+        for i, e1 in enumerate(entities):
+            for j, e2 in enumerate(entities):
+                if i < j:
+                    p_value = p_value_matrix.loc[e1, e2]
+                    rank1 = mean_ranks.get(e1, np.nan)
+                    rank2 = mean_ranks.get(e2, np.nan)
+                    results.append(
+                        {
+                            **group_dict,
+                            "entity1": e1,
+                            "entity2": e2,
+                            "mean_rank_1": rank1,
+                            "mean_rank_2": rank2,
+                            "p_value": p_value,
+                            "significant": p_value < alpha,
+                            "better_entity": e1 if rank1 < rank2 else e2,
+                        }
+                    )
+
+    results_df = pd.DataFrame(results)
+    if not results_df.empty and "p_value" in results_df.columns:
+        results_df["significant"] = results_df["p_value"] < alpha
+    else:
+        results_df["significant"] = []
+    return results_df
 
 
 def _run_and_save_friedman(
@@ -87,7 +194,11 @@ def _aggregate_and_save(
     logger: logging.Logger,
 ) -> pd.DataFrame:
     aggregated_results = aggregate_benchmark_data(
-        data=data, grouping_cols=grouping_cols, metrics=metrics
+        data=data,
+        aggregators=grouping_cols,
+        metrics=metrics,
+        n_bootstraps=100,
+        random_state=1234,
     )
     filepath = os.path.join(output_path, filename)
     aggregated_results.to_csv(filepath, index=False)
@@ -139,7 +250,7 @@ def analyze_main_benchmark(
 
     relativized_results = process_performance_records(
         raw_benchmark_data=raw_benchmark_data,
-        grouping_columns=grouping_cols,
+        aggregators=grouping_cols,
         performance_column=perf_col,
         budget_unit=runtime_unit,
         repetition_column=rep_col,
@@ -149,7 +260,7 @@ def analyze_main_benchmark(
 
     iteration_results = process_performance_records(
         raw_benchmark_data=raw_benchmark_data,
-        grouping_columns=grouping_cols,
+        aggregators=grouping_cols,
         performance_column=perf_col,
         budget_unit=iter_unit,
         repetition_column=rep_col,
@@ -289,8 +400,8 @@ def _prepare_tuning_effect_data(
         "estimator_architecture",
     ]
     ranked_df = calculate_ranks(
-        experiment_log=df,
-        ranking_columns=rank_grouping_cols,
+        data=df,
+        aggregators=rank_grouping_cols,
         rank_ascending=True,
         metric_column=metric_col,
     )
@@ -323,8 +434,8 @@ def _prepare_estimator_comparison_data(
         "tuning_framework",
     ]
     ranked_df = calculate_ranks(
-        experiment_log=df,
-        ranking_columns=rank_grouping_cols,
+        data=df,
+        aggregators=rank_grouping_cols,
         rank_ascending=True,
         metric_column=metric_col,
     )
@@ -510,7 +621,7 @@ def analyze_dataset_level_benchmark(
 
     processed_data = process_performance_records(
         raw_benchmark_data=dataset_benchmark_data,
-        grouping_columns=grouping_columns,
+        aggregators=grouping_columns,
         performance_column="performance",
         budget_unit=budget_unit,
         repetition_column="repetition",
