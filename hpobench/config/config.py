@@ -120,18 +120,21 @@ SAMPLER_VARIATION_CONFIGURATIONS = build_sampler_variation_configurations(
 
 ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurations(
     architectures=[
-        # "qrf",
-        # "qknn",
+        "qrf",
+        "qknn",
         # "qens1",
         # "qgp",
         # "qens2",
         # "qens3",
+        "qgbm",
         "qens4",
         # "qens5"
     ],
     samplers=[
-        ExpectedImprovementSampler(n_quantiles=8, num_ei_samples=100, adapter=None),
-        # ThompsonSampler(n_quantiles=8, enable_optimistic_sampling=False, adapter="DtACI"),
+        ExpectedImprovementSampler(n_quantiles=8, num_ei_samples=100, adapter="DtACI"),
+        ThompsonSampler(
+            n_quantiles=8, enable_optimistic_sampling=False, adapter="DtACI"
+        ),
     ],
 )
 
@@ -151,7 +154,6 @@ FULL_TUNING_CONFIGURATIONS = [
     PRECONFORMAL_COMPARISON_CONFIGURATIONS,
 ]
 
-# 4. Create configurations feeding the tuning vs. no tuning search rank plots (NOTE: Unused in paper for brevity):
 SAMPLER = LowerBoundSampler(
     interval_width=DEFAULT_INTERVAL_WIDTH,
     adapter="DtACI",
@@ -176,56 +178,5 @@ TUNING_PATH_CONFIGURATIONS = [
             SEARCHER, searcher_tuning_framework="fixed"
         ),
         searcher_tuning_framework="fixed",  # Fixed tuning framework
-    ),
-]
-
-# 5. Create configurations for development use:
-DEV_TUNING_CONFIGURATIONS = [
-    TunerConfig(
-        tuner="optuna",
-        searcher="tpe",
-        config_identifier="TPE",
-    ),
-    TunerConfig(
-        tuner="confopt",
-        searcher=QuantileConformalSearcher(
-            quantile_estimator_architecture="qrf",
-            sampler=MaxValueEntropySearchSampler(
-                n_quantiles=8,
-                adapter="DtACI",
-                n_min_samples=500,
-                n_y_samples=30,
-            ),
-        ),
-        config_identifier=create_sampler_config_id(
-            QuantileConformalSearcher(
-                quantile_estimator_architecture="qrf",
-                sampler=MaxValueEntropySearchSampler(
-                    n_quantiles=8,
-                    adapter="DtACI",
-                    n_min_samples=500,
-                    n_y_samples=30,
-                ),
-            )
-        ),
-        searcher_tuning_framework=None,
-    ),
-    TunerConfig(
-        tuner="confopt",
-        searcher=QuantileConformalSearcher(
-            quantile_estimator_architecture="qrf",
-            sampler=ThompsonSampler(
-                n_quantiles=8, enable_optimistic_sampling=False, adapter="DtACI"
-            ),
-        ),
-        config_identifier=create_sampler_config_id(
-            QuantileConformalSearcher(
-                quantile_estimator_architecture="qrf",
-                sampler=ThompsonSampler(
-                    n_quantiles=8, enable_optimistic_sampling=False, adapter="DtACI"
-                ),
-            )
-        ),
-        searcher_tuning_framework=None,
     ),
 ]

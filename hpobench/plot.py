@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 from datetime import datetime
 import pandas as pd
 import numpy as np
-from typing import Optional, List, Any
+from typing import Optional, List, Callable
 import time
 import os
 import logging
@@ -175,305 +175,13 @@ def plot_benchmark_data(
     plt.close()
 
 
-def run_plots(data, x_col, y_cols, col_measure, row_measure, plot_path):
-    """Generates and saves plots for specified y-columns."""
-    for y_col in y_cols:
-        try:
-            # Set lower and upper interval columns explicitly if they exist
-            y_col_lower = f"{y_col}_q10" if f"{y_col}_q10" in data.columns else None
-            y_col_upper = f"{y_col}_q90" if f"{y_col}_q90" in data.columns else None
-
-            plot_benchmark_data(
-                data,
-                plot_path,
-                x_col=x_col,
-                y_col=y_col,
-                y_col_lower=y_col_lower,
-                y_col_upper=y_col_upper,
-                add_confidence_intervals=True,
-                col_measure=col_measure,
-                row_measure=row_measure,
-            )
-            # Consider removing or reducing sleep if not strictly necessary
-            time.sleep(2)
-        except Exception as e:
-            # Log the error instead of crashing
-            logger.error(f"Error plotting {y_col}: {e}")
-
-
-def plot_tuning_effect(
-    plot_df: pd.DataFrame,
-    budget_col: str,
-    performance_col: str,
-    performance_col_lower: Optional[str] = None,
-    performance_col_upper: Optional[str] = None,
-    tuner_col: str = "tuner",
-    estimator_name: str = "",
-    dataset_name: str = "",
-    plot_file_path: str = "",
-    color_palette: Optional[List[str]] = None,
-):
-    """
-    Plot the effect of different tuners on performance metrics over time.
-
-    Args:
-        plot_df (pd.DataFrame): DataFrame containing the data to plot
-        budget_col (str): Column name for the budget/x-axis (e.g., runtime, iteration)
-        performance_col (str): Column name for the performance metric
-        performance_col_lower (Optional[str]): Column name for lower confidence interval
-        performance_col_upper (Optional[str]): Column name for upper confidence interval
-        tuner_col (str): Column name identifying different tuners
-        estimator_name (str): Name of the estimator for the plot title
-        dataset_name (str): Name of the dataset for the plot title
-        plot_file_path (str): Path to save the plot
-        color_palette (Optional[List[str]]): Custom color palette
-    """
-    if plot_df.empty:
-        logger.warning(
-            f"Skipping plot for {estimator_name} on {dataset_name}: Data is empty."
-        )
-        return
-
-    # Set default values for confidence interval columns if not provided
-    if performance_col_lower is None and f"{performance_col}_q10" in plot_df.columns:
-        performance_col_lower = f"{performance_col}_q10"
-    if performance_col_upper is None and f"{performance_col}_q90" in plot_df.columns:
-        performance_col_upper = f"{performance_col}_q90"
-
-    plt.clf()
-    fig, ax = plt.subplots(figsize=(8, 5))
-
-    tuners = plot_df[tuner_col].unique()
-    if color_palette is None:
-        color_palette = plt.cm.get_cmap("tab10", len(tuners))
-        colors = {tuner: color_palette(i) for i, tuner in enumerate(tuners)}
-    else:
-        colors = {
-            tuner: color_palette[i % len(color_palette)]
-            for i, tuner in enumerate(tuners)
-        }
-
-    required_cols = [budget_col, performance_col]
-    if performance_col_lower and performance_col_upper:
-        required_cols.extend([performance_col_lower, performance_col_upper])
-
-    missing_cols = [col for col in required_cols if col not in plot_df.columns]
-    if missing_cols:
-        logger.error(
-            f"Missing required columns for plotting in {plot_file_path}. Missing: {missing_cols}"
-        )
-        return
-
-    for tuner, group in plot_df.groupby(tuner_col):
-        group = group.sort_values(by=budget_col)
-        ax.plot(
-            group[budget_col],
-            group[performance_col],
-            label=str(tuner),
-            color=colors.get(tuner),
-        )
-
-        # Add confidence intervals if columns are provided
-        if performance_col_lower is not None and performance_col_upper is not None:
-            ax.fill_between(
-                group[budget_col],
-                group[performance_col_lower],
-                group[performance_col_upper],
-                alpha=0.2,
-                color=colors.get(tuner),
-            )
-
-    budget_label = budget_col.replace("_", " ").title()
-    if budget_col == "normalized_runtime":
-        budget_label += " (%)"
-
-    ax.set_title(
-        f"Tuning Effect Over Time\nEstimator: {estimator_name}, Dataset: {dataset_name}"
-    )
-    ax.set_xlabel(budget_label)
-    ax.set_ylabel(f"{performance_col.replace('_', ' ').title()} (Lower is Better)")
-    ax.legend()
-    ax.grid(True)
-    plt.tight_layout()
-
-    try:
-        plt.savefig(plot_file_path)
-        logger.info(f"Saved tuning effect plot: {plot_file_path}")
-    except Exception as e:
-        logger.error(f"Failed to save plot {plot_file_path}: {e}")
-    finally:
-        plt.close(fig)  # Close the figure to free memory
-
-
-def plot_rank_analysis(
-    plot_df: pd.DataFrame,
-    plot_path: str,
-    x_col: str = "data_size",
-    y_col: str = "rank",
-    y_col_lower: Optional[str] = None,
-    y_col_upper: Optional[str] = None,
-    group_col: str = "estimator_architecture",
-    title: str = "Performance Across Data Sizes",
-    ylabel: str = "Average Rank\n(Lower is Better)",
-    significant_col: Optional[str] = "significant",
-    significant_value: Any = True,
-    invert_y_axis: bool = True,
-    reference_line: Optional[float] = None,
-    reference_line_style: str = "--",
-    reference_line_color: str = "gray",
-    reference_line_alpha: float = 0.5,
-    figsize: tuple = (10, 6),
-    dpi: int = 300,
-    marker_size: int = 8,
-    significant_marker: str = "*",
-    significant_marker_size: int = 15,
-    annotation_text: Optional[str] = None,
-):
-    """
-    Generic plotting function for rank-based analyses that vary across data sizes.
-
-    Parameters:
-    -----------
-    plot_df : pd.DataFrame
-        DataFrame containing the data to plot
-    plot_path : str
-        Path where the plot will be saved
-    x_col : str
-        Column to use for the x-axis, default is "data_size"
-    y_col : str
-        Column to use for the y-axis, default is "rank"
-    y_col_lower : Optional[str]
-        Column for lower confidence interval, if None, will use "{y_col}_q10" if available
-    y_col_upper : Optional[str]
-        Column for upper confidence interval, if None, will use "{y_col}_q90" if available
-    group_col : str
-        Column to use for grouping data into different lines/colors, default is "estimator_architecture"
-    title : str
-        Title for the plot
-    ylabel : str
-        Label for the y-axis
-    significant_col : Optional[str]
-        Column indicating statistical significance, default is "significant"
-    significant_value : Any
-        Value in significant_col that indicates significance, default is True
-    invert_y_axis : bool
-        Whether to invert the y-axis (useful for rank plots where lower is better), default is True
-    reference_line : Optional[float]
-        Y-value for an optional horizontal reference line, default is None
-    reference_line_style : str
-        Line style for reference line, default is "--"
-    reference_line_color : str
-        Color for reference line, default is "gray"
-    reference_line_alpha : float
-        Alpha (transparency) for reference line, default is 0.5
-    figsize : tuple
-        Figure size (width, height) in inches, default is (10, 6)
-    dpi : int
-        Resolution for the saved figure, default is 300
-    marker_size : int
-        Size of regular data point markers, default is 8
-    significant_marker : str
-        Marker symbol for significant data points, default is "*"
-    significant_marker_size : int
-        Size of significant point markers, default is 15
-    annotation_text : Optional[str]
-        Optional text to add at the bottom of the plot (e.g., explaining markers)
-    """
-    # Set default values for confidence interval columns if not provided
-    if y_col_lower is None and f"{y_col}_q10" in plot_df.columns:
-        y_col_lower = f"{y_col}_q10"
-    if y_col_upper is None and f"{y_col}_q90" in plot_df.columns:
-        y_col_upper = f"{y_col}_q90"
-
-    plt.figure(figsize=figsize)
-
-    # Get unique groups and create color palette
-    groups = plot_df[group_col].unique()
-    colors = plt.cm.tab10(np.linspace(0, 1, len(groups)))
-
-    # Plot each group
-    for i, group_value in enumerate(groups):
-        group_data = plot_df[plot_df[group_col] == group_value]
-
-        # Sort by x-axis value for proper line connection
-        group_data = group_data.sort_values(x_col)
-
-        # Create line plot
-        plt.plot(
-            group_data[x_col],
-            group_data[y_col],
-            "o-",
-            label=group_value,
-            color=colors[i],
-            linewidth=2,
-            markersize=marker_size,
-        )
-
-        # Add confidence intervals if provided
-        if y_col_lower is not None and y_col_upper is not None:
-            plt.fill_between(
-                group_data[x_col],
-                group_data[y_col_lower],
-                group_data[y_col_upper],
-                alpha=0.2,
-                color=colors[i],
-            )
-
-        # Add markers for significant points if requested
-        if significant_col is not None:
-            significant_points = group_data[
-                group_data[significant_col] == significant_value
-            ]
-            if not significant_points.empty:
-                plt.plot(
-                    significant_points[x_col],
-                    significant_points[y_col],
-                    significant_marker,
-                    color=colors[i],
-                    markersize=significant_marker_size,
-                )
-
-    # Add reference line if specified
-    if reference_line is not None:
-        plt.axhline(
-            y=reference_line,
-            color=reference_line_color,
-            linestyle=reference_line_style,
-            alpha=reference_line_alpha,
-        )
-
-    # Add labels and title
-    plt.title(title, fontsize=14)
-    plt.xlabel(x_col.replace("_", " ").title(), fontsize=12)
-    plt.ylabel(ylabel, fontsize=12)
-    plt.grid(True, alpha=0.3)
-    plt.legend(title=group_col.replace("_", " ").title(), fontsize=10)
-
-    # Invert y-axis if requested (for rank plots where lower is better)
-    if invert_y_axis:
-        plt.gca().invert_yaxis()
-
-    # Add annotation if provided
-    if annotation_text:
-        plt.figtext(0.01, 0.01, annotation_text, fontsize=8)
-
-    # Make sure the plot directory exists
-    os.makedirs(os.path.dirname(plot_path), exist_ok=True)
-
-    # Save plot
-    plt.savefig(plot_path, dpi=dpi, bbox_inches="tight")
-    plt.close()
-
-    logger.info(f"Saved plot to {plot_path}")
-
-
 def plot_estimator_rank_vs_datasize(
     data: pd.DataFrame,
     plot_base_path: str,
     x_col: str = "data_size",
     y_col: str = "rank",
     group_col: str = "estimator_architecture",
-    tuning_col: str = "tuning_framework",
+    tuning_col: str = "searcher_tuning_framework",
     benchmark_col: str = "benchmark_identifier",
     figsize: tuple = (14, 6),
     dpi: int = 300,
@@ -622,7 +330,7 @@ def plot_tuning_rank_comparison(
     data_size_col: str = "data_size",
     rank_col: str = "rank",
     estimator_col: str = "estimator_architecture",
-    tuning_col: str = "tuning_framework",
+    tuning_col: str = "searcher_tuning_framework",
     benchmark_col: str = "benchmark_identifier",
     alpha: float = 0.05,
     figsize: tuple = (10, 6),
@@ -841,4 +549,41 @@ def plot_tuning_rank_comparison(
                 plt.close(fig)  # Close the figure
 
 
-# %%
+def run_plots(data, x_col, y_cols, col_measure, row_measure, plot_path):
+    """Generates and saves plots for specified y-columns."""
+    for y_col in y_cols:
+        try:
+            # Set lower and upper interval columns explicitly if they exist
+            y_col_lower = f"{y_col}_q10" if f"{y_col}_q10" in data.columns else None
+            y_col_upper = f"{y_col}_q90" if f"{y_col}_q90" in data.columns else None
+
+            plot_benchmark_data(
+                data,
+                plot_path,
+                x_col=x_col,
+                y_col=y_col,
+                y_col_lower=y_col_lower,
+                y_col_upper=y_col_upper,
+                add_confidence_intervals=True,
+                col_measure=col_measure,
+                row_measure=row_measure,
+            )
+            # Consider removing or reducing sleep if not strictly necessary
+            time.sleep(2)
+        except Exception as e:
+            # Log the error instead of crashing
+            logger.error(f"Error plotting {y_col}: {e}")
+
+
+def _plot_and_save(
+    plot_func: Callable,
+    data: pd.DataFrame,
+    output_path: str,
+    filename_prefix: str,
+    logger: logging.Logger,
+    **plot_kwargs,
+):
+    os.makedirs(output_path, exist_ok=True)
+    plot_path = os.path.join(output_path, filename_prefix)
+    plot_func(data=data, plot_path=plot_path, **plot_kwargs)
+    logger.debug(f"Plots saved in {output_path} with prefix {filename_prefix}")

@@ -2,7 +2,6 @@ import pandas as pd
 from datetime import datetime
 import os
 import logging
-import optuna
 from typing import Literal
 import gc
 
@@ -21,37 +20,6 @@ from hpobench.tune import tune
 
 logger = logging.getLogger(__name__)
 os.environ["SYNETUNE_FOLDER"] = "cache/syne-tune"
-
-
-def setup_environment(cache_path: str = "cache/") -> tuple[str, logging.Logger]:
-    if not os.path.exists(cache_path):
-        os.makedirs(cache_path)
-    run_start = datetime.now()
-    run_start_str = run_start.strftime("%Y-%m-%d_%H-%M-%S")
-    log_path = os.path.join(cache_path, f"logs/{run_start_str}")
-    if not os.path.exists(log_path):
-        os.makedirs(log_path)
-    log_filename = os.path.join(
-        log_path, f"run_{run_start.strftime(format='%m_%d_%Y-%H_%M_%S')}.log"
-    )
-    logging.basicConfig(
-        filename=log_filename,
-        level=logging.DEBUG,
-        format="%(asctime)s %(levelname)-8s %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-        force=True,
-    )
-    logger = logging.getLogger()
-    logging.getLogger("hyperopt").setLevel(logging.ERROR)
-    logging.getLogger("confopt").setLevel(logging.ERROR)
-    optuna.logging.set_verbosity(optuna.logging.ERROR)
-    logging.getLogger("yahpo").setLevel(logging.WARNING)
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.DEBUG)
-    formatter = logging.Formatter("%(asctime)s %(levelname)-8s %(message)s")
-    console_handler.setFormatter(formatter)
-    logger.addHandler(console_handler)
-    return run_start_str, logger
 
 
 def load_benchmark_configs(
@@ -106,18 +74,26 @@ def run_main_benchmark(
     logger,
 ) -> pd.DataFrame:
     logger.info("Running HPO benchmark...")
+
     incremental_data_path = os.path.join(cache_path, f"data/{run_start_str}")
     os.makedirs(incremental_data_path, exist_ok=True)
+
     raw_benchmark_data = pd.DataFrame()
     for experiment_config in experiment_configs:
         dataset_name = experiment_config.dataset_identifier
-        logger.info(f"Dataset: {dataset_name}")
+        logger.info(f"Loop Level | Dataset: {dataset_name}")
 
-        # Initialize the generator for this dataset
         logger.info(f"Initializing generator for dataset: {dataset_name}...")
         experiment_config.objective_function.initialize()
         logger.info(f"Generator initialization complete for dataset: {dataset_name}")
 
+        logger.info(
+            f"Generating {experiment_config.n_warm_starts} warm start configurations for dataset: {dataset_name}"
+        )
+        # NOTE: Warm starts are identical per repetition, so all models
+        # will have the same starting hyperparameter configurations, but
+        # a new set of warm starts needs to be generated per dataset and
+        # per repetition.
         warm_start_configs_per_repetition = []
         for repetition in range(n_repetitions):
             consistent_warm_starts = generate_hyperparameter_combinations(
@@ -130,13 +106,15 @@ def run_main_benchmark(
                 performance = experiment_config.objective_function.predict(combination)
                 warm_start_configs.append((combination, performance))
             warm_start_configs_per_repetition.append(warm_start_configs)
+        logger.info(
+            f"Generated {len(warm_start_configs_per_repetition[0])} warm start configurations."
+        )
 
         for tuner in experiment_config.tuning_configurations:
-            logger.info(f"Tuner: {tuner}")
+            logger.info(f"Loop Level | Tuner: {tuner}")
             for repetition in range(n_repetitions):
-                logger.info(f"Repetition: {repetition}")
+                logger.info(f"Loop Level | Repetition: {repetition}")
                 tune_start = datetime.now()
-                repetition_seed = base_random_state + repetition
 
                 historical_performance = tune(
                     performance_generator=experiment_config.objective_function,
@@ -145,16 +123,16 @@ def run_main_benchmark(
                     timeout=experiment_config.timeout,
                     params=experiment_config.search_space,
                     warm_start_configs=warm_start_configs_per_repetition[repetition],
-                    random_state=repetition_seed,
+                    random_state=repetition,
                 )
 
+                # NOTE: Assumes single thread execution:
                 historical_performance = add_runtime(
                     experiment_log=historical_performance,
                     tune_start=tune_start,
                     performance_generator=experiment_config.objective_function,
                 )
 
-                # Add extra columns for estimator error analysis
                 historical_performance[
                     "benchmark_identifier"
                 ] = experiment_config.benchmark_identifier
@@ -162,8 +140,9 @@ def run_main_benchmark(
                 historical_performance["tuner"] = tuner.config_identifier
                 historical_performance["repetition"] = repetition + 1
                 historical_performance[
-                    "tuning_framework"
+                    "searcher_tuning_framework"
                 ] = tuner.searcher_tuning_framework
+                # For estimator analysis:
                 if tuner.tuner == "confopt":
                     estimator_architecture = (
                         tuner.searcher.quantile_estimator_architecture
@@ -186,10 +165,8 @@ def run_main_benchmark(
                     index=False,
                 )
 
-        # Help free memory by allowing Python's garbage collector to clean up
-        # after we're done with this dataset's generator
+        # Free up memory after processing each experiment config:
         experiment_config.objective_function = None
-
         gc.collect()
 
     final_data_path = os.path.join(cache_path, f"data/{run_start_str}")

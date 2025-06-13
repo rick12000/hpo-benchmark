@@ -6,6 +6,8 @@ import pandas as pd
 import os
 import logging
 from hpobench.generation.generate import ObjectiveMetricGenerator
+from datetime import datetime
+import optuna
 
 logger = logging.getLogger(__name__)
 
@@ -149,10 +151,8 @@ def add_runtime(
     tune_start,
     performance_generator: ObjectiveMetricGenerator,
 ):
-    """Adds cumulative generator runtime and total runtime to the experiment log."""
     experiment_log_copy = experiment_log.copy()
 
-    # Calculate cumulative runtime for the generator predictions
     experiment_log_copy["generator_runtime"] = experiment_log_copy[
         "configurations"
     ].apply(lambda x: performance_generator.predict_runtime(x))
@@ -160,12 +160,47 @@ def add_runtime(
         "generator_runtime"
     ].cumsum()
 
-    # Calculate total runtime (tuner time + generator time)
     experiment_log_copy["runtime"] = (
         experiment_log_copy["end_time"] - tune_start
-    ).dt.total_seconds()  # Use total_seconds() for float representation
+    ).dt.total_seconds()
     experiment_log_copy["runtime"] = (
         experiment_log_copy["runtime"] + experiment_log_copy["generator_runtime"]
     )
 
     return experiment_log_copy
+
+
+def setup_environment(cache_path: str = "cache/") -> tuple[str, logging.Logger]:
+    if not os.path.exists(cache_path):
+        os.makedirs(cache_path)
+
+    run_start = datetime.now()
+    run_start_str = run_start.strftime("%Y-%m-%d_%H-%M-%S")
+
+    log_path = os.path.join(cache_path, f"logs/{run_start_str}")
+    if not os.path.exists(log_path):
+        os.makedirs(log_path)
+    log_filename = os.path.join(
+        log_path, f"run_{run_start.strftime(format='%m_%d_%Y-%H_%M_%S')}.log"
+    )
+    logging.basicConfig(
+        filename=log_filename,
+        level=logging.DEBUG,
+        format="%(asctime)s %(levelname)-8s %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        force=True,
+    )
+    logger = logging.getLogger()
+
+    logging.getLogger("hyperopt").setLevel(logging.ERROR)
+    logging.getLogger("confopt").setLevel(logging.ERROR)
+    optuna.logging.set_verbosity(optuna.logging.ERROR)
+    logging.getLogger("yahpo").setLevel(logging.WARNING)
+
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.DEBUG)
+    formatter = logging.Formatter("%(asctime)s %(levelname)-8s %(message)s")
+    console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
+
+    return run_start_str, logger

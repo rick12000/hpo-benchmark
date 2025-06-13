@@ -3,9 +3,7 @@ import warnings
 
 from hpobench.config.config import (
     FULL_TUNING_CONFIGURATIONS,
-    DEV_TUNING_CONFIGURATIONS,
     TUNING_PATH_CONFIGURATIONS,
-    RUN_TYPE,
     N_REPETITIONS_PER_TUNER_CONFIG,
     N_TRIALS,
     N_WARM_STARTS,
@@ -19,10 +17,10 @@ from hpobench.analyze import (
     analyze_main_benchmark,
 )
 from hpobench.orchestrate import (
-    setup_environment,
     load_benchmark_configs,
     run_main_benchmark,
 )
+from hpobench.utils import setup_environment
 
 warnings.filterwarnings(
     "ignore",
@@ -43,20 +41,12 @@ if __name__ == "__main__":
     }
 
     run_start_str, logger = setup_environment(cache_path=CACHE_PATH)
-    logger.info(f"Run type: {RUN_TYPE}")
 
-    if RUN_TYPE == "dev":
-        tuning_configurations = DEV_TUNING_CONFIGURATIONS
-        n_repetitions = 2
-        n_trials = 50
-        timeout = None
-        n_warm_starts = 15
-    else:
-        tuning_configurations = FULL_TUNING_CONFIGURATIONS
-        n_repetitions = N_REPETITIONS_PER_TUNER_CONFIG
-        n_trials = N_TRIALS
-        timeout = TIMEOUT
-        n_warm_starts = N_WARM_STARTS
+    tuning_configurations = FULL_TUNING_CONFIGURATIONS
+    n_repetitions = N_REPETITIONS_PER_TUNER_CONFIG
+    n_trials = N_TRIALS
+    timeout = TIMEOUT
+    n_warm_starts = N_WARM_STARTS
 
     # Main Benchmark Section
     if run_sections["run_main_benchmark"]:
@@ -113,12 +103,12 @@ if __name__ == "__main__":
                 logger=logger,
             )
             # Replace NaN/None in tuning_framework with string "None"
-            result_df["tuning_framework"] = result_df["tuning_framework"].mask(
-                result_df["tuning_framework"].isna(), "None"
-            )
+            result_df["searcher_tuning_framework"] = result_df[
+                "searcher_tuning_framework"
+            ].mask(result_df["searcher_tuning_framework"].isna(), "None")
             group_cols = [
                 "estimator_architecture",
-                "tuning_framework",
+                "searcher_tuning_framework",
                 "dataset",
                 "benchmark_identifier",
                 "repetition",
@@ -134,8 +124,8 @@ if __name__ == "__main__":
             estimator_error_results_list, ignore_index=True
         )
         # Convert "None" string in tuning_framework back to pd.NA
-        estimator_error_results["tuning_framework"] = estimator_error_results[
-            "tuning_framework"
+        estimator_error_results["searcher_tuning_framework"] = estimator_error_results[
+            "searcher_tuning_framework"
         ].replace("None", pd.NA)
 
         logger.info("Estimator Error Analysis finished.")
