@@ -164,11 +164,19 @@ def nemenyi_pairwise_test(
             )
             continue
 
+        # Create a unique block identifier to handle duplicated entries in block_col
+        # The block_id should map each unique block (across_col value) to a unique integer
+        group_df = group_df.copy()
+        unique_blocks = group_df[across_col].unique()
+        block_to_id = {block: i for i, block in enumerate(unique_blocks)}
+        group_df["_block_id"] = group_df[across_col].map(block_to_id)
+
         p_value_matrix = posthoc_nemenyi_friedman(
             a=group_df,
             y_col=rank_col,
             block_col=across_col,
             group_col=entity_col,
+            block_id_col="_block_id",
             melted=True,
             sort=True,
         )

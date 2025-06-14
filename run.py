@@ -35,9 +35,9 @@ if __name__ == "__main__":
 
     # Section control dictionary
     run_sections = {
-        "run_main_benchmark": False,
-        "run_static_analysis": True,
-        "run_tuning_benchmark": True,
+        "run_main_benchmark": True,
+        "run_static_analysis": False,
+        "run_tuning_benchmark": False,
     }
 
     run_start_str, logger = setup_environment(cache_path=CACHE_PATH)

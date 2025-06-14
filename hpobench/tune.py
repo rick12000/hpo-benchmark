@@ -507,7 +507,7 @@ def tune(
     """
     # Shared arguments for all tuner functions:
     shared_kwargs = {
-        "params": params,
+        "raw_params": params,
         "performance_generator": performance_generator,
         "warm_start_configs": warm_start_configs,
         "random_state": random_state,

@@ -6,7 +6,6 @@ from confopt.selection.sampling import (
     ThompsonSampler,
     LowerBoundSampler,
     ExpectedImprovementSampler,
-    InformationGainSampler,
     MaxValueEntropySearchSampler,
 )
 from hpobench.config.utils import (
@@ -94,14 +93,14 @@ for interval_width in COVERAGE_INTERVAL_WIDTHS:
 # 3. Create configurations feeding the comparative tuner rank plots:
 SAMPLER_VARIATION_CONFIGURATIONS = build_sampler_variation_configurations(
     samplers=[
-        InformationGainSampler(
-            n_quantiles=8,
-            adapter="DtACI",
-            n_paths=100,
-            n_X_candidates=10,
-            n_y_candidates_per_x=4,
-            sampling_strategy="thompson",
-        ),
+        #     InformationGainSampler(
+        #         n_quantiles=8,
+        #         adapter="DtACI",
+        #         n_paths=100,
+        #         n_X_candidates=10,
+        #         n_y_candidates_per_x=4,
+        #         sampling_strategy="thompson",
+        #     ),
         MaxValueEntropySearchSampler(
             n_quantiles=8,
             adapter="DtACI",
@@ -153,12 +152,12 @@ PRECONFORMAL_COMPARISON_CONFIGURATIONS = build_architecture_variation_configurat
 )
 EXTERNAL_TUNING_CONFIGURATIONS = get_external_tuning_configurations()
 
-FULL_TUNING_CONFIGURATIONS = [
-    EXTERNAL_TUNING_CONFIGURATIONS,
-    SAMPLER_VARIATION_CONFIGURATIONS,
-    ARCHITECTURE_VARIATION_CONFIGURATIONS,
-    PRECONFORMAL_COMPARISON_CONFIGURATIONS,
-]
+FULL_TUNING_CONFIGURATIONS = (
+    # EXTERNAL_TUNING_CONFIGURATIONS
+    SAMPLER_VARIATION_CONFIGURATIONS
+    # + ARCHITECTURE_VARIATION_CONFIGURATIONS
+    # + PRECONFORMAL_COMPARISON_CONFIGURATIONS
+)
 
 SAMPLER = LowerBoundSampler(
     interval_width=DEFAULT_INTERVAL_WIDTH,
