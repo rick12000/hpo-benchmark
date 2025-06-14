@@ -41,28 +41,24 @@ if __name__ == "__main__":
     }
 
     run_start_str, logger = setup_environment(cache_path=CACHE_PATH)
-
-    tuning_configurations = FULL_TUNING_CONFIGURATIONS
-    n_repetitions = N_REPETITIONS_PER_TUNER_CONFIG
-    n_trials = N_TRIALS
-    timeout = TIMEOUT
-    n_warm_starts = N_WARM_STARTS
+    DEFAULT_MAX_N_INSTANCES = 3
+    TUNING_PATH_MAX_N_INSTANCES = 3
 
     # Main Benchmark Section
     if run_sections["run_main_benchmark"]:
         experiment_configs = load_benchmark_configs(
             benchmarks=["lcbench"],
-            tuning_configurations=tuning_configurations,
-            n_warm_starts=n_warm_starts,
-            n_trials=n_trials,
-            timeout=timeout,
+            tuning_configurations=FULL_TUNING_CONFIGURATIONS,
+            n_warm_starts=N_WARM_STARTS,
+            n_trials=N_TRIALS,
+            timeout=TIMEOUT,
             logger=logger,
-            max_n_instances_per_benchmark=7,
+            max_n_instances_per_benchmark=DEFAULT_MAX_N_INSTANCES,
         )
 
         raw_benchmark_data = run_main_benchmark(
             experiment_configs=experiment_configs,
-            n_repetitions=n_repetitions,
+            n_repetitions=N_REPETITIONS_PER_TUNER_CONFIG,
             base_random_state=BASE_RANDOM_STATE,
             cache_path=CACHE_PATH,
             run_start_str=run_start_str,
@@ -90,13 +86,13 @@ if __name__ == "__main__":
                 tuning_configurations=STATIC_TUNING_CONFIGURATIONS,
                 n_warm_starts=data_size,
                 n_trials=2,
-                timeout=timeout,
+                timeout=TIMEOUT,
                 logger=logger,
-                max_n_instances_per_benchmark=3,
+                max_n_instances_per_benchmark=DEFAULT_MAX_N_INSTANCES,
             )
             result_df = run_main_benchmark(
                 experiment_configs=static_experiment_configs,
-                n_repetitions=n_repetitions,
+                n_repetitions=N_REPETITIONS_PER_TUNER_CONFIG,
                 base_random_state=BASE_RANDOM_STATE,
                 cache_path=CACHE_PATH,
                 run_start_str=run_start_str,
@@ -154,14 +150,14 @@ if __name__ == "__main__":
         logger.info("Starting Dataset-Level Benchmark with Runtime Analysis...")
 
         dataset_name = "lcbench"
-        max_n_instances = 3
+        max_n_instances = TUNING_PATH_MAX_N_INSTANCES
 
         dataset_experiment_configs = load_benchmark_configs(
             benchmarks=["lcbench"],
             tuning_configurations=TUNING_PATH_CONFIGURATIONS,
-            n_warm_starts=n_warm_starts,
-            n_trials=n_trials,
-            timeout=timeout,
+            n_warm_starts=N_WARM_STARTS,
+            n_trials=N_TRIALS,
+            timeout=TIMEOUT,
             logger=logger,
             max_n_instances_per_benchmark=max_n_instances,
         )
@@ -172,7 +168,7 @@ if __name__ == "__main__":
         dataset_benchmark_run_start_str = f"{run_start_str}_dataset_level"
         dataset_benchmark_data = run_main_benchmark(
             experiment_configs=dataset_experiment_configs,
-            n_repetitions=n_repetitions,
+            n_repetitions=N_REPETITIONS_PER_TUNER_CONFIG,
             base_random_state=BASE_RANDOM_STATE,
             cache_path=CACHE_PATH,
             run_start_str=dataset_benchmark_run_start_str,

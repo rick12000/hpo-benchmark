@@ -135,6 +135,11 @@ def dummy_experiment_data():
         + [2] * 2
         + [1] * 2
         + [2] * 2,
+        "sampler": ["gbrt"] * 10 + ["tpe"] * 9 + ["gbrt"] * 4 + ["tpe"] * 4,
+        "confidence_level": [""]
+        * 27,  # Non-confopt tuners have empty string confidence level
+        "estimator_architecture": [""]
+        * 27,  # Non-confopt tuners have empty string estimator architecture
     }
     df_data = pd.DataFrame(data)
 
@@ -143,7 +148,15 @@ def dummy_experiment_data():
 
 @pytest.fixture
 def grouping_columns():
-    return ["benchmark_identifier", "dataset", "tuner", "repetition"]
+    return [
+        "benchmark_identifier",
+        "dataset",
+        "tuner",
+        "repetition",
+        "sampler",
+        "confidence_level",
+        "estimator_architecture",
+    ]
 
 
 @pytest.fixture
@@ -159,6 +172,21 @@ def performance_column():
 @pytest.fixture
 def tuner_column():
     return "tuner"
+
+
+@pytest.fixture
+def sampler_column():
+    return "sampler"
+
+
+@pytest.fixture
+def confidence_level_column():
+    return "confidence_level"
+
+
+@pytest.fixture
+def estimator_architecture_column():
+    return "estimator_architecture"
 
 
 @pytest.fixture

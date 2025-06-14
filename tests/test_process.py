@@ -33,6 +33,11 @@ def test_process_performance_records(
     dummy_experiment_data,
     grouping_columns,
     performance_column,
+    repetition_column,
+    tuner_column,
+    sampler_column,
+    confidence_level_column,
+    estimator_architecture_column,
     budget_unit,
     relativize_budget,
 ):
@@ -42,7 +47,12 @@ def test_process_performance_records(
         aggregators=grouping_columns,
         performance_column=performance_column,
         budget_unit=budget_unit,
+        repetition_column=repetition_column,
+        tuner_column=tuner_column,
         relativize_budget=relativize_budget,
+        sampler_column=sampler_column,
+        confidence_level_column=confidence_level_column,
+        estimator_architecture_column=estimator_architecture_column,
     )
 
     # Load expected output based on parameters
@@ -129,6 +139,9 @@ def test_calculate_ranks_iteration(
     performance_column,
     tuner_column,
     repetition_column,
+    sampler_column,
+    confidence_level_column,
+    estimator_architecture_column,
 ):
     """Test calculate_ranks with iteration budget unit"""
     # Derive columns exactly as in process_performance_records
@@ -136,6 +149,9 @@ def test_calculate_ranks_iteration(
     alignment_columns.remove(repetition_column)
     ranking_columns = deepcopy(grouping_columns) + ["iteration"]
     ranking_columns.remove(tuner_column)
+    ranking_columns.remove(sampler_column)
+    ranking_columns.remove(confidence_level_column)
+    ranking_columns.remove(estimator_architecture_column)
 
     accumulated_performances = accumulate_performances(
         data=dummy_experiment_data,
@@ -155,6 +171,7 @@ def test_calculate_ranks_iteration(
     result = calculate_ranks(
         data=aligned_tuners,
         aggregators=ranking_columns,
+        rank_ascending=True,
         metric_column="best_performance",
     )
 
@@ -173,6 +190,9 @@ def test_accumulate_breaches_iteration(
     performance_column,
     tuner_column,
     repetition_column,
+    sampler_column,
+    confidence_level_column,
+    estimator_architecture_column,
 ):
     """Test accumulate_breaches with iteration budget unit"""
     # Derive columns exactly as in process_performance_records
@@ -180,6 +200,9 @@ def test_accumulate_breaches_iteration(
     alignment_columns.remove(repetition_column)
     ranking_columns = deepcopy(grouping_columns) + ["iteration"]
     ranking_columns.remove(tuner_column)
+    ranking_columns.remove(sampler_column)
+    ranking_columns.remove(confidence_level_column)
+    ranking_columns.remove(estimator_architecture_column)
 
     accumulated_performances = accumulate_performances(
         data=dummy_experiment_data,
@@ -199,6 +222,7 @@ def test_accumulate_breaches_iteration(
     calculated_ranks = calculate_ranks(
         data=aligned_tuners,
         aggregators=ranking_columns,
+        rank_ascending=True,
         metric_column="best_performance",
     )
 
@@ -207,6 +231,7 @@ def test_accumulate_breaches_iteration(
         aggregators=grouping_columns,
         budget_unit="iteration",
         breach_column="breach_status",
+        rolling_breach_count=10,
     )
 
     expected = load_test_data("accumulated_breaches_iteration.json")
@@ -223,15 +248,27 @@ def test_time_discretize_benchmark_data(
     grouping_columns,
     repetition_column,
     performance_column,
+    tuner_column,
+    sampler_column,
+    confidence_level_column,
+    estimator_architecture_column,
 ):
     """Test time_discretize_benchmark_data"""
     # Derive alignment_columns exactly as in process_performance_records
     alignment_columns = deepcopy(grouping_columns)
     alignment_columns.remove(repetition_column)
 
+    tuner_columns = [
+        tuner_column,
+        sampler_column,
+        confidence_level_column,
+        estimator_architecture_column,
+    ]
+
     result = time_discretize_benchmark_data(
         data=dummy_experiment_data,
         entity_columns=alignment_columns,
+        tuner_columns=tuner_columns,
         repetition_column=repetition_column,
         budget_unit="runtime",
         performance_column=performance_column,
@@ -252,6 +289,9 @@ def test_align_tuners_runtime(
     repetition_column,
     performance_column,
     tuner_column,
+    sampler_column,
+    confidence_level_column,
+    estimator_architecture_column,
 ):
     """Test align_tuners with runtime budget unit"""
     # Derive columns exactly as in process_performance_records
@@ -260,10 +300,21 @@ def test_align_tuners_runtime(
     dataset_columns = deepcopy(grouping_columns)
     dataset_columns.remove(tuner_column)
     dataset_columns.remove(repetition_column)
+    dataset_columns.remove(sampler_column)
+    dataset_columns.remove(confidence_level_column)
+    dataset_columns.remove(estimator_architecture_column)
+
+    tuner_columns = [
+        tuner_column,
+        sampler_column,
+        confidence_level_column,
+        estimator_architecture_column,
+    ]
 
     discretized_data = time_discretize_benchmark_data(
         data=dummy_experiment_data,
         entity_columns=alignment_columns,
+        tuner_columns=tuner_columns,
         repetition_column=repetition_column,
         budget_unit="runtime",
         performance_column=performance_column,
@@ -292,6 +343,9 @@ def test_calculate_ranks_runtime(
     repetition_column,
     performance_column,
     tuner_column,
+    sampler_column,
+    confidence_level_column,
+    estimator_architecture_column,
 ):
     """Test calculate_ranks with runtime budget unit"""
     # Derive columns exactly as in process_performance_records
@@ -300,12 +354,26 @@ def test_calculate_ranks_runtime(
     dataset_columns = deepcopy(grouping_columns)
     dataset_columns.remove(tuner_column)
     dataset_columns.remove(repetition_column)
+    dataset_columns.remove(sampler_column)
+    dataset_columns.remove(confidence_level_column)
+    dataset_columns.remove(estimator_architecture_column)
     ranking_columns = deepcopy(grouping_columns) + ["runtime"]
     ranking_columns.remove(tuner_column)
+    ranking_columns.remove(sampler_column)
+    ranking_columns.remove(confidence_level_column)
+    ranking_columns.remove(estimator_architecture_column)
+
+    tuner_columns = [
+        tuner_column,
+        sampler_column,
+        confidence_level_column,
+        estimator_architecture_column,
+    ]
 
     discretized_data = time_discretize_benchmark_data(
         data=dummy_experiment_data,
         entity_columns=alignment_columns,
+        tuner_columns=tuner_columns,
         repetition_column=repetition_column,
         budget_unit="runtime",
         performance_column=performance_column,
@@ -322,6 +390,7 @@ def test_calculate_ranks_runtime(
     result = calculate_ranks(
         data=aligned_tuners,
         aggregators=ranking_columns,
+        rank_ascending=True,
         metric_column="best_performance",
     )
 
@@ -340,6 +409,9 @@ def test_standardize_budget_unit_iteration(
     performance_column,
     tuner_column,
     repetition_column,
+    sampler_column,
+    confidence_level_column,
+    estimator_architecture_column,
 ):
     """Test standardize_budget_unit with iteration budget unit"""
     # Derive columns exactly as in process_performance_records
@@ -347,6 +419,9 @@ def test_standardize_budget_unit_iteration(
     alignment_columns.remove(repetition_column)
     ranking_columns = deepcopy(grouping_columns) + ["iteration"]
     ranking_columns.remove(tuner_column)
+    ranking_columns.remove(sampler_column)
+    ranking_columns.remove(confidence_level_column)
+    ranking_columns.remove(estimator_architecture_column)
 
     accumulated_performances = accumulate_performances(
         data=dummy_experiment_data,
@@ -366,6 +441,7 @@ def test_standardize_budget_unit_iteration(
     calculated_ranks = calculate_ranks(
         data=aligned_tuners,
         aggregators=ranking_columns,
+        rank_ascending=True,
         metric_column="best_performance",
     )
 
@@ -374,6 +450,7 @@ def test_standardize_budget_unit_iteration(
         aggregators=grouping_columns,
         budget_unit="iteration",
         breach_column="breach_status",
+        rolling_breach_count=10,
     )
 
     result = standardize_budget_unit(
@@ -398,6 +475,9 @@ def test_standardize_budget_unit_runtime(
     repetition_column,
     performance_column,
     tuner_column,
+    sampler_column,
+    confidence_level_column,
+    estimator_architecture_column,
 ):
     """Test standardize_budget_unit with runtime budget unit"""
     # Derive columns exactly as in process_performance_records
@@ -406,12 +486,26 @@ def test_standardize_budget_unit_runtime(
     dataset_columns = deepcopy(grouping_columns)
     dataset_columns.remove(tuner_column)
     dataset_columns.remove(repetition_column)
+    dataset_columns.remove(sampler_column)
+    dataset_columns.remove(confidence_level_column)
+    dataset_columns.remove(estimator_architecture_column)
     ranking_columns = deepcopy(grouping_columns) + ["runtime"]
     ranking_columns.remove(tuner_column)
+    ranking_columns.remove(sampler_column)
+    ranking_columns.remove(confidence_level_column)
+    ranking_columns.remove(estimator_architecture_column)
+
+    tuner_columns = [
+        tuner_column,
+        sampler_column,
+        confidence_level_column,
+        estimator_architecture_column,
+    ]
 
     discretized_data = time_discretize_benchmark_data(
         data=dummy_experiment_data,
         entity_columns=alignment_columns,
+        tuner_columns=tuner_columns,
         repetition_column=repetition_column,
         budget_unit="runtime",
         performance_column=performance_column,
@@ -428,6 +522,7 @@ def test_standardize_budget_unit_runtime(
     calculated_ranks = calculate_ranks(
         data=aligned_tuners,
         aggregators=ranking_columns,
+        rank_ascending=True,
         metric_column="best_performance",
     )
 
@@ -453,6 +548,9 @@ def test_collapse_per_budget_iteration(
     performance_column,
     tuner_column,
     repetition_column,
+    sampler_column,
+    confidence_level_column,
+    estimator_architecture_column,
 ):
     """Test collapse_per_budget with iteration budget unit"""
     # Derive columns exactly as in process_performance_records
@@ -460,6 +558,9 @@ def test_collapse_per_budget_iteration(
     alignment_columns.remove(repetition_column)
     ranking_columns = deepcopy(grouping_columns) + ["iteration"]
     ranking_columns.remove(tuner_column)
+    ranking_columns.remove(sampler_column)
+    ranking_columns.remove(confidence_level_column)
+    ranking_columns.remove(estimator_architecture_column)
 
     accumulated_performances = accumulate_performances(
         data=dummy_experiment_data,
@@ -479,6 +580,7 @@ def test_collapse_per_budget_iteration(
     calculated_ranks = calculate_ranks(
         data=aligned_tuners,
         aggregators=ranking_columns,
+        rank_ascending=True,
         metric_column="best_performance",
     )
 
@@ -487,6 +589,7 @@ def test_collapse_per_budget_iteration(
         aggregators=grouping_columns,
         budget_unit="iteration",
         breach_column="breach_status",
+        rolling_breach_count=10,
     )
 
     result = collapse_per_budget(
@@ -516,6 +619,9 @@ def test_collapse_per_budget_runtime(
     repetition_column,
     performance_column,
     tuner_column,
+    sampler_column,
+    confidence_level_column,
+    estimator_architecture_column,
 ):
     """Test collapse_per_budget with runtime budget unit"""
     # Derive columns exactly as in process_performance_records
@@ -524,12 +630,26 @@ def test_collapse_per_budget_runtime(
     dataset_columns = deepcopy(grouping_columns)
     dataset_columns.remove(tuner_column)
     dataset_columns.remove(repetition_column)
+    dataset_columns.remove(sampler_column)
+    dataset_columns.remove(confidence_level_column)
+    dataset_columns.remove(estimator_architecture_column)
     ranking_columns = deepcopy(grouping_columns) + ["runtime"]
     ranking_columns.remove(tuner_column)
+    ranking_columns.remove(sampler_column)
+    ranking_columns.remove(confidence_level_column)
+    ranking_columns.remove(estimator_architecture_column)
+
+    tuner_columns = [
+        tuner_column,
+        sampler_column,
+        confidence_level_column,
+        estimator_architecture_column,
+    ]
 
     discretized_data = time_discretize_benchmark_data(
         data=dummy_experiment_data,
         entity_columns=alignment_columns,
+        tuner_columns=tuner_columns,
         repetition_column=repetition_column,
         budget_unit="runtime",
         performance_column=performance_column,
@@ -546,6 +666,7 @@ def test_collapse_per_budget_runtime(
     calculated_ranks = calculate_ranks(
         data=aligned_tuners,
         aggregators=ranking_columns,
+        rank_ascending=True,
         metric_column="best_performance",
     )
 

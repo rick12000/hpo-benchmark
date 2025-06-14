@@ -7,6 +7,7 @@ from hpobench.config.types import (
 JAHS201_SEARCH_SPACE = {
     "Activation": CategoricalRange(choices=["ReLU", "Hardswish", "Mish"]),
     "LearningRate": FloatRange(lower=0.001, upper=1),
+    "WeightDecay": FloatRange(lower=1e-5, upper=1e-2),
     "N": CategoricalRange(choices=[5]),
     "Op1": CategoricalRange(choices=list(range(5))),
     "Op2": CategoricalRange(choices=list(range(5))),

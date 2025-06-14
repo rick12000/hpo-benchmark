@@ -45,45 +45,51 @@ STATIC_TUNING_CONFIGURATIONS = build_static_tuning_configurations(
 
 # 2. Create configurations feeding the coverage charts:
 COVERAGE_ANALYSIS_CONFIGURATIONS = []
-# TODO: Add a fixed DtACI to simulate ACI:
+COVERAGE_INTERVAL_WIDTHS = [0.1, 0.5, 0.9]
 ADAPTERS = ["DtACI", None]
-for adapter in ADAPTERS:
-    SAMPLER = LowerBoundSampler(
-        interval_width=DEFAULT_INTERVAL_WIDTH,
-        adapter=adapter,
-        c=1,
-    )
-    SEARCHER = QuantileConformalSearcher(
-        quantile_estimator_architecture="qrf",
-        sampler=SAMPLER,
-    )
-    if adapter is None:
-        config_identifier = "Conformalized"
-    elif adapter == "DtACI":
-        config_identifier = "Conformalized + DtACI"
-    else:
-        raise ValueError(f"Unknown adapter: {adapter}")
+
+for interval_width in COVERAGE_INTERVAL_WIDTHS:
+    for adapter in ADAPTERS:
+        SAMPLER = LowerBoundSampler(
+            interval_width=interval_width,
+            adapter=adapter,
+            c=1,
+        )
+        SEARCHER = QuantileConformalSearcher(
+            quantile_estimator_architecture="qrf",
+            sampler=SAMPLER,
+        )
+        if adapter is None:
+            config_identifier = f"Conformalized @ {interval_width}%"
+        elif adapter == "DtACI":
+            config_identifier = f"Conformalized + DtACI @ {interval_width}%"
+        else:
+            raise ValueError(f"Unknown adapter: {adapter}")
+        COVERAGE_ANALYSIS_CONFIGURATIONS.append(
+            TunerConfig(
+                tuner="confopt",
+                searcher=SEARCHER,
+                config_identifier=config_identifier,
+                searcher_tuning_framework=None,
+            )
+        )
+    # Manually add the unconformalized configuration for each interval width:
     COVERAGE_ANALYSIS_CONFIGURATIONS.append(
         TunerConfig(
             tuner="confopt",
-            searcher=SEARCHER,
-            config_identifier=config_identifier,
+            searcher=QuantileConformalSearcher(
+                quantile_estimator_architecture="qrf",
+                sampler=LowerBoundSampler(
+                    interval_width=interval_width,
+                    adapter=None,
+                    c=1,
+                ),
+                n_pre_conformal_trials=10000,
+            ),
+            config_identifier=f"Unconformalized @ {interval_width}%",
             searcher_tuning_framework=None,
         )
     )
-# Manually add the unconformalized configuration:
-COVERAGE_ANALYSIS_CONFIGURATIONS.append(
-    TunerConfig(
-        tuner="confopt",
-        searcher=QuantileConformalSearcher(
-            quantile_estimator_architecture="qrf",
-            sampler=SAMPLER,
-            n_pre_conformal_trials=10000,
-        ),
-        config_identifier="Unconformalized",
-        searcher_tuning_framework=None,
-    )
-)
 
 # 3. Create configurations feeding the comparative tuner rank plots:
 SAMPLER_VARIATION_CONFIGURATIONS = build_sampler_variation_configurations(

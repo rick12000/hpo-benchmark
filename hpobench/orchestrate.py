@@ -142,16 +142,29 @@ def run_main_benchmark(
                 historical_performance[
                     "searcher_tuning_framework"
                 ] = tuner.searcher_tuning_framework
-                # For estimator analysis:
+
                 if tuner.tuner == "confopt":
+                    sampler_name = tuner.searcher.sampler.__class__.__name__
+
+                    if hasattr(tuner.searcher.sampler, "interval_width"):
+                        confidence_level = str(tuner.searcher.sampler.interval_width)
+                    else:
+                        confidence_level = ""
+
                     estimator_architecture = (
                         tuner.searcher.quantile_estimator_architecture
                     )
                 else:
-                    estimator_architecture = None
+                    # NOTE: Use "" instead of None or NaN to avoid bad groupby behavior
+                    sampler_name = ""
+                    confidence_level = ""
+                    estimator_architecture = ""
+
                 historical_performance[
                     "estimator_architecture"
                 ] = estimator_architecture
+                historical_performance["confidence_level"] = confidence_level
+                historical_performance["sampler"] = sampler_name
 
                 raw_benchmark_data = pd.concat(
                     [raw_benchmark_data, historical_performance], axis=0

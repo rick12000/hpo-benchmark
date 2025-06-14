@@ -283,12 +283,23 @@ def analyze_main_benchmark(
     _ensure_dir(analysis_data_path)
     _ensure_dir(plots_base_path)
 
-    grouping_cols = ["benchmark_identifier", "dataset", "tuner", "repetition"]
+    grouping_cols = [
+        "benchmark_identifier",
+        "dataset",
+        "tuner",
+        "repetition",
+        "sampler",
+        "confidence_level",
+        "estimator_architecture",
+    ]
     rep_col = "repetition"
     perf_col = "performance"
     tuner_col = "tuner"
     bench_col = "benchmark_identifier"
     data_col = "dataset"
+    sampler_col = "sampler"
+    confidence_level_col = "confidence_level"
+    estimator_architecture_col = "estimator_architecture"
     runtime_unit = "runtime"
     iter_unit = "iteration"
     norm_runtime_unit = f"normalized_{runtime_unit}"
@@ -303,6 +314,9 @@ def analyze_main_benchmark(
         repetition_column=rep_col,
         tuner_column=tuner_col,
         relativize_budget=True,
+        sampler_column=sampler_col,
+        confidence_level_column=confidence_level_col,
+        estimator_architecture_column=estimator_architecture_col,
     )
 
     absolute_iteration_results = process_performance_records(
@@ -313,6 +327,9 @@ def analyze_main_benchmark(
         repetition_column=rep_col,
         tuner_column=tuner_col,
         relativize_budget=False,
+        sampler_column=sampler_col,
+        confidence_level_column=confidence_level_col,
+        estimator_architecture_column=estimator_architecture_col,
     )
 
     cross_budget_friedman_results, cross_budget_nemenyi_results = [], []
@@ -645,6 +662,9 @@ def analyze_dataset_level_benchmark(
 
     budget_unit = "runtime"
     grouping_columns = ["benchmark_identifier", "dataset", "tuner", "repetition"]
+    sampler_col = "sampler"
+    confidence_level_col = "confidence_level"
+    estimator_architecture_col = "estimator_architecture"
 
     processed_data = process_performance_records(
         raw_benchmark_data=dataset_benchmark_data,
@@ -654,6 +674,9 @@ def analyze_dataset_level_benchmark(
         repetition_column="repetition",
         tuner_column="tuner",
         relativize_budget=False,
+        sampler_column=sampler_col,
+        confidence_level_column=confidence_level_col,
+        estimator_architecture_column=estimator_architecture_col,
     )
 
     unique_datasets = processed_data["dataset"].unique()

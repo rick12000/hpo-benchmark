@@ -7,7 +7,16 @@ from hpobench.config.types import (
     ExperimentConfig,
 )
 from hpobench.config.benchmark_data import JAHS201_SEARCH_SPACE, BLACK_BOX_SEARCH_SPACE
-from hpobench.config.config import DEV_TUNING_CONFIGURATIONS
+from hpobench.config.config import SEARCHER, create_sampler_config_id, TunerConfig
+
+DEV_TUNING_CONFIGURATIONS = [
+    TunerConfig(
+        tuner="confopt",
+        searcher=SEARCHER,
+        config_identifier=create_sampler_config_id(SEARCHER),
+        searcher_tuning_framework=None,
+    )
+]
 
 
 def test_setup_yahpo_instance_configs():
