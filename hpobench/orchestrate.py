@@ -2,11 +2,15 @@ import pandas as pd
 from datetime import datetime
 import os
 import logging
-from typing import Literal
+from typing import Literal, Optional
 import gc
 
 from hpobench.config.types import (
     ExperimentConfig,
+    TunerConfig,
+)
+from hpobench.config.config import (
+    N_REPETITIONS_PER_TUNER_CONFIG,
 )
 from hpobench.utils import (
     generate_hyperparameter_combinations,
@@ -17,6 +21,7 @@ from hpobench.prepare import (
     setup_jahs201_configs,
 )
 from hpobench.tune import tune
+from hpobench.analyze import analyze_main_benchmark
 
 logger = logging.getLogger(__name__)
 os.environ["SYNETUNE_FOLDER"] = "cache/syne-tune"
@@ -24,13 +29,13 @@ os.environ["SYNETUNE_FOLDER"] = "cache/syne-tune"
 
 def load_benchmark_configs(
     benchmarks: list[Literal["jahs201", "lcbench", "rbv2_xgboost"]],
-    tuning_configurations,
-    n_warm_starts,
-    n_trials,
-    timeout,
-    logger,
-    max_n_instances_per_benchmark=10,
-) -> list:
+    tuning_configurations: list[TunerConfig],
+    n_warm_starts: int,
+    n_trials: int,
+    timeout: Optional[float],
+    logger: logging.Logger,
+    max_n_instances_per_benchmark: int = 10,
+) -> list[ExperimentConfig]:
     logger.info("Setting up benchmark instances...")
     experiment_configs = []
 
@@ -67,11 +72,11 @@ def load_benchmark_configs(
 
 def run_main_benchmark(
     experiment_configs: list[ExperimentConfig],
-    n_repetitions,
-    base_random_state,
-    cache_path,
-    run_start_str,
-    logger,
+    n_repetitions: int,
+    base_random_state: int,
+    cache_path: str,
+    run_start_str: str,
+    logger: logging.Logger,
 ) -> pd.DataFrame:
     logger.info("Running HPO benchmark...")
 
@@ -154,17 +159,26 @@ def run_main_benchmark(
                     estimator_architecture = (
                         tuner.searcher.quantile_estimator_architecture
                     )
+
+                    if hasattr(tuner.searcher, "n_pre_conformal_trials"):
+                        n_pre_conformal_trials = tuner.searcher.n_pre_conformal_trials
+                    else:
+                        n_pre_conformal_trials = ""
                 else:
                     # NOTE: Use "" instead of None or NaN to avoid bad groupby behavior
                     sampler_name = ""
                     confidence_level = ""
                     estimator_architecture = ""
+                    n_pre_conformal_trials = ""
 
                 historical_performance[
                     "estimator_architecture"
                 ] = estimator_architecture
                 historical_performance["confidence_level"] = confidence_level
                 historical_performance["sampler"] = sampler_name
+                historical_performance[
+                    "n_pre_conformal_trials"
+                ] = n_pre_conformal_trials
 
                 raw_benchmark_data = pd.concat(
                     [raw_benchmark_data, historical_performance], axis=0
@@ -189,4 +203,74 @@ def run_main_benchmark(
     logger.info(
         f"Final raw benchmark data saved to {final_filename} ({len(raw_benchmark_data)} rows)."
     )
+    return raw_benchmark_data
+
+
+def run_and_analyze_main_benchmark(
+    benchmarks: list[Literal["jahs201", "lcbench", "rbv2_xgboost"]],
+    tuning_configurations: list[TunerConfig],
+    n_warm_starts: int,
+    n_trials: int,
+    timeout: Optional[float],
+    logger: logging.Logger,
+    base_random_state: int,
+    cache_path: str,
+    run_start_str: str,
+    analysis_type: str,
+    max_n_instances_per_benchmark: int = 10,
+    n_repetitions: int = N_REPETITIONS_PER_TUNER_CONFIG,
+    data_folder: str = "data",
+    plots_folder: str = "plots",
+) -> pd.DataFrame:
+    """
+    Run and analyze the main benchmark workflow.
+
+    Args:
+        benchmarks: List of benchmark names to run
+        tuning_configurations: Tuning configurations to use
+        n_warm_starts: Number of warm start configurations
+        n_trials: Number of trials per tuner
+        timeout: Timeout for each trial
+        logger: Logger instance
+        base_random_state: Base random state for reproducibility
+        cache_path: Path to cache directory
+        run_start_str: Unique identifier for this run
+        analysis_type: Type of analysis (e.g., "01_coverage_analysis")
+        max_n_instances_per_benchmark: Maximum number of instances per benchmark (default: 10)
+        n_repetitions: Number of repetitions per tuner config (default: from config)
+        data_folder: Folder name for data output (default: "data")
+        plots_folder: Folder name for plots output (default: "plots")
+
+    Returns:
+        pd.DataFrame: Raw benchmark data
+    """
+    experiment_configs = load_benchmark_configs(
+        benchmarks=benchmarks,
+        tuning_configurations=tuning_configurations,
+        n_warm_starts=n_warm_starts,
+        n_trials=n_trials,
+        timeout=timeout,
+        logger=logger,
+        max_n_instances_per_benchmark=max_n_instances_per_benchmark,
+    )
+
+    raw_benchmark_data = run_main_benchmark(
+        experiment_configs=experiment_configs,
+        n_repetitions=n_repetitions,
+        base_random_state=base_random_state,
+        cache_path=cache_path,
+        run_start_str=run_start_str,
+        logger=logger,
+    )
+
+    analyze_main_benchmark(
+        raw_benchmark_data=raw_benchmark_data,
+        cache_path=cache_path,
+        run_start_str=run_start_str,
+        logger=logger,
+        analysis_type=analysis_type,
+        data_folder=data_folder,
+        plots_folder=plots_folder,
+    )
+
     return raw_benchmark_data

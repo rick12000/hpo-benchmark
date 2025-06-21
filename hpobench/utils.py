@@ -12,6 +12,31 @@ import optuna
 logger = logging.getLogger(__name__)
 
 
+class AnalysisPathManager:
+    """Simple path manager for organizing analysis outputs by type and purpose."""
+
+    def __init__(self, cache_path: str, run_start_str: str):
+        self.cache_path = cache_path
+        self.run_start_str = run_start_str
+        self.base_path = os.path.join(cache_path, "experiments", run_start_str)
+
+    def get_analysis_path(
+        self, analysis_type: str, output_type: str = "data", subfolder: str = None
+    ) -> str:
+        """Get path for specific analysis type and output type.
+
+        Args:
+            analysis_type: e.g., "01_coverage_analysis", "02_sampler_variation"
+            output_type: "data" or "plots"
+            subfolder: optional subfolder like "statistical_tests", "aggregated_results"
+        """
+        path = os.path.join(self.base_path, analysis_type, output_type)
+        if subfolder:
+            path = os.path.join(path, subfolder)
+        os.makedirs(path, exist_ok=True)
+        return path
+
+
 def q10(x):
     return x.quantile(0.1)
 
@@ -129,11 +154,31 @@ def save_analysis_results(
     run_start_str: str,
     filename: str,
     description: str,
-    output_folder: str = "data",
+    analysis_type: str = None,
+    subfolder: str = None,
 ):
+    """Save analysis results with proper path organization.
+
+    Args:
+        df: DataFrame to save
+        cache_path: Base cache path
+        run_start_str: Run identifier
+        filename: Name of the file
+        description: Description for logging
+        analysis_type: Analysis type (e.g., "01_coverage_analysis")
+        subfolder: Optional subfolder (e.g., "statistical_tests")
+    """
     if df is not None and not df.empty:
-        analysis_data_path = os.path.join(cache_path, output_folder, run_start_str)
-        os.makedirs(analysis_data_path, exist_ok=True)
+        if analysis_type:
+            path_manager = AnalysisPathManager(cache_path, run_start_str)
+            analysis_data_path = path_manager.get_analysis_path(
+                analysis_type, "data", subfolder
+            )
+        else:
+            # Fallback to old behavior for backward compatibility
+            analysis_data_path = os.path.join(cache_path, "data", run_start_str)
+            os.makedirs(analysis_data_path, exist_ok=True)
+
         full_filename = os.path.join(analysis_data_path, filename)
         try:
             df.to_csv(full_filename, index=False)

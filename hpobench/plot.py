@@ -578,12 +578,18 @@ def run_plots(data, x_col, y_cols, col_measure, row_measure, plot_path):
 def _plot_and_save(
     plot_func: Callable,
     data: pd.DataFrame,
-    output_path: str,
+    cache_path: str,
+    run_start_str: str,
     filename_prefix: str,
+    analysis_type: str,
+    subfolder: str,
     logger: logging.Logger,
     **plot_kwargs,
 ):
-    os.makedirs(output_path, exist_ok=True)
+    from hpobench.utils import AnalysisPathManager
+
+    path_manager = AnalysisPathManager(cache_path, run_start_str)
+    output_path = path_manager.get_analysis_path(analysis_type, "plots", subfolder)
     plot_path = os.path.join(output_path, filename_prefix)
     plot_func(data=data, plot_path=plot_path, **plot_kwargs)
     logger.debug(f"Plots saved in {output_path} with prefix {filename_prefix}")

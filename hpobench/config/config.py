@@ -1,4 +1,3 @@
-from typing import Literal
 from confopt.selection.acquisition import (
     QuantileConformalSearcher,
 )
@@ -20,11 +19,10 @@ from hpobench.config.types import (
 )
 
 # Environment variables used in the main code:
-N_REPETITIONS_PER_TUNER_CONFIG = 20
-N_TRIALS = 60
+N_REPETITIONS_PER_TUNER_CONFIG = 3
+N_TRIALS = 100
 TIMEOUT = None
 N_WARM_STARTS = 15
-RUN_TYPE: Literal["dev", "full"] = "full"
 
 # Environment variables used only in configuration:
 DEFAULT_INTERVAL_WIDTH = 0.9
@@ -45,7 +43,7 @@ STATIC_TUNING_CONFIGURATIONS = build_static_tuning_configurations(
 # 2. Create configurations feeding the coverage charts:
 COVERAGE_ANALYSIS_CONFIGURATIONS = []
 COVERAGE_INTERVAL_WIDTHS = [0.1, 0.5, 0.9]
-ADAPTERS = ["DtACI", None]
+ADAPTERS = ["ACI", "DtACI", None]
 
 for interval_width in COVERAGE_INTERVAL_WIDTHS:
     for adapter in ADAPTERS:
@@ -60,8 +58,8 @@ for interval_width in COVERAGE_INTERVAL_WIDTHS:
         )
         if adapter is None:
             config_identifier = f"Conformalized @ {interval_width}%"
-        elif adapter == "DtACI":
-            config_identifier = f"Conformalized + DtACI @ {interval_width}%"
+        elif adapter in ["ACI", "DtACI"]:
+            config_identifier = f"Conformalized + {adapter} @ {interval_width}%"
         else:
             raise ValueError(f"Unknown adapter: {adapter}")
         COVERAGE_ANALYSIS_CONFIGURATIONS.append(
@@ -143,21 +141,44 @@ ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurati
     ],
 )
 
-PRECONFORMAL_COMPARISON_CONFIGURATIONS = build_architecture_variation_configurations(
-    architectures=["qgbm", "qgp"],
-    samplers=[
-        ExpectedImprovementSampler(n_quantiles=8, num_ei_samples=100, adapter=None)
-    ],
-    n_pre_conformal_trials=10000,
-)
-EXTERNAL_TUNING_CONFIGURATIONS = get_external_tuning_configurations()
 
-FULL_TUNING_CONFIGURATIONS = (
-    # EXTERNAL_TUNING_CONFIGURATIONS
-    SAMPLER_VARIATION_CONFIGURATIONS
-    # + ARCHITECTURE_VARIATION_CONFIGURATIONS
-    # + PRECONFORMAL_COMPARISON_CONFIGURATIONS
+LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS = (
+    build_architecture_variation_configurations(
+        architectures=[
+            "qrf",
+            "qgp",
+            "qens4",
+        ],
+        samplers=[
+            ExpectedImprovementSampler(
+                n_quantiles=8, num_ei_samples=100, adapter="DtACI"
+            )
+        ],
+    )
 )
+
+PRECONFORMAL_COMPARISON_CONFIGURATIONS = []
+for architecture in ["qgbm", "qgp", "qens4"]:
+    # Simulate normal pre-conformal cutoff vs. unreachable one:
+    for pre_conformal_trials in [20, 10000]:
+        if pre_conformal_trials == 10000:
+            adapter = None
+        else:
+            adapter = "DtACI"
+        PRECONFORMAL_COMPARISON_CONFIGURATIONS.extend(
+            build_architecture_variation_configurations(
+                architectures=[architecture],
+                samplers=[
+                    ExpectedImprovementSampler(
+                        n_quantiles=8, num_ei_samples=100, adapter=adapter
+                    )
+                ],
+                n_pre_conformal_trials=pre_conformal_trials,
+            )
+        )
+
+
+EXTERNAL_TUNING_CONFIGURATIONS = get_external_tuning_configurations()
 
 SAMPLER = LowerBoundSampler(
     interval_width=DEFAULT_INTERVAL_WIDTH,

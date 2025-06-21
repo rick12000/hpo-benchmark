@@ -1,7 +1,6 @@
 import pandas as pd
 import numpy as np
 import logging
-import os
 from typing import List, Optional
 from scikit_posthocs import posthoc_nemenyi_friedman
 
@@ -21,10 +20,6 @@ from hpobench.process import (
 from scipy.stats import friedmanchisquare
 
 logger = logging.getLogger(__name__)
-
-
-def _ensure_dir(path: str):
-    os.makedirs(path, exist_ok=True)
 
 
 def _get_group_dict(breakout_col, within_group):
@@ -213,10 +208,13 @@ def _run_and_save_friedman(
     entity_col: str,
     rank_col: str,
     alpha: float,
-    output_path: str,
+    cache_path: str,
+    run_start_str: str,
     filename: str,
+    analysis_type: str,
     logger: logging.Logger,
-) -> pd.DataFrame:
+    subfolder: str = "statistical_tests",
+):
     results_df = friedman_test_runner(
         data=data,
         breakout_col=breakout_col,
@@ -225,10 +223,15 @@ def _run_and_save_friedman(
         rank_col=rank_col,
         alpha=alpha,
     )
-    filepath = os.path.join(output_path, filename)
-    results_df.to_csv(filepath, index=False)
-    logger.debug(f"Friedman test results saved to {filepath}")
-    return results_df
+    save_analysis_results(
+        results_df,
+        cache_path,
+        run_start_str,
+        filename,
+        "Friedman test results",
+        analysis_type,
+        subfolder,
+    )
 
 
 def _run_and_save_nemenyi(
@@ -238,9 +241,12 @@ def _run_and_save_nemenyi(
     entity_col: str,
     rank_col: str,
     alpha: float,
-    output_path: str,
+    cache_path: str,
+    run_start_str: str,
     filename: str,
+    analysis_type: str,
     logger: logging.Logger,
+    subfolder: str = "statistical_tests",
 ) -> pd.DataFrame:
     results_df = nemenyi_pairwise_test(
         data=data,
@@ -250,19 +256,92 @@ def _run_and_save_nemenyi(
         rank_col=rank_col,
         alpha=alpha,
     )
-    filepath = os.path.join(output_path, filename)
-    results_df.to_csv(filepath, index=False)
-    logger.debug(f"Nemenyi pairwise test results saved to {filepath}")
-
+    save_analysis_results(
+        results_df,
+        cache_path,
+        run_start_str,
+        filename,
+        "Nemenyi pairwise test results",
+        analysis_type,
+        subfolder,
+    )
     return results_df
+
+
+def _calculate_coverage_snapshots(
+    iteration_data: pd.DataFrame,
+    budget_cross_sections: List[int],
+    identifier_cols: List[str],
+    confidence_level_col: str,
+    iteration_col: str,
+    cache_path: str,
+    run_start_str: str,
+    analysis_type: str,
+    logger: logging.Logger,
+) -> None:
+    """
+    Calculates coverage analysis snapshots at specific budget cross-sections.
+
+    Takes the already aggregated iteration data and extracts cumulative breach rates
+    at specified budget points by mapping relative budget to iteration numbers.
+
+    Args:
+        iteration_data: Absolute iteration results with breach rates (already aggregated)
+        identifier_cols: Columns to identify the data
+        budget_cross_sections: Budget points to analyze (e.g., [50, 100])
+        confidence_level_col: Column name for confidence levels
+        cache_path: Base path for saving results
+        run_start_str: Timestamp string for file naming
+        analysis_type: Analysis type for folder organization
+        logger: Logger for status messages
+    """
+    max_iteration = iteration_data["iteration"].max()
+    min_iteration = iteration_data["iteration"].min()
+    iteration_targets = []
+    for budget in budget_cross_sections:
+        target_iteration = min_iteration + (budget / 100.0) * (
+            max_iteration - min_iteration
+        )
+        target_iteration = round(target_iteration)
+        iteration_targets.append(target_iteration)
+
+    coverage_data = iteration_data[
+        iteration_data["iteration"].isin(iteration_targets)
+    ].copy()
+    iteration_to_budget = dict(zip(iteration_targets, budget_cross_sections))
+    coverage_data["relativized_budget"] = coverage_data["iteration"].map(
+        iteration_to_budget
+    )
+
+    identifier_cols = identifier_cols + [confidence_level_col]
+    output_cols = identifier_cols + [
+        "relativized_budget",
+        iteration_col,
+        "cumulative_breach_rate",
+    ]
+
+    final_cols = [col for col in output_cols if col in coverage_data.columns]
+    final_data = coverage_data[final_cols]
+
+    save_analysis_results(
+        final_data,
+        cache_path,
+        run_start_str,
+        "coverage_analysis_snapshots.csv",
+        "Coverage analysis snapshots at budget cross-sections",
+        analysis_type,
+        "coverage_analysis",
+    )
 
 
 def _aggregate_and_save(
     data: pd.DataFrame,
     grouping_cols: List[str],
     metrics: List[str],
-    output_path: str,
+    cache_path: str,
+    run_start_str: str,
     filename: str,
+    analysis_type: str,
     logger: logging.Logger,
 ) -> pd.DataFrame:
     aggregated_results = aggregate_benchmark_data(
@@ -272,9 +351,15 @@ def _aggregate_and_save(
         n_bootstraps=100,
         random_state=1234,
     )
-    filepath = os.path.join(output_path, filename)
-    aggregated_results.to_csv(filepath, index=False)
-    logger.debug(f"Aggregated results saved to {filepath}")
+    save_analysis_results(
+        aggregated_results,
+        cache_path,
+        run_start_str,
+        filename,
+        "Aggregated results",
+        analysis_type,
+        "aggregated_results",
+    )
     return aggregated_results
 
 
@@ -283,13 +368,19 @@ def analyze_main_benchmark(
     cache_path: str,
     run_start_str: str,
     logger: logging.Logger,
+    analysis_type: str,
     data_folder: str = "data",
     plots_folder: str = "plots",
 ):
-    analysis_data_path = os.path.join(cache_path, data_folder, run_start_str)
-    plots_base_path = os.path.join(cache_path, plots_folder, run_start_str)
-    _ensure_dir(analysis_data_path)
-    _ensure_dir(plots_base_path)
+    # Save raw benchmark data
+    save_analysis_results(
+        raw_benchmark_data,
+        cache_path,
+        run_start_str,
+        "raw_benchmark_data.csv",
+        "Raw benchmark data",
+        analysis_type,
+    )
 
     grouping_cols = [
         "benchmark_identifier",
@@ -310,6 +401,7 @@ def analyze_main_benchmark(
     estimator_architecture_col = "estimator_architecture"
     runtime_unit = "runtime"
     iter_unit = "iteration"
+    n_pre_conformal_trials_col = "n_pre_conformal_trials"
     norm_runtime_unit = f"normalized_{runtime_unit}"
     budget_cross_sections = [50, 100]
     alpha = 0.05
@@ -340,25 +432,24 @@ def analyze_main_benchmark(
         estimator_architecture_column=estimator_architecture_col,
     )
 
-    cross_budget_friedman_results, cross_budget_nemenyi_results = [], []
     for budget in budget_cross_sections:
         budget_data = relativized_runtime_results[
             relativized_runtime_results[norm_runtime_unit] == budget
         ]
 
-        friedman_df = _run_and_save_friedman(
+        _run_and_save_friedman(
             data=budget_data,
             breakout_col=[bench_col],
             across_col=data_col,
             entity_col=tuner_col,
             rank_col="rank",
             alpha=alpha,
-            output_path=analysis_data_path,
-            filename=f"friedman_test_{budget}.csv",
+            cache_path=cache_path,
+            run_start_str=run_start_str,
+            filename=f"friedman_test_budget_{budget}.csv",
+            analysis_type=analysis_type,
             logger=logger,
         )
-        friedman_df[norm_runtime_unit] = budget
-        cross_budget_friedman_results.append(friedman_df)
 
         nemenyi_df = _run_and_save_nemenyi(
             data=budget_data,
@@ -367,20 +458,76 @@ def analyze_main_benchmark(
             entity_col=tuner_col,
             rank_col="rank",
             alpha=alpha,
-            output_path=analysis_data_path,
-            filename=f"nemenyi_pairwise_{budget}.csv",
+            cache_path=cache_path,
+            run_start_str=run_start_str,
+            filename=f"nemenyi_pairwise_budget_{budget}.csv",
+            analysis_type=analysis_type,
             logger=logger,
         )
         nemenyi_df[norm_runtime_unit] = budget
-        cross_budget_nemenyi_results.append(nemenyi_df)
+
+        win_percentage_results = _calculate_win_percentage(
+            data=budget_data,
+            breakout_cols=[bench_col],
+            dataset_col="dataset",
+            entity_col="tuner",
+            rank_col="rank",
+        )
+        save_analysis_results(
+            win_percentage_results,
+            cache_path,
+            run_start_str,
+            "tuner_win_percentage.csv",
+            "Tuner comparison win percentages across datasets",
+            analysis_type,
+            "win_percentages",
+        )
+
+    try:
+        # Coverage analysis plots:
+        if absolute_iteration_results[data_col].nunique() == 1:
+            _plot_and_save(
+                plot_func=run_plots,
+                data=absolute_iteration_results,
+                cache_path=cache_path,
+                run_start_str=run_start_str,
+                filename_prefix="coverage_per_dataset",
+                analysis_type=analysis_type,
+                subfolder="coverage_breach_rates",
+                logger=logger,
+                x_col=iter_unit,
+                y_cols=["cumulative_breach_rate", "rolling_breach_rate"],
+                col_measure=confidence_level_col,
+                row_measure=data_col,
+            )
+
+            _calculate_coverage_snapshots(
+                iteration_data=absolute_iteration_results,
+                budget_cross_sections=budget_cross_sections,
+                identifier_cols=[bench_col, data_col, tuner_col],
+                iteration_col=iter_unit,
+                confidence_level_col=confidence_level_col,
+                cache_path=cache_path,
+                run_start_str=run_start_str,
+                analysis_type=analysis_type,
+                logger=logger,
+            )
+
+        else:
+            logger.warning(
+                "Coverage analysis plots are only supported for single dataset benchmarks."
+            )
+    except Exception as e:
+        logger.warning(f"Error plotting coverage analysis plots: {e}")
 
     _plot_and_save(
         plot_func=run_plots,
         data=absolute_iteration_results,
-        output_path=os.path.join(
-            plots_base_path, "per_dataset_performance_vs_iteration"
-        ),
+        cache_path=cache_path,
+        run_start_str=run_start_str,
         filename_prefix="perf_vs_iter",
+        analysis_type=analysis_type,
+        subfolder="performance_curves",
         logger=logger,
         x_col=iter_unit,
         y_cols=["best_performance", "rank"],
@@ -392,16 +539,21 @@ def analyze_main_benchmark(
         data=relativized_runtime_results,
         grouping_cols=[bench_col, norm_runtime_unit, tuner_col],
         metrics=["rank"],
-        output_path=analysis_data_path,
-        filename="aggregated_benchmark_results.csv",
+        cache_path=cache_path,
+        run_start_str=run_start_str,
+        filename="runtime_aggregated_results.csv",
+        analysis_type=analysis_type,
         logger=logger,
     )
 
     _plot_and_save(
         plot_func=run_plots,
         data=runtime_aggregated_results,
-        output_path=os.path.join(plots_base_path, "aggregated_rank_vs_runtime"),
+        cache_path=cache_path,
+        run_start_str=run_start_str,
         filename_prefix="rank_vs_norm_runtime",
+        analysis_type=analysis_type,
+        subfolder="rank_analysis",
         logger=logger,
         x_col=norm_runtime_unit,
         y_cols=["rank"],
@@ -412,8 +564,11 @@ def analyze_main_benchmark(
     _plot_and_save(
         plot_func=run_plots,
         data=relativized_runtime_results,
-        output_path=os.path.join(plots_base_path, "per_dataset_performance_vs_runtime"),
+        cache_path=cache_path,
+        run_start_str=run_start_str,
         filename_prefix="perf_vs_runtime",
+        analysis_type=analysis_type,
+        subfolder="performance_curves",
         logger=logger,
         x_col=norm_runtime_unit,
         y_cols=["best_performance", "rank"],
@@ -421,25 +576,112 @@ def analyze_main_benchmark(
         row_measure=bench_col,
     )
 
+    try:
+        # Sampler partitioned plots:
+        _plot_and_save(
+            plot_func=run_plots,
+            data=relativized_runtime_results,
+            cache_path=cache_path,
+            run_start_str=run_start_str,
+            filename_prefix="sampler_partitioned_perf_vs_runtime",
+            analysis_type=analysis_type,
+            subfolder="sampler_comparison",
+            logger=logger,
+            x_col=norm_runtime_unit,
+            y_cols=["rank"],
+            col_measure=sampler_col,
+            row_measure=bench_col,
+        )
+
+        # Architecture partitioned plots:
+        _plot_and_save(
+            plot_func=run_plots,
+            data=relativized_runtime_results,
+            cache_path=cache_path,
+            run_start_str=run_start_str,
+            filename_prefix="architecture_partitioned_perf_vs_runtime",
+            analysis_type=analysis_type,
+            subfolder="architecture_comparison",
+            logger=logger,
+            x_col=norm_runtime_unit,
+            y_cols=["rank"],
+            col_measure=estimator_architecture_col,
+            row_measure=bench_col,
+        )
+    except Exception as e:
+        logger.warning(f"Error plotting architecture partitioned plots: {e}")
+
     iteration_aggregated_results = _aggregate_and_save(
         data=absolute_iteration_results,
         grouping_cols=[bench_col, iter_unit, tuner_col],
         metrics=["rank"],
-        output_path=analysis_data_path,
-        filename="aggregated_iteration_benchmark_results.csv",
+        cache_path=cache_path,
+        run_start_str=run_start_str,
+        filename="iteration_aggregated_results.csv",
+        analysis_type=analysis_type,
         logger=logger,
     )
 
     _plot_and_save(
         plot_func=run_plots,
         data=iteration_aggregated_results,
-        output_path=os.path.join(plots_base_path, "aggregated_rank_vs_iteration"),
+        cache_path=cache_path,
+        run_start_str=run_start_str,
         filename_prefix="rank_vs_iteration",
+        analysis_type=analysis_type,
+        subfolder="rank_analysis",
         logger=logger,
         x_col=iter_unit,
         y_cols=["rank"],
         col_measure=bench_col,
         row_measure=None,
+    )
+
+    # Conformalization vs. non-conformalization analysis:
+    conformalized_vs_nonconformalized_results = pd.DataFrame()
+    for n_pre_conformal_trials in raw_benchmark_data[
+        n_pre_conformal_trials_col
+    ].unique():
+        conformalization_slice_data = raw_benchmark_data[
+            raw_benchmark_data[n_pre_conformal_trials_col] == n_pre_conformal_trials
+        ].copy()
+
+        conformalization_slice_relativized_runtime_results = (
+            process_performance_records(
+                raw_benchmark_data=conformalization_slice_data,
+                aggregators=grouping_cols,
+                performance_column=perf_col,
+                budget_unit=runtime_unit,
+                repetition_column=rep_col,
+                tuner_column=tuner_col,
+                relativize_budget=True,
+                sampler_column=sampler_col,
+                confidence_level_column=confidence_level_col,
+                estimator_architecture_column=estimator_architecture_col,
+            )
+        )
+
+    conformalized_vs_nonconformalized_results = pd.concat(
+        [
+            conformalized_vs_nonconformalized_results,
+            conformalization_slice_relativized_runtime_results,
+        ]
+    )
+
+    # Architecture partitioned plots (each ranking conf vs. unconf):
+    _plot_and_save(
+        plot_func=run_plots,
+        data=conformalized_vs_nonconformalized_results,
+        cache_path=cache_path,
+        run_start_str=run_start_str,
+        filename_prefix=f"perf_vs_runtime_n_pre_conformal_trials_{n_pre_conformal_trials}",
+        analysis_type=analysis_type,
+        subfolder="conformalization_effect",
+        logger=logger,
+        x_col=norm_runtime_unit,
+        y_cols=["rank"],
+        col_measure=estimator_architecture_col,
+        row_measure=bench_col,
     )
 
 
@@ -568,18 +810,12 @@ def analyze_estimator_comparison(
     results_df: pd.DataFrame,
     cache_path: str,
     run_start_str: str,
+    analysis_type: str,
     alpha: float = 0.05,
     data_folder: str = "data",
     plots_folder: str = "plots",
 ):
     metric_col = "estimator_error"
-
-    analysis_data_path = os.path.join(cache_path, data_folder, run_start_str)
-    estimator_plots_path = os.path.join(
-        cache_path, plots_folder, run_start_str, "estimator_analysis"
-    )
-    _ensure_dir(analysis_data_path)
-    _ensure_dir(estimator_plots_path)
 
     prepared_df = _prepare_estimator_comparison_data(results_df, metric_col)
 
@@ -587,9 +823,10 @@ def analyze_estimator_comparison(
         prepared_df,
         cache_path,
         run_start_str,
-        "estimator_comparison_dataset_avg_ranks.csv",
+        "dataset_avg_ranks.csv",
         "Estimator comparison dataset average ranks",
-        output_folder=data_folder,
+        analysis_type,
+        "estimator_comparison",
     )
 
     plot_agg_cols = [
@@ -600,6 +837,14 @@ def analyze_estimator_comparison(
     ]
     plot_data = (
         prepared_df.groupby(plot_agg_cols, observed=True)["rank"].mean().reset_index()
+    )
+
+    # Use specialized plot function for estimator comparison
+    from hpobench.utils import AnalysisPathManager
+
+    path_manager = AnalysisPathManager(cache_path, run_start_str)
+    estimator_plots_path = path_manager.get_analysis_path(
+        analysis_type, "plots", "estimator_analysis"
     )
 
     plot_estimator_rank_vs_datasize(
@@ -614,16 +859,19 @@ def analyze_estimator_comparison(
     logger.info(f"Estimator rank vs data size plots saved in {estimator_plots_path}")
 
     breakout_cols = ["benchmark_identifier", "data_size", "searcher_tuning_framework"]
-    friedman_results, _ = _run_and_save_friedman(
+    _run_and_save_friedman(
         data=prepared_df,
         breakout_col=breakout_cols,
         across_col="dataset",
         entity_col="estimator_architecture",
         rank_col="rank",
         alpha=alpha,
-        output_path=analysis_data_path,
-        filename="estimator_comparison_friedman.csv",
+        cache_path=cache_path,
+        run_start_str=run_start_str,
+        filename="friedman_test.csv",
+        analysis_type=analysis_type,
         logger=logger,
+        subfolder="estimator_comparison",
     )
 
     _run_and_save_nemenyi(
@@ -633,9 +881,12 @@ def analyze_estimator_comparison(
         entity_col="estimator_architecture",
         rank_col="rank",
         alpha=alpha,
-        output_path=analysis_data_path,
-        filename="estimator_comparison_nemenyi.csv",
+        cache_path=cache_path,
+        run_start_str=run_start_str,
+        filename="nemenyi_pairwise.csv",
+        analysis_type=analysis_type,
         logger=logger,
+        subfolder="estimator_comparison",
     )
 
     win_percentage_results = _calculate_win_percentage(
@@ -649,24 +900,33 @@ def analyze_estimator_comparison(
         win_percentage_results,
         cache_path,
         run_start_str,
-        "estimator_comparison_win_percentage.csv",
+        "win_percentage.csv",
         "Estimator comparison win percentages across datasets",
-        output_folder=data_folder,
+        analysis_type,
+        "estimator_comparison",
     )
 
 
 def analyze_dataset_level_benchmark(
     dataset_benchmark_data: pd.DataFrame,
-    dataset_name: str = "lcbench",
+    benchmark_name: str = "lcbench",
     cache_path: str = "cache/",
     run_start_str: str = None,
+    analysis_type: str = "06_dataset_level",
     logger: Optional[logging.Logger] = None,
 ) -> None:
     if logger is None:
         logger = logging.getLogger(__name__)
 
-    plots_path = os.path.join(cache_path, "plots", run_start_str)
-    _ensure_dir(plots_path)
+    # Save raw benchmark data
+    save_analysis_results(
+        dataset_benchmark_data,
+        cache_path,
+        run_start_str,
+        "raw_benchmark_data.csv",
+        "Raw dataset benchmark data",
+        analysis_type,
+    )
 
     budget_unit = "runtime"
     grouping_columns = ["benchmark_identifier", "dataset", "tuner", "repetition"]
@@ -693,8 +953,11 @@ def analyze_dataset_level_benchmark(
         _plot_and_save(
             plot_func=plot_benchmark_data,
             data=dataset_data,
-            output_path=plots_path,
-            filename_prefix=f"dataset_runtime_performance_{dataset_name}_{dataset_id}",
+            cache_path=cache_path,
+            run_start_str=run_start_str,
+            filename_prefix=f"dataset_runtime_performance_{dataset_id}",
+            analysis_type=analysis_type,
+            subfolder="",
             logger=logger,
             x_col=f"{budget_unit}",
             y_col="best_performance",
@@ -708,18 +971,22 @@ def analyze_tuning_effect(
     results_df: pd.DataFrame,
     cache_path: str,
     run_start_str: str,
+    analysis_type: str,
     alpha: float = 0.05,
     data_folder: str = "data",
     plots_folder: str = "plots",
 ):
     metric_col = "estimator_error"
 
-    analysis_data_path = os.path.join(cache_path, data_folder, run_start_str)
-    tuning_plots_path = os.path.join(
-        cache_path, plots_folder, run_start_str, "tuning_effect"
+    # Save raw estimator error results
+    save_analysis_results(
+        results_df,
+        cache_path,
+        run_start_str,
+        "raw_estimator_error_results.csv",
+        "Raw estimator error results",
+        analysis_type,
     )
-    _ensure_dir(analysis_data_path)
-    _ensure_dir(tuning_plots_path)
 
     filtered_df = _prepare_tuning_effect_data(results_df, metric_col)
 
@@ -733,9 +1000,10 @@ def analyze_tuning_effect(
         filtered_df,
         cache_path,
         run_start_str,
-        "tuning_effect_filtered_ranks.csv",
+        "filtered_ranks.csv",
         "Tuning effect filtered ranks",
-        output_folder=data_folder,
+        analysis_type,
+        "tuning_effect",
     )
 
     plot_agg_cols_tuning = [
@@ -751,16 +1019,19 @@ def analyze_tuning_effect(
     )
 
     breakout_cols = ["benchmark_identifier", "data_size"]
-    friedman_results, _ = _run_and_save_friedman(
+    _run_and_save_friedman(
         data=filtered_df,
         breakout_col=breakout_cols,
         across_col="dataset",
         entity_col="estimator_and_tuning_framework",
         rank_col="rank",
         alpha=alpha,
-        output_path=analysis_data_path,
-        filename="tuning_effect_friedman.csv",
+        cache_path=cache_path,
+        run_start_str=run_start_str,
+        filename="friedman_test.csv",
+        analysis_type=analysis_type,
         logger=logger,
+        subfolder="tuning_effect",
     )
 
     nemenyi_df = _run_and_save_nemenyi(
@@ -770,9 +1041,20 @@ def analyze_tuning_effect(
         entity_col="estimator_and_tuning_framework",
         rank_col="rank",
         alpha=alpha,
-        output_path=analysis_data_path,
-        filename="tuning_effect_nemenyi.csv",
+        cache_path=cache_path,
+        run_start_str=run_start_str,
+        filename="nemenyi_pairwise.csv",
+        analysis_type=analysis_type,
         logger=logger,
+        subfolder="tuning_effect",
+    )
+
+    # Use specialized plot function for tuning effect
+    from hpobench.utils import AnalysisPathManager
+
+    path_manager = AnalysisPathManager(cache_path, run_start_str)
+    tuning_plots_path = path_manager.get_analysis_path(
+        analysis_type, "plots", "tuning_effect"
     )
 
     plot_tuning_rank_comparison(
