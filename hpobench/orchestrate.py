@@ -217,6 +217,19 @@ def run_and_analyze_main_benchmark(
     cache_path: str,
     run_start_str: str,
     analysis_type: str,
+    analysis_components: list[
+        Literal[
+            "friedman",
+            "nemenyi",
+            "win_percentage",
+            "coverage",
+            "dataset_performances",
+            "rank_analysis",
+            "sampler_comparison",
+            "architecture_comparison",
+            "conformalization_effect",
+        ]
+    ],
     max_n_instances_per_benchmark: int = 10,
     n_repetitions: int = N_REPETITIONS_PER_TUNER_CONFIG,
     data_folder: str = "data",
@@ -269,6 +282,7 @@ def run_and_analyze_main_benchmark(
         run_start_str=run_start_str,
         logger=logger,
         analysis_type=analysis_type,
+        analysis_components=analysis_components,
         data_folder=data_folder,
         plots_folder=plots_folder,
     )

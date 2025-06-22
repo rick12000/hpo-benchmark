@@ -41,12 +41,12 @@ if __name__ == "__main__":
     # Section control dictionary
     run_sections = {
         "run_main_benchmark": True,
-        "run_static_analysis": False,
-        "run_tuning_benchmark": False,
+        "run_static_analysis": True,
+        "run_tuning_benchmark": True,
     }
 
     run_start_str, logger = setup_environment(cache_path=CACHE_PATH)
-    DEFAULT_MAX_N_INSTANCES = 3
+    DEFAULT_MAX_N_INSTANCES = 10
     TUNING_PATH_MAX_N_INSTANCES = 3
 
     # Main Benchmark Section
@@ -65,6 +65,7 @@ if __name__ == "__main__":
             run_start_str=run_start_str,
             analysis_type="01_coverage_analysis",
             max_n_instances_per_benchmark=1,
+            analysis_components=["coverage"],
         )
 
         # Sampler Variation Analysis:
@@ -80,6 +81,7 @@ if __name__ == "__main__":
             run_start_str=run_start_str,
             analysis_type="02_sampler_variation",
             max_n_instances_per_benchmark=DEFAULT_MAX_N_INSTANCES,
+            analysis_components=["rank_analysis"],
         )
 
         # Architecture Variation Analysis:
@@ -95,6 +97,11 @@ if __name__ == "__main__":
             run_start_str=run_start_str,
             analysis_type="03_architecture_variation",
             max_n_instances_per_benchmark=DEFAULT_MAX_N_INSTANCES,
+            analysis_components=[
+                "architecture_comparison",
+                "rank_analysis",
+                "sampler_comparison",
+            ],
         )
 
         # External Tuning Analysis:
@@ -111,6 +118,12 @@ if __name__ == "__main__":
             run_start_str=run_start_str,
             analysis_type="04_external_tuning",
             max_n_instances_per_benchmark=DEFAULT_MAX_N_INSTANCES,
+            analysis_components=[
+                "friedman",
+                "nemenyi",
+                "win_percentage",
+                "rank_analysis",
+            ],
         )
 
         # Preconformal Comparison Analysis:
@@ -126,6 +139,12 @@ if __name__ == "__main__":
             run_start_str=run_start_str,
             analysis_type="05_preconformal_comparison",
             max_n_instances_per_benchmark=DEFAULT_MAX_N_INSTANCES,
+            analysis_components=[
+                "friedman",
+                "nemenyi",
+                "win_percentage",
+                "conformalization_effect",
+            ],
         )
 
     # Static Analysis Section

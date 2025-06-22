@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 import logging
-from typing import List, Optional
+from typing import List, Optional, Literal
 from scikit_posthocs import posthoc_nemenyi_friedman
 
 from hpobench.utils import save_analysis_results
@@ -369,6 +369,19 @@ def analyze_main_benchmark(
     run_start_str: str,
     logger: logging.Logger,
     analysis_type: str,
+    analysis_components: List[
+        Literal[
+            "friedman",
+            "nemenyi",
+            "win_percentage",
+            "coverage",
+            "dataset_performances",
+            "rank_analysis",
+            "sampler_comparison",
+            "architecture_comparison",
+            "conformalization_effect",
+        ]
+    ],
     data_folder: str = "data",
     plots_folder: str = "plots",
 ):
@@ -437,55 +450,61 @@ def analyze_main_benchmark(
             relativized_runtime_results[norm_runtime_unit] == budget
         ]
 
-        _run_and_save_friedman(
-            data=budget_data,
-            breakout_col=[bench_col],
-            across_col=data_col,
-            entity_col=tuner_col,
-            rank_col="rank",
-            alpha=alpha,
-            cache_path=cache_path,
-            run_start_str=run_start_str,
-            filename=f"friedman_test_budget_{budget}.csv",
-            analysis_type=analysis_type,
-            logger=logger,
-        )
+        if "friedman" in analysis_components:
+            _run_and_save_friedman(
+                data=budget_data,
+                breakout_col=[bench_col],
+                across_col=data_col,
+                entity_col=tuner_col,
+                rank_col="rank",
+                alpha=alpha,
+                cache_path=cache_path,
+                run_start_str=run_start_str,
+                filename=f"friedman_test_budget_{budget}.csv",
+                analysis_type=analysis_type,
+                logger=logger,
+            )
 
-        nemenyi_df = _run_and_save_nemenyi(
-            data=budget_data,
-            breakout_col=[bench_col],
-            across_col=data_col,
-            entity_col=tuner_col,
-            rank_col="rank",
-            alpha=alpha,
-            cache_path=cache_path,
-            run_start_str=run_start_str,
-            filename=f"nemenyi_pairwise_budget_{budget}.csv",
-            analysis_type=analysis_type,
-            logger=logger,
-        )
-        nemenyi_df[norm_runtime_unit] = budget
+        if "nemenyi" in analysis_components:
+            nemenyi_df = _run_and_save_nemenyi(
+                data=budget_data,
+                breakout_col=[bench_col],
+                across_col=data_col,
+                entity_col=tuner_col,
+                rank_col="rank",
+                alpha=alpha,
+                cache_path=cache_path,
+                run_start_str=run_start_str,
+                filename=f"nemenyi_pairwise_budget_{budget}.csv",
+                analysis_type=analysis_type,
+                logger=logger,
+            )
+            nemenyi_df[norm_runtime_unit] = budget
 
-        win_percentage_results = _calculate_win_percentage(
-            data=budget_data,
-            breakout_cols=[bench_col],
-            dataset_col="dataset",
-            entity_col="tuner",
-            rank_col="rank",
-        )
-        save_analysis_results(
-            win_percentage_results,
-            cache_path,
-            run_start_str,
-            "tuner_win_percentage.csv",
-            "Tuner comparison win percentages across datasets",
-            analysis_type,
-            "win_percentages",
-        )
+        if "win_percentage" in analysis_components:
+            win_percentage_results = _calculate_win_percentage(
+                data=budget_data,
+                breakout_cols=[bench_col],
+                dataset_col="dataset",
+                entity_col="tuner",
+                rank_col="rank",
+            )
+            save_analysis_results(
+                win_percentage_results,
+                cache_path,
+                run_start_str,
+                "tuner_win_percentage.csv",
+                "Tuner comparison win percentages across datasets",
+                analysis_type,
+                "win_percentages",
+            )
 
     try:
         # Coverage analysis plots:
-        if absolute_iteration_results[data_col].nunique() == 1:
+        if (
+            absolute_iteration_results[data_col].nunique() == 1
+            and "coverage" in analysis_components
+        ):
             _plot_and_save(
                 plot_func=run_plots,
                 data=absolute_iteration_results,
@@ -520,169 +539,179 @@ def analyze_main_benchmark(
     except Exception as e:
         logger.warning(f"Error plotting coverage analysis plots: {e}")
 
-    _plot_and_save(
-        plot_func=run_plots,
-        data=absolute_iteration_results,
-        cache_path=cache_path,
-        run_start_str=run_start_str,
-        filename_prefix="perf_vs_iter",
-        analysis_type=analysis_type,
-        subfolder="performance_curves",
-        logger=logger,
-        x_col=iter_unit,
-        y_cols=["best_performance", "rank"],
-        col_measure=data_col,
-        row_measure=bench_col,
-    )
-
-    runtime_aggregated_results = _aggregate_and_save(
-        data=relativized_runtime_results,
-        grouping_cols=[bench_col, norm_runtime_unit, tuner_col],
-        metrics=["rank"],
-        cache_path=cache_path,
-        run_start_str=run_start_str,
-        filename="runtime_aggregated_results.csv",
-        analysis_type=analysis_type,
-        logger=logger,
-    )
-
-    _plot_and_save(
-        plot_func=run_plots,
-        data=runtime_aggregated_results,
-        cache_path=cache_path,
-        run_start_str=run_start_str,
-        filename_prefix="rank_vs_norm_runtime",
-        analysis_type=analysis_type,
-        subfolder="rank_analysis",
-        logger=logger,
-        x_col=norm_runtime_unit,
-        y_cols=["rank"],
-        col_measure=bench_col,
-        row_measure=None,
-    )
-
-    _plot_and_save(
-        plot_func=run_plots,
-        data=relativized_runtime_results,
-        cache_path=cache_path,
-        run_start_str=run_start_str,
-        filename_prefix="perf_vs_runtime",
-        analysis_type=analysis_type,
-        subfolder="performance_curves",
-        logger=logger,
-        x_col=norm_runtime_unit,
-        y_cols=["best_performance", "rank"],
-        col_measure=data_col,
-        row_measure=bench_col,
-    )
-
-    try:
-        # Sampler partitioned plots:
+    if "dataset_performances" in analysis_components:
         _plot_and_save(
             plot_func=run_plots,
-            data=relativized_runtime_results,
+            data=absolute_iteration_results,
             cache_path=cache_path,
             run_start_str=run_start_str,
-            filename_prefix="sampler_partitioned_perf_vs_runtime",
+            filename_prefix="perf_vs_iter",
             analysis_type=analysis_type,
-            subfolder="sampler_comparison",
+            subfolder="dataset_performances",
             logger=logger,
-            x_col=norm_runtime_unit,
-            y_cols=["rank"],
-            col_measure=sampler_col,
+            x_col=iter_unit,
+            y_cols=["best_performance", "rank"],
+            col_measure=data_col,
             row_measure=bench_col,
         )
 
-        # Architecture partitioned plots:
         _plot_and_save(
             plot_func=run_plots,
             data=relativized_runtime_results,
             cache_path=cache_path,
             run_start_str=run_start_str,
-            filename_prefix="architecture_partitioned_perf_vs_runtime",
+            filename_prefix="perf_vs_runtime",
             analysis_type=analysis_type,
-            subfolder="architecture_comparison",
+            subfolder="dataset_performances",
+            logger=logger,
+            x_col=norm_runtime_unit,
+            y_cols=["best_performance", "rank"],
+            col_measure=data_col,
+            row_measure=bench_col,
+        )
+
+    if "rank_analysis" in analysis_components:
+        runtime_aggregated_results = _aggregate_and_save(
+            data=relativized_runtime_results,
+            grouping_cols=[bench_col, norm_runtime_unit, tuner_col],
+            metrics=["rank"],
+            cache_path=cache_path,
+            run_start_str=run_start_str,
+            filename="runtime_aggregated_results.csv",
+            analysis_type=analysis_type,
+            logger=logger,
+        )
+
+        _plot_and_save(
+            plot_func=run_plots,
+            data=runtime_aggregated_results,
+            cache_path=cache_path,
+            run_start_str=run_start_str,
+            filename_prefix="rank_vs_norm_runtime",
+            analysis_type=analysis_type,
+            subfolder="rank_analysis",
+            logger=logger,
+            x_col=norm_runtime_unit,
+            y_cols=["rank"],
+            col_measure=bench_col,
+            row_measure=None,
+        )
+
+        iteration_aggregated_results = _aggregate_and_save(
+            data=absolute_iteration_results,
+            grouping_cols=[bench_col, iter_unit, tuner_col],
+            metrics=["rank"],
+            cache_path=cache_path,
+            run_start_str=run_start_str,
+            filename="iteration_aggregated_results.csv",
+            analysis_type=analysis_type,
+            logger=logger,
+        )
+
+        _plot_and_save(
+            plot_func=run_plots,
+            data=iteration_aggregated_results,
+            cache_path=cache_path,
+            run_start_str=run_start_str,
+            filename_prefix="rank_vs_iteration",
+            analysis_type=analysis_type,
+            subfolder="rank_analysis",
+            logger=logger,
+            x_col=iter_unit,
+            y_cols=["rank"],
+            col_measure=bench_col,
+            row_measure=None,
+        )
+
+    if "sampler_comparison" in analysis_components:
+        try:
+            # Sampler partitioned plots:
+            _plot_and_save(
+                plot_func=run_plots,
+                data=relativized_runtime_results,
+                cache_path=cache_path,
+                run_start_str=run_start_str,
+                filename_prefix="sampler_partitioned_perf_vs_runtime",
+                analysis_type=analysis_type,
+                subfolder="sampler_comparison",
+                logger=logger,
+                x_col=norm_runtime_unit,
+                y_cols=["rank"],
+                col_measure=sampler_col,
+                row_measure=bench_col,
+            )
+
+        except Exception as e:
+            logger.warning(f"Error plotting sampler partitioned plots: {e}")
+
+    if "architecture_comparison" in analysis_components:
+        try:
+            # Architecture partitioned plots:
+            _plot_and_save(
+                plot_func=run_plots,
+                data=relativized_runtime_results,
+                cache_path=cache_path,
+                run_start_str=run_start_str,
+                filename_prefix="architecture_partitioned_perf_vs_runtime",
+                analysis_type=analysis_type,
+                subfolder="architecture_comparison",
+                logger=logger,
+                x_col=norm_runtime_unit,
+                y_cols=["rank"],
+                col_measure=estimator_architecture_col,
+                row_measure=bench_col,
+            )
+        except Exception as e:
+            logger.warning(f"Error plotting architecture partitioned plots: {e}")
+
+    if "conformalization_effect" in analysis_components:
+
+        # Conformalization vs. non-conformalization analysis:
+        conformalized_vs_nonconformalized_results = pd.DataFrame()
+        for n_pre_conformal_trials in raw_benchmark_data[
+            n_pre_conformal_trials_col
+        ].unique():
+            conformalization_slice_data = raw_benchmark_data[
+                raw_benchmark_data[n_pre_conformal_trials_col] == n_pre_conformal_trials
+            ].copy()
+
+            conformalization_slice_relativized_runtime_results = (
+                process_performance_records(
+                    raw_benchmark_data=conformalization_slice_data,
+                    aggregators=grouping_cols,
+                    performance_column=perf_col,
+                    budget_unit=runtime_unit,
+                    repetition_column=rep_col,
+                    tuner_column=tuner_col,
+                    relativize_budget=True,
+                    sampler_column=sampler_col,
+                    confidence_level_column=confidence_level_col,
+                    estimator_architecture_column=estimator_architecture_col,
+                )
+            )
+
+        conformalized_vs_nonconformalized_results = pd.concat(
+            [
+                conformalized_vs_nonconformalized_results,
+                conformalization_slice_relativized_runtime_results,
+            ]
+        )
+
+        # Architecture partitioned plots (each ranking conf vs. unconf):
+        _plot_and_save(
+            plot_func=run_plots,
+            data=conformalized_vs_nonconformalized_results,
+            cache_path=cache_path,
+            run_start_str=run_start_str,
+            filename_prefix=f"perf_vs_runtime_n_pre_conformal_trials_{n_pre_conformal_trials}",
+            analysis_type=analysis_type,
+            subfolder="conformalization_effect",
             logger=logger,
             x_col=norm_runtime_unit,
             y_cols=["rank"],
             col_measure=estimator_architecture_col,
             row_measure=bench_col,
         )
-    except Exception as e:
-        logger.warning(f"Error plotting architecture partitioned plots: {e}")
-
-    iteration_aggregated_results = _aggregate_and_save(
-        data=absolute_iteration_results,
-        grouping_cols=[bench_col, iter_unit, tuner_col],
-        metrics=["rank"],
-        cache_path=cache_path,
-        run_start_str=run_start_str,
-        filename="iteration_aggregated_results.csv",
-        analysis_type=analysis_type,
-        logger=logger,
-    )
-
-    _plot_and_save(
-        plot_func=run_plots,
-        data=iteration_aggregated_results,
-        cache_path=cache_path,
-        run_start_str=run_start_str,
-        filename_prefix="rank_vs_iteration",
-        analysis_type=analysis_type,
-        subfolder="rank_analysis",
-        logger=logger,
-        x_col=iter_unit,
-        y_cols=["rank"],
-        col_measure=bench_col,
-        row_measure=None,
-    )
-
-    # Conformalization vs. non-conformalization analysis:
-    conformalized_vs_nonconformalized_results = pd.DataFrame()
-    for n_pre_conformal_trials in raw_benchmark_data[
-        n_pre_conformal_trials_col
-    ].unique():
-        conformalization_slice_data = raw_benchmark_data[
-            raw_benchmark_data[n_pre_conformal_trials_col] == n_pre_conformal_trials
-        ].copy()
-
-        conformalization_slice_relativized_runtime_results = (
-            process_performance_records(
-                raw_benchmark_data=conformalization_slice_data,
-                aggregators=grouping_cols,
-                performance_column=perf_col,
-                budget_unit=runtime_unit,
-                repetition_column=rep_col,
-                tuner_column=tuner_col,
-                relativize_budget=True,
-                sampler_column=sampler_col,
-                confidence_level_column=confidence_level_col,
-                estimator_architecture_column=estimator_architecture_col,
-            )
-        )
-
-    conformalized_vs_nonconformalized_results = pd.concat(
-        [
-            conformalized_vs_nonconformalized_results,
-            conformalization_slice_relativized_runtime_results,
-        ]
-    )
-
-    # Architecture partitioned plots (each ranking conf vs. unconf):
-    _plot_and_save(
-        plot_func=run_plots,
-        data=conformalized_vs_nonconformalized_results,
-        cache_path=cache_path,
-        run_start_str=run_start_str,
-        filename_prefix=f"perf_vs_runtime_n_pre_conformal_trials_{n_pre_conformal_trials}",
-        analysis_type=analysis_type,
-        subfolder="conformalization_effect",
-        logger=logger,
-        x_col=norm_runtime_unit,
-        y_cols=["rank"],
-        col_measure=estimator_architecture_col,
-        row_measure=bench_col,
-    )
 
 
 def _prepare_tuning_effect_data(
