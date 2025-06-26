@@ -70,28 +70,6 @@ def load_benchmark_configs(
     return experiment_configs
 
 
-def _generate_warm_starts_per_repetition(
-    experiment_config: ExperimentConfig, n_repetitions: int
-) -> list[list[tuple[dict, float]]]:
-    # NOTE: Warm starts are identical per repetition, so all models
-    # will have the same starting hyperparameter configurations, but
-    # a new set of warm starts needs to be generated per dataset and
-    # per repetition.
-    warm_start_configs_per_repetition = []
-    for repetition in range(n_repetitions):
-        consistent_warm_starts = generate_hyperparameter_combinations(
-            params=experiment_config.search_space,
-            n_combinations=experiment_config.n_warm_starts,
-            random_state=repetition,
-        )
-        warm_start_configs = []
-        for combination in consistent_warm_starts:
-            performance = experiment_config.objective_function.predict(combination)
-            warm_start_configs.append((combination, performance))
-        warm_start_configs_per_repetition.append(warm_start_configs)
-    return warm_start_configs_per_repetition
-
-
 def run_main_benchmark(
     experiment_configs: list[ExperimentConfig],
     n_repetitions: int,
@@ -117,9 +95,22 @@ def run_main_benchmark(
         logger.info(
             f"Generating {experiment_config.n_warm_starts} warm start configurations for dataset: {dataset_name}"
         )
-        warm_start_configs_per_repetition = _generate_warm_starts_per_repetition(
-            experiment_config=experiment_config, n_repetitions=n_repetitions
-        )
+        # NOTE: Warm starts are identical per repetition, so all models
+        # will have the same starting hyperparameter configurations, but
+        # a new set of warm starts needs to be generated per dataset and
+        # per repetition.
+        warm_start_configs_per_repetition = []
+        for repetition in range(n_repetitions):
+            consistent_warm_starts = generate_hyperparameter_combinations(
+                params=experiment_config.search_space,
+                n_combinations=experiment_config.n_warm_starts,
+                random_state=repetition,
+            )
+            warm_start_configs = []
+            for combination in consistent_warm_starts:
+                performance = experiment_config.objective_function.predict(combination)
+                warm_start_configs.append((combination, performance))
+            warm_start_configs_per_repetition.append(warm_start_configs)
         logger.info(
             f"Generated {len(warm_start_configs_per_repetition[0])} warm start configurations."
         )
