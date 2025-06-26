@@ -7,7 +7,6 @@ from hpobench.config.config import (
     LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS,
     SAMPLER_VARIATION_CONFIGURATIONS,
     EXTERNAL_TUNING_CONFIGURATIONS,
-    TUNING_PATH_CONFIGURATIONS,
     PRECONFORMAL_COMPARISON_CONFIGURATIONS,
     N_REPETITIONS_PER_TUNER_CONFIG,
     N_TRIALS,
@@ -15,12 +14,11 @@ from hpobench.config.config import (
     TIMEOUT,
     STATIC_TUNING_CONFIGURATIONS,
 )
-from hpobench.analyze import (
+from hpobench.report.analyze import (
     analyze_tuning_effect,
     analyze_estimator_comparison,
-    analyze_dataset_level_benchmark,
 )
-from hpobench.orchestrate import (
+from hpobench.report.orchestrate import (
     load_benchmark_configs,
     run_main_benchmark,
     run_and_analyze_main_benchmark,
@@ -40,13 +38,12 @@ if __name__ == "__main__":
 
     # Section control dictionary
     run_sections = {
-        "run_main_benchmark": True,
+        "run_main_benchmark": False,
         "run_static_analysis": True,
-        "run_tuning_benchmark": True,
     }
 
     run_start_str, logger = setup_environment(cache_path=CACHE_PATH)
-    DEFAULT_MAX_N_INSTANCES = 10
+    DEFAULT_MAX_N_INSTANCES = 3
     TUNING_PATH_MAX_N_INSTANCES = 3
 
     # Main Benchmark Section
@@ -158,7 +155,12 @@ if __name__ == "__main__":
                 benchmarks=["lcbench"],
                 tuning_configurations=STATIC_TUNING_CONFIGURATIONS,
                 n_warm_starts=data_size,
-                n_trials=2,
+                # NOTE: Important that this remains set to 2. 0 trials would
+                # result in no conformal runs, 1 trial would result in
+                # a single conformal run with no tuning, 2 trials ensures that
+                # we get exactly one tuned run following a first untuned one,
+                # which we can then extract by filtering for the last iteration.
+                n_trials=data_size + 2,
                 timeout=TIMEOUT,
                 logger=logger,
                 max_n_instances_per_benchmark=DEFAULT_MAX_N_INSTANCES,
@@ -182,6 +184,8 @@ if __name__ == "__main__":
                 "benchmark_identifier",
                 "repetition",
             ]
+            # NOTE: As mentioned earlier, we only want the last iteration for each group,
+            # so we sort by runtime and then take the last row for each group:
             result_df = (
                 result_df.sort_values(group_cols + ["runtime"])
                 .groupby(group_cols, as_index=False)
@@ -205,7 +209,6 @@ if __name__ == "__main__":
             run_start_str=run_start_str,
             analysis_type="05_static_analysis",
             alpha=0.05,
-            plots_folder="plots",
         )
         logger.info("Tuning Effect Analysis finished.")
 
@@ -216,49 +219,7 @@ if __name__ == "__main__":
             run_start_str=run_start_str,
             analysis_type="05_static_analysis",
             alpha=0.05,
-            plots_folder="plots",
         )
         logger.info("Estimator Comparison Analysis finished.")
-
-    # Tuning Benchmark Section
-    if run_sections["run_tuning_benchmark"]:
-        logger.info("Starting Dataset-Level Benchmark with Runtime Analysis...")
-
-        benchmark_name = "lcbench"
-        max_n_instances = TUNING_PATH_MAX_N_INSTANCES
-
-        dataset_experiment_configs = load_benchmark_configs(
-            benchmarks=["lcbench"],
-            tuning_configurations=TUNING_PATH_CONFIGURATIONS,
-            n_warm_starts=N_WARM_STARTS,
-            n_trials=N_TRIALS,
-            timeout=TIMEOUT,
-            logger=logger,
-            max_n_instances_per_benchmark=max_n_instances,
-        )
-        logger.info(
-            f"Created {len(dataset_experiment_configs)} dataset experiment configs for {benchmark_name}"
-        )
-
-        dataset_benchmark_run_start_str = f"{run_start_str}_dataset_level"
-        dataset_benchmark_data = run_main_benchmark(
-            experiment_configs=dataset_experiment_configs,
-            n_repetitions=N_REPETITIONS_PER_TUNER_CONFIG,
-            base_random_state=BASE_RANDOM_STATE,
-            cache_path=CACHE_PATH,
-            run_start_str=dataset_benchmark_run_start_str,
-            logger=logger,
-        )
-
-        analyze_dataset_level_benchmark(
-            dataset_benchmark_data=dataset_benchmark_data,
-            benchmark_name=benchmark_name,
-            cache_path=CACHE_PATH,
-            run_start_str=dataset_benchmark_run_start_str,
-            analysis_type="06_dataset_level",
-            logger=logger,
-        )
-
-        logger.info("Dataset-Level Benchmark with Runtime Analysis finished.")
 
     logger.info(f"HPO Benchmark run {run_start_str} completed.")

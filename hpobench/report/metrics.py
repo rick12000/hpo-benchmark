@@ -1,0 +1,296 @@
+import pandas as pd
+import numpy as np
+import logging
+from typing import List, Optional
+from scikit_posthocs import posthoc_nemenyi_friedman
+
+from hpobench.utils import save_analysis_results
+from hpobench.utils import get_group_dict
+from scipy.stats import friedmanchisquare
+
+
+logger = logging.getLogger(__name__)
+
+
+def friedman_test_runner(
+    data: pd.DataFrame,
+    across_col: str,
+    entity_col: str,
+    rank_col: str,
+    breakout_col: Optional[list[str]] = None,
+    alpha: float = 0.05,
+) -> pd.DataFrame:
+    """Performs Friedman tests, optionally grouped by `breakout_col`.
+
+    For each group (or the entire DataFrame if no `breakout_col`), data is
+    pivoted: `index=across_col`, `columns=entity_col`, `values=rank_col`.
+    The `rank_col` in the input `data` for each group should be unique
+    for `across_col` and `entity_col` combinations (e.g., pre-aggregated ranks).
+
+    The pivoted matrix for the Friedman test will have unique `across_col`
+    values as rows and unique `entity_col` values as columns. It requires
+    at least 2 rows and 3 columns.
+
+    The baseline alpha significance level is used without any multiple
+    comparison corrections.
+
+    Generally, this test would check whether there is a significant difference in
+    the ranks of the entities, across the across_col values.
+
+    Args:
+        data: DataFrame with `across_col`, `entity_col`, `rank_col`,
+            and any `breakout_col` columns.
+        across_col: Column for blocks/groups (e.g., 'dataset').
+        entity_col: Column for entities/treatments (e.g., 'tuner').
+        rank_col: Column with ranks (ranks should be calculated to measure
+            differences between entities).
+        breakout_col: Optional list of columns for grouping data.
+            A test is run per group.
+        alpha: Significance level.
+
+    Returns:
+        DataFrame of test results per group, including
+              'statistic', 'p_value', 'significant'.
+    """
+    results = []
+    group_iter = (
+        data.groupby(breakout_col) if breakout_col is not None else [(None, data)]
+    )
+    for within_group, group_df in group_iter:
+        pivot_df = group_df.pivot(index=across_col, columns=entity_col, values=rank_col)
+        if pivot_df.shape[0] < 2 or pivot_df.shape[1] < 3:
+            logger.info(
+                f"Skipping {within_group}: Need at least 3 entities (columns) for Friedman test. Skipped."
+            )
+            continue
+        stat, p = friedmanchisquare(
+            *[pivot_df[col].dropna() for col in pivot_df.columns]
+        )
+        group_dict = get_group_dict(breakout_col, within_group)
+        results.append({**group_dict, "statistic": stat, "p_value": p})
+
+    results_df = pd.DataFrame(results)
+    if not results_df.empty and "p_value" in results_df.columns:
+        results_df["significant"] = results_df["p_value"] < alpha
+    else:
+        results_df["significant"] = []
+
+    return results_df
+
+
+def nemenyi_pairwise_test(
+    data: pd.DataFrame,
+    across_col: str,
+    entity_col: str,
+    rank_col: str,
+    breakout_col: Optional[list[str]] = None,
+    alpha: float = 0.05,
+) -> pd.DataFrame:
+    """Performs Nemenyi pairwise post-hoc tests, optionally grouped by `breakout_col`.
+
+    This test is typically used after a significant Friedman test to determine
+    which specific pairs of entities differ significantly. It compares
+    all possible pairs of entities within each group. The `across_col`
+    serves as the blocking factor, consistent with the Friedman test.
+
+    The input data's `rank_col` should contain values where lower indicates better
+    performance or rank. These can be raw performance metrics or pre-calculated
+    ranks (ranks assigned within each block defined by `across_col`, where a
+    lower rank is better). The `posthoc_nemenyi_friedman` function internally
+    re-ranks the `rank_col` values within each block (defined by `across_col`).
+    If pre-calculated ranks (lower is better) are provided, this re-ranking
+    will preserve their relative order.
+
+    The test requires at least 2 entities and 2 blocks per group for meaningful
+    comparisons.
+
+    Args:
+        data: DataFrame with `across_col`, `entity_col`, `rank_col`,
+            and any `breakout_col` columns.
+        across_col: Column for blocks/groups (e.g., 'dataset') - same as Friedman test.
+        entity_col: Column for entities/treatments (e.g., 'tuner') being compared.
+        rank_col: Column with performance values or pre-calculated ranks.
+        breakout_col: Optional list of columns for grouping data.
+            A separate test is run for each group.
+        alpha: Significance level for determining statistical significance.
+
+    Returns:
+        DataFrame with pairwise comparison results including:
+        - Group identifiers (if breakout_col provided)
+        - entity1, entity2: The two entities being compared
+        - mean_rank_1, mean_rank_2: Mean ranks for each entity
+        - p_value: Statistical significance of the difference
+        - significant: Boolean indicator if p_value < alpha
+        - better_entity: Entity with lower (better) mean rank
+    """
+    results = []
+    group_iter = (
+        data.groupby(breakout_col) if breakout_col is not None else [(None, data)]
+    )
+
+    for within_group, group_df in group_iter:
+        if group_df[entity_col].nunique() < 2:
+            logger.info(
+                f"Skipping {within_group}: Need at least 2 entities for Nemenyi test"
+            )
+            continue
+
+        if group_df[across_col].nunique() < 2:
+            logger.info(
+                f"Skipping {within_group}: Need at least 2 blocks/datasets for Nemenyi test"
+            )
+            continue
+
+        # Create a unique block identifier to handle duplicated entries in block_col
+        # The block_id should map each unique block (across_col value) to a unique integer
+        group_df = group_df.copy()
+        unique_blocks = group_df[across_col].unique()
+        block_to_id = {block: i for i, block in enumerate(unique_blocks)}
+        group_df["_block_id"] = group_df[across_col].map(block_to_id)
+
+        p_value_matrix = posthoc_nemenyi_friedman(
+            a=group_df,
+            y_col=rank_col,
+            block_col=across_col,
+            group_col=entity_col,
+            block_id_col="_block_id",
+            melted=True,
+            sort=True,
+        )
+        entities = p_value_matrix.index.tolist()
+        group_dict = get_group_dict(breakout_col, within_group)
+
+        mean_ranks = group_df.groupby(entity_col)[rank_col].mean()
+        for i, e1 in enumerate(entities):
+            for j, e2 in enumerate(entities):
+                if i < j:
+                    p_value = p_value_matrix.loc[e1, e2]
+                    rank1 = mean_ranks.get(e1, np.nan)
+                    rank2 = mean_ranks.get(e2, np.nan)
+                    results.append(
+                        {
+                            **group_dict,
+                            "entity1": e1,
+                            "entity2": e2,
+                            "mean_rank_1": rank1,
+                            "mean_rank_2": rank2,
+                            "p_value": p_value,
+                            "significant": p_value < alpha,
+                            "better_entity": e1 if rank1 < rank2 else e2,
+                        }
+                    )
+
+    return pd.DataFrame(results)
+
+
+def _calculate_win_percentage(
+    data: pd.DataFrame,
+    breakout_cols: List[str],
+    dataset_col: str,
+    entity_col: str,
+    rank_col: str,
+) -> pd.DataFrame:
+    df = data.copy()
+    grouping_cols = breakout_cols + [dataset_col]
+
+    df["min_rank"] = df.groupby(grouping_cols)[rank_col].transform("min")
+
+    df["is_winner"] = (df[rank_col] == df["min_rank"]).astype(int)
+
+    win_counts = (
+        df.groupby(breakout_cols + [entity_col], observed=True)["is_winner"]
+        .sum()
+        .reset_index(name="win_count")
+    )
+
+    total_datasets = (
+        df.groupby(breakout_cols, observed=True)[dataset_col]
+        .nunique()
+        .reset_index(name="total_datasets")
+    )
+
+    all_combos = df[breakout_cols + [entity_col]].drop_duplicates()
+
+    win_analysis = pd.merge(
+        all_combos, win_counts, on=breakout_cols + [entity_col], how="left"
+    )
+
+    win_analysis = pd.merge(win_analysis, total_datasets, on=breakout_cols, how="left")
+
+    win_analysis["win_count"] = win_analysis["win_count"].fillna(0).astype(int)
+
+    win_analysis["win_percentage"] = np.where(
+        win_analysis["total_datasets"] > 0,
+        (win_analysis["win_count"] / win_analysis["total_datasets"]) * 100,
+        0,
+    )
+    win_analysis["win_percentage"] = win_analysis["win_percentage"].fillna(0)
+
+    return win_analysis[
+        breakout_cols + [entity_col, "win_count", "total_datasets", "win_percentage"]
+    ]
+
+
+def _calculate_coverage_snapshots(
+    iteration_data: pd.DataFrame,
+    budget_cross_sections: List[int],
+    identifier_cols: List[str],
+    confidence_level_col: str,
+    iteration_col: str,
+    cache_path: str,
+    run_start_str: str,
+    analysis_type: str,
+    logger: logging.Logger,
+) -> None:
+    """
+    Calculates coverage analysis snapshots at specific budget cross-sections.
+
+    Takes the already aggregated iteration data and extracts cumulative breach rates
+    at specified budget points by mapping relative budget to iteration numbers.
+
+    Args:
+        iteration_data: Absolute iteration results with breach rates (already aggregated)
+        identifier_cols: Columns to identify the data
+        budget_cross_sections: Budget points to analyze (e.g., [50, 100])
+        confidence_level_col: Column name for confidence levels
+        cache_path: Base path for saving results
+        run_start_str: Timestamp string for file naming
+        analysis_type: Analysis type for folder organization
+        logger: Logger for status messages
+    """
+    max_iteration = iteration_data["iteration"].max()
+    min_iteration = iteration_data["iteration"].min()
+    iteration_targets = []
+    for budget in budget_cross_sections:
+        target_iteration = min_iteration + (budget / 100.0) * (
+            max_iteration - min_iteration
+        )
+        target_iteration = round(target_iteration)
+        iteration_targets.append(target_iteration)
+
+    coverage_data = iteration_data[
+        iteration_data["iteration"].isin(iteration_targets)
+    ].copy()
+    iteration_to_budget = dict(zip(iteration_targets, budget_cross_sections))
+    coverage_data["relativized_budget"] = coverage_data["iteration"].map(
+        iteration_to_budget
+    )
+
+    identifier_cols = identifier_cols + [confidence_level_col]
+    output_cols = identifier_cols + [
+        "relativized_budget",
+        iteration_col,
+        "cumulative_breach_rate",
+    ]
+
+    final_cols = [col for col in output_cols if col in coverage_data.columns]
+    final_data = coverage_data[final_cols]
+
+    save_analysis_results(
+        final_data,
+        cache_path,
+        run_start_str,
+        "coverage_analysis_snapshots.csv",
+        analysis_type,
+        "coverage_analysis",
+    )

@@ -18,3 +18,4 @@
 - Don't rely on default values for function arguments.
 - Avoid *args or **kwargs unless absolutely necessary.
 - Use pydantic models for configuration values.
+- Follow DRY and SOLID coding principles.

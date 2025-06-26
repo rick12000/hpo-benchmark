@@ -45,6 +45,14 @@ def q90(x):
     return x.quantile(0.9)
 
 
+def get_group_dict(breakout_col, within_group):
+    if breakout_col is None:
+        return {}
+    if isinstance(within_group, tuple):
+        return dict(zip(breakout_col, within_group))
+    return {breakout_col[0]: within_group}
+
+
 def generate_hyperparameter_combinations(
     params: dict[str, Union[IntRange, FloatRange, CategoricalRange]],
     n_combinations: int,
@@ -153,7 +161,6 @@ def save_analysis_results(
     cache_path: str,
     run_start_str: str,
     filename: str,
-    description: str,
     analysis_type: str = None,
     subfolder: str = None,
 ):
@@ -164,7 +171,6 @@ def save_analysis_results(
         cache_path: Base cache path
         run_start_str: Run identifier
         filename: Name of the file
-        description: Description for logging
         analysis_type: Analysis type (e.g., "01_coverage_analysis")
         subfolder: Optional subfolder (e.g., "statistical_tests")
     """
@@ -182,13 +188,13 @@ def save_analysis_results(
         full_filename = os.path.join(analysis_data_path, filename)
         try:
             df.to_csv(full_filename, index=False)
-            logger.info(f"{description} saved to {full_filename}")
+            logger.info(f"Saved results to {full_filename}")
         except Exception as e:
             logger.error(
-                f"Failed to save {description} to {full_filename}: {e}", exc_info=True
+                f"Failed to save results to {full_filename}: {e}", exc_info=True
             )
     else:
-        logger.warning(f"Skipping save for {description}: DataFrame is empty or None.")
+        logger.warning(f"Skipping save for {filename}: DataFrame is empty or None.")
 
 
 def add_runtime(

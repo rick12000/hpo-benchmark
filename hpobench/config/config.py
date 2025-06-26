@@ -8,7 +8,6 @@ from confopt.selection.sampling import (
     MaxValueEntropySearchSampler,
 )
 from hpobench.config.utils import (
-    create_sampler_config_id,
     build_static_tuning_configurations,
     get_external_tuning_configurations,
     build_sampler_variation_configurations,
@@ -19,8 +18,8 @@ from hpobench.config.types import (
 )
 
 # Environment variables used in the main code:
-N_REPETITIONS_PER_TUNER_CONFIG = 3
-N_TRIALS = 100
+N_REPETITIONS_PER_TUNER_CONFIG = 2
+N_TRIALS = 40
 TIMEOUT = None
 N_WARM_STARTS = 15
 
@@ -125,12 +124,12 @@ ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurati
     architectures=[
         "qrf",
         "qknn",
+        "qgbm",
+        "qens4",
         # "qens1",
         # "qgp",
         # "qens2",
         # "qens3",
-        "qgbm",
-        "qens4",
         # "qens5"
     ],
     samplers=[
@@ -179,30 +178,3 @@ for architecture in ["qgbm", "qgp", "qens4"]:
 
 
 EXTERNAL_TUNING_CONFIGURATIONS = get_external_tuning_configurations()
-
-SAMPLER = LowerBoundSampler(
-    interval_width=DEFAULT_INTERVAL_WIDTH,
-    adapter="DtACI",
-    c=1,
-)
-SEARCHER = QuantileConformalSearcher(
-    quantile_estimator_architecture="qrf",
-    sampler=SAMPLER,
-)
-TUNING_PATH_CONFIGURATIONS = [
-    TunerConfig(
-        tuner="confopt",
-        searcher=SEARCHER,
-        config_identifier=create_sampler_config_id(SEARCHER),
-        searcher_tuning_framework=None,  # No tuning
-    ),
-    # Same configuration but with tuning enabled
-    TunerConfig(
-        tuner="confopt",
-        searcher=SEARCHER,  # Reuse the same searcher
-        config_identifier=create_sampler_config_id(
-            SEARCHER, searcher_tuning_framework="fixed"
-        ),
-        searcher_tuning_framework="fixed",  # Fixed tuning framework
-    ),
-]
