@@ -348,9 +348,12 @@ def _build_win_percentage_table(
         "\\begin{table}[htbp]",
         f"\\caption{{{_get_win_percentage_caption()}}}",
         "\\centering",
+        "\\begin{minipage}{\\textwidth}",
+        "\\centering",
+        "{\\footnotesize",
         "\\begin{tabular}{@{}ll>{\\centering\\arraybackslash}p{2cm}@{}}",
         "\\toprule",
-        f"\\textbf{{{_escape_latex_text(vertical_separator.title())}}} & \\textbf{{{_escape_latex_text(comparison_column.title())}}} & \\textbf{{Win \\%}} \\\\",
+        f"\\textbf{{{_escape_latex_text(vertical_separator.title())}}} & \\textbf{{{_escape_latex_text(comparison_column.title())}}} & \\textbf{{Win \\%}} \\\\"
         "\\midrule",
         "",
     ]
@@ -375,11 +378,11 @@ def _build_win_percentage_table(
                 win_pct = row_data["win_percentage"].iloc[0]
                 if j == 0:
                     lines.append(
-                        f"  & {_escape_latex_text(str(comp_val))} & {win_pct:.2f} \\\\"
+                        f"  & {_escape_latex_text(str(comp_val))} & {win_pct:.1f} \\\\"
                     )
                 else:
                     lines.append(
-                        f"  & {_escape_latex_text(str(comp_val))} & {win_pct:.2f} \\\\"
+                        f"  & {_escape_latex_text(str(comp_val))} & {win_pct:.1f} \\\\"
                     )
 
         # Add midrule between benchmarks (except for the last one)
@@ -393,6 +396,8 @@ def _build_win_percentage_table(
             "",
             "\\bottomrule",
             "\\end{tabular}",
+            "}",
+            "\\end{minipage}",
             "\\label{tab:tuner_win_percentage}",
             "\\end{table}",
         ]

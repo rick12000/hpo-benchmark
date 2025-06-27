@@ -1,34 +1,38 @@
 \begin{table}[htbp]
 \caption{Tuner Win Percentage Across Benchmarks}
 \centering
+\begin{minipage}{\textwidth}
+\centering
+{\footnotesize
 \begin{tabular}{@{}ll>{\centering\arraybackslash}p{2cm}@{}}
 \toprule
-\textbf{Benchmark\_Identifier} & \textbf{Tuner} & \textbf{Win \%} \\
-\midrule
+\textbf{Benchmark\_Identifier} & \textbf{Tuner} & \textbf{Win \%} \\\midrule
 
 \multirow{4}{*}{JAHS-201}
-  & ArchVar-DtACI-QENS4 EIS nq=8 ns=100 & 0.00 \\
-  & ArchVar-DtACI-QRF EIS nq=8 ns=100 & 0.00 \\
-  & GP & 66.67 \\
-  & TPE & 66.67 \\
+  & ArchVar-DtACI-QENS4 EIS nq=8 ns=100 & 0.0 \\
+  & ArchVar-DtACI-QRF EIS nq=8 ns=100 & 0.0 \\
+  & GP & 66.7 \\
+  & TPE & 66.7 \\
 
 \midrule
 
 \multirow{4}{*}{lcbench}
-  & ArchVar-DtACI-QENS4 EIS nq=8 ns=100 & 0.00 \\
-  & ArchVar-DtACI-QRF EIS nq=8 ns=100 & 0.00 \\
-  & GP & 100.00 \\
-  & TPE & 33.33 \\
+  & ArchVar-DtACI-QENS4 EIS nq=8 ns=100 & 0.0 \\
+  & ArchVar-DtACI-QRF EIS nq=8 ns=100 & 0.0 \\
+  & GP & 100.0 \\
+  & TPE & 33.3 \\
 
 \midrule
 
 \multirow{4}{*}{rbv2\_xgboost}
-  & ArchVar-DtACI-QENS4 EIS nq=8 ns=100 & 33.33 \\
-  & ArchVar-DtACI-QRF EIS nq=8 ns=100 & 33.33 \\
-  & GP & 100.00 \\
-  & TPE & 33.33 \\
+  & ArchVar-DtACI-QENS4 EIS nq=8 ns=100 & 33.3 \\
+  & ArchVar-DtACI-QRF EIS nq=8 ns=100 & 33.3 \\
+  & GP & 100.0 \\
+  & TPE & 33.3 \\
 
 \bottomrule
 \end{tabular}
+}
+\end{minipage}
 \label{tab:tuner_win_percentage}
 \end{table}
