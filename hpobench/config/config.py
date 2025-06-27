@@ -8,7 +8,6 @@ from confopt.selection.sampling import (
     MaxValueEntropySearchSampler,
 )
 from hpobench.config.utils import (
-    build_static_tuning_configurations,
     get_external_tuning_configurations,
     build_sampler_variation_configurations,
     build_architecture_variation_configurations,
@@ -27,17 +26,14 @@ N_WARM_STARTS = 15
 DEFAULT_INTERVAL_WIDTH = 0.9
 
 # 1. Create configurations feeding the static tuning charts and tables:
-STATIC_TUNING_CONFIGURATIONS = build_static_tuning_configurations(
-    quantile_architectures=[
-        "qgbm",
-        "qrf",
-        "qknn",
-        "qlgbm",
-        "qgp",
-        "qens4",
-    ],
-    searcher_tuning_frameworks=[None, "fixed"],
-)
+STATIC_ANALYSIS_ESTIMATOR_ARCHITECTURES = [
+    "qgbm",
+    "qrf",
+    # "qknn",
+    # "qlgbm",
+    # "qgp",
+    # "qens4",
+]
 
 # 2. Create configurations feeding the coverage charts:
 COVERAGE_ANALYSIS_CONFIGURATIONS = []
@@ -111,11 +107,11 @@ SAMPLER_VARIATION_CONFIGURATIONS = build_sampler_variation_configurations(
             c=2,
             beta_decay="logarithmic_decay",
         ),
-        ExpectedImprovementSampler(n_quantiles=8, num_ei_samples=100, adapter="DtACI"),
+        # ExpectedImprovementSampler(n_quantiles=8, num_ei_samples=100, adapter="DtACI"),
         # ThompsonSampler(n_quantiles=8, enable_optimistic_sampling=False, adapter="DtACI"),
-        ThompsonSampler(
-            n_quantiles=8, enable_optimistic_sampling=True, adapter="DtACI"
-        ),
+        # ThompsonSampler(
+        #     n_quantiles=8, enable_optimistic_sampling=True, adapter="DtACI"
+        # ),
     ],
     quantile_arch="qgbm",
 )
@@ -124,13 +120,8 @@ ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurati
     architectures=[
         "qrf",
         "qknn",
-        "qgbm",
-        "qens4",
-        # "qens1",
-        # "qgp",
-        # "qens2",
-        # "qens3",
-        # "qens5"
+        # "qgbm",
+        # "qens4",
     ],
     samplers=[
         ExpectedImprovementSampler(n_quantiles=8, num_ei_samples=100, adapter="DtACI"),
@@ -141,23 +132,23 @@ ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurati
 )
 
 
-LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS = (
-    build_architecture_variation_configurations(
-        architectures=[
-            "qrf",
-            "qgp",
-            "qens4",
-        ],
-        samplers=[
-            ExpectedImprovementSampler(
-                n_quantiles=8, num_ei_samples=100, adapter="DtACI"
-            )
-        ],
-    )
+LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurations(
+    architectures=[
+        "qrf",
+        # "qgp",
+        "qens4",
+    ],
+    samplers=[
+        ExpectedImprovementSampler(n_quantiles=8, num_ei_samples=100, adapter="DtACI")
+    ],
 )
 
 PRECONFORMAL_COMPARISON_CONFIGURATIONS = []
-for architecture in ["qgbm", "qgp", "qens4"]:
+for architecture in [
+    "qgbm",
+    # "qgp",
+    # "qens4",
+]:
     # Simulate normal pre-conformal cutoff vs. unreachable one:
     for pre_conformal_trials in [20, 10000]:
         if pre_conformal_trials == 10000:

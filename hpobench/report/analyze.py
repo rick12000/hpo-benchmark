@@ -6,14 +6,12 @@ from hpobench.utils import AnalysisPathManager
 from hpobench.utils import save_analysis_results
 from hpobench.plot import (
     run_plots,
-    plot_estimator_rank_vs_datasize,
-    plot_tuning_rank_comparison,
     _plot_and_save,
 )
 from hpobench.process import (
     process_performance_records,
-    calculate_ranks,
 )
+from hpobench.process import rank_and_collapse_data
 
 # Import missing functions from metrics.py
 from hpobench.report.metrics import (
@@ -183,6 +181,7 @@ def analyze_main_benchmark(
             logger=logger,
             x_col=iter_unit,
             y_cols=["cumulative_breach_rate", "rolling_breach_rate"],
+            entity_col=tuner_col,
             col_measure=confidence_level_col,
             row_measure=data_col,
         )
@@ -217,6 +216,7 @@ def analyze_main_benchmark(
             logger=logger,
             x_col=iter_unit,
             y_cols=["best_performance", "rank"],
+            entity_col=tuner_col,
             col_measure=data_col,
             row_measure=bench_col,
         )
@@ -252,6 +252,7 @@ def analyze_main_benchmark(
             logger=logger,
             x_col=norm_runtime_unit,
             y_cols=["rank"],
+            entity_col=tuner_col,
             col_measure=bench_col,
             row_measure=None,
         )
@@ -285,6 +286,7 @@ def analyze_main_benchmark(
             logger=logger,
             x_col=iter_unit,
             y_cols=["rank"],
+            entity_col=tuner_col,
             col_measure=bench_col,
             row_measure=None,
         )
@@ -306,6 +308,7 @@ def analyze_main_benchmark(
             logger=logger,
             x_col=norm_runtime_unit,
             y_cols=["rank"],
+            entity_col=tuner_col,
             col_measure=sampler_col,
             row_measure=bench_col,
         )
@@ -323,6 +326,7 @@ def analyze_main_benchmark(
             logger=logger,
             x_col=norm_runtime_unit,
             y_cols=["rank"],
+            entity_col=tuner_col,
             col_measure=estimator_architecture_col,
             row_measure=bench_col,
         )
@@ -391,174 +395,10 @@ def analyze_main_benchmark(
             logger=logger,
             x_col=norm_runtime_unit,
             y_cols=["rank"],
+            entity_col=tuner_col,
             col_measure=estimator_architecture_col,
             row_measure=bench_col,
         )
-
-
-def _prepare_tuning_effect_data(
-    single_iteration_raw_benchmark_data: pd.DataFrame, estimator_error_col: str
-) -> pd.DataFrame:
-    df = single_iteration_raw_benchmark_data.copy()
-    # If a tuner has a nan estimator error, remove it from comparison:
-    # incomplete_tuners = df[df[estimator_error_col].isna()]["tuner"].unique()
-    # df = df[~df["tuner"].isin(incomplete_tuners)]
-    df["searcher_tuning_framework"] = df["searcher_tuning_framework"].fillna("None")
-
-    rank_grouping_cols = [
-        "benchmark_identifier",
-        "dataset",
-        "data_size",
-        "repetition",
-        "estimator_architecture",
-    ]
-    ranked_df = calculate_ranks(
-        data=df,
-        aggregators=rank_grouping_cols,
-        rank_ascending=True,
-        metric_column=estimator_error_col,
-    )
-
-    avg_rank_cols = [
-        "benchmark_identifier",
-        "dataset",
-        "data_size",
-        "estimator_architecture",
-        "searcher_tuning_framework",
-    ]
-    dataset_avg_ranks = (
-        ranked_df.groupby(avg_rank_cols, observed=True)["rank"].mean().reset_index()
-    )
-
-    return dataset_avg_ranks
-
-
-def _prepare_estimator_comparison_data(
-    results_df: pd.DataFrame, metric_col: str
-) -> pd.DataFrame:
-    df = results_df.copy()
-    df["searcher_tuning_framework"] = df["searcher_tuning_framework"].fillna("None")
-
-    rank_grouping_cols = [
-        "benchmark_identifier",
-        "dataset",
-        "data_size",
-        "repetition",
-        "searcher_tuning_framework",
-    ]
-    ranked_df = calculate_ranks(
-        data=df,
-        aggregators=rank_grouping_cols,
-        rank_ascending=True,
-        metric_column=metric_col,
-    )
-
-    avg_rank_cols = [
-        "benchmark_identifier",
-        "dataset",
-        "data_size",
-        "searcher_tuning_framework",
-        "estimator_architecture",
-    ]
-    dataset_avg_ranks = (
-        ranked_df.groupby(avg_rank_cols, observed=True)["rank"].mean().reset_index()
-    )
-
-    return dataset_avg_ranks
-
-
-def analyze_estimator_comparison(
-    results_df: pd.DataFrame,
-    cache_path: str,
-    run_start_str: str,
-    analysis_type: str,
-    alpha: float = 0.05,
-):
-    metric_col = "estimator_error"
-
-    prepared_df = _prepare_estimator_comparison_data(results_df, metric_col)
-
-    save_analysis_results(
-        prepared_df,
-        cache_path,
-        run_start_str,
-        "dataset_avg_ranks.csv",
-        analysis_type,
-        "estimator_comparison",
-    )
-
-    plot_agg_cols = [
-        "benchmark_identifier",
-        "data_size",
-        "searcher_tuning_framework",
-        "estimator_architecture",
-    ]
-    plot_data = (
-        prepared_df.groupby(plot_agg_cols, observed=True)["rank"].mean().reset_index()
-    )
-
-    path_manager = AnalysisPathManager(cache_path, run_start_str)
-    estimator_plots_path = path_manager.get_analysis_path(
-        analysis_type, "plots", "estimator_analysis"
-    )
-
-    plot_estimator_rank_vs_datasize(
-        data=plot_data,
-        plot_base_path=estimator_plots_path,
-        x_col="data_size",
-        y_col="rank",
-        group_col="estimator_architecture",
-        tuning_col="searcher_tuning_framework",
-        benchmark_col="benchmark_identifier",
-    )
-    logger.info(f"Estimator rank vs data size plots saved in {estimator_plots_path}")
-
-    breakout_cols = ["benchmark_identifier", "data_size", "searcher_tuning_framework"]
-    _run_and_save_friedman(
-        data=prepared_df,
-        breakout_col=breakout_cols,
-        across_col="dataset",
-        entity_col="estimator_architecture",
-        rank_col="rank",
-        alpha=alpha,
-        cache_path=cache_path,
-        run_start_str=run_start_str,
-        filename="friedman_test.csv",
-        analysis_type=analysis_type,
-        logger=logger,
-        subfolder="estimator_comparison",
-    )
-
-    _run_and_save_nemenyi(
-        data=prepared_df,
-        breakout_col=breakout_cols,
-        across_col="dataset",
-        entity_col="estimator_architecture",
-        rank_col="rank",
-        alpha=alpha,
-        cache_path=cache_path,
-        run_start_str=run_start_str,
-        filename="nemenyi_pairwise.csv",
-        analysis_type=analysis_type,
-        logger=logger,
-        subfolder="estimator_comparison",
-    )
-
-    win_percentage_results = _calculate_win_percentage(
-        data=prepared_df,
-        breakout_cols=breakout_cols,
-        dataset_col="dataset",
-        entity_col="estimator_architecture",
-        rank_col="rank",
-    )
-    save_analysis_results(
-        win_percentage_results,
-        cache_path,
-        run_start_str,
-        "win_percentage.csv",
-        analysis_type,
-        "estimator_comparison",
-    )
 
 
 def analyze_tuning_effect(
@@ -568,23 +408,28 @@ def analyze_tuning_effect(
     analysis_type: str,
     alpha: float = 0.05,
 ):
-    metric_col = "estimator_error"
-
-    # Save raw estimator error results
-    save_analysis_results(
-        results_df,
-        cache_path,
-        run_start_str,
-        "raw_estimator_error_results.csv",
-        analysis_type,
-    )
-
-    filtered_df = _prepare_tuning_effect_data(results_df, metric_col)
-
-    filtered_df["estimator_and_tuning_framework"] = (
-        filtered_df["searcher_tuning_framework"].astype(str)
-        + "|"
-        + filtered_df["estimator_architecture"].astype(str)
+    grouping_columns = [
+        "benchmark_identifier",
+        "dataset",
+        "data_size",
+        "repetition",
+        "estimator_architecture",
+        "alpha",
+        "tuning_iterations",
+    ]
+    estimator_architecture_col = "estimator_architecture"
+    repetition_column = "repetition"
+    tuning_iterations_column = "tuning_iterations"
+    estimator_error_column = "mean_pinball_loss"
+    bench_col = "benchmark_identifier"
+    data_col = "dataset"
+    data_size_col = "data_size"
+    filtered_df = rank_and_collapse_data(
+        data=results_df,
+        grouping_cols=grouping_columns,
+        comparison_col=tuning_iterations_column,
+        value_col=estimator_error_column,
+        repetition_col=repetition_column,
     )
 
     save_analysis_results(
@@ -595,44 +440,53 @@ def analyze_tuning_effect(
         analysis_type,
     )
 
-    plot_agg_cols_tuning = [
-        "benchmark_identifier",
-        "data_size",
-        "estimator_architecture",
-        "searcher_tuning_framework",
+    # Create a tuner column by concatenating tuning_iterations
+    # and estimator_architecture (ensure this is unique if changing
+    # columns in the dataframe or nature of experiment)
+    filtered_df["tuner"] = (
+        filtered_df["tuning_iterations"].astype(str)
+        + "|"
+        + filtered_df["estimator_architecture"].astype(str)
+    )
+    tuner_col = "tuner"
+
+    # Average rank across datasets:
+    aggregation_columns = [
+        col
+        for col in grouping_columns
+        if col not in [data_col, repetition_column, estimator_error_column]
     ]
-    plot_data_tuning = (
-        filtered_df.groupby(plot_agg_cols_tuning, observed=True)["rank"]
+    aggregated_df = (
+        filtered_df.groupby(aggregation_columns, observed=True)["rank"]
         .mean()
         .reset_index()
     )
 
-    breakout_cols = ["benchmark_identifier", "data_size"]
     _run_and_save_friedman(
         data=filtered_df,
-        breakout_col=breakout_cols,
-        across_col="dataset",
-        entity_col="estimator_and_tuning_framework",
+        breakout_col=[bench_col, estimator_architecture_col, data_size_col],
+        across_col=data_col,
+        entity_col=tuner_col,
         rank_col="rank",
         alpha=alpha,
         cache_path=cache_path,
         run_start_str=run_start_str,
-        filename="friedman_test.csv",
+        filename="friedman_test_tuning_effect.csv",
         analysis_type=analysis_type,
         logger=logger,
         subfolder="tuning_effect",
     )
 
-    nemenyi_df = _run_and_save_nemenyi(
+    _run_and_save_nemenyi(
         data=filtered_df,
-        breakout_col=breakout_cols,
-        across_col="dataset",
-        entity_col="estimator_and_tuning_framework",
+        breakout_col=[bench_col, estimator_architecture_col, data_size_col],
+        across_col=data_col,
+        entity_col=tuner_col,
         rank_col="rank",
         alpha=alpha,
         cache_path=cache_path,
         run_start_str=run_start_str,
-        filename="nemenyi_pairwise.csv",
+        filename="nemenyi_pairwise_test_tuning_effect.csv",
         analysis_type=analysis_type,
         logger=logger,
         subfolder="tuning_effect",
@@ -644,15 +498,128 @@ def analyze_tuning_effect(
         analysis_type, "plots", "tuning_effect"
     )
 
-    plot_tuning_rank_comparison(
-        data=plot_data_tuning,
-        nemenyi_results=nemenyi_df,
-        plot_base_path=tuning_plots_path,
-        data_size_col="data_size",
-        rank_col="rank",
-        estimator_col="estimator_architecture",
-        tuning_col="searcher_tuning_framework",
-        benchmark_col="benchmark_identifier",
-        alpha=alpha,
+    _plot_and_save(
+        plot_func=run_plots,
+        data=aggregated_df,
+        cache_path=cache_path,
+        run_start_str=run_start_str,
+        filename_prefix="tuning_effect_vs_data_size",
+        analysis_type=analysis_type,
+        subfolder="tuning_effect",
+        logger=logger,
+        x_col=tuning_iterations_column,
+        y_cols=["rank"],
+        entity_col=estimator_architecture_col,
+        col_measure=data_size_col,
+        row_measure=bench_col,
     )
+
     logger.info(f"Tuning rank comparison plots saved in {tuning_plots_path}")
+
+
+def analyze_estimator_comparison(
+    results_df: pd.DataFrame,
+    cache_path: str,
+    run_start_str: str,
+    analysis_type: str,
+    alpha: float = 0.05,
+):
+    grouping_columns = [
+        "benchmark_identifier",
+        "dataset",
+        "data_size",
+        "repetition",
+        "estimator_architecture",
+        "alpha",
+        "tuning_iterations",
+    ]
+    estimator_architecture_col = "estimator_architecture"
+    repetition_column = "repetition"
+    tuning_iterations_column = "tuning_iterations"
+    estimator_error_column = "mean_pinball_loss"
+    bench_col = "benchmark_identifier"
+    data_col = "dataset"
+    data_size_col = "data_size"
+
+    non_tuned_results_df = results_df[results_df["tuning_iterations"] == 0]
+    filtered_df = rank_and_collapse_data(
+        data=non_tuned_results_df,
+        grouping_cols=grouping_columns,
+        comparison_col=estimator_architecture_col,
+        value_col=estimator_error_column,
+        repetition_col=repetition_column,
+    )
+
+    save_analysis_results(
+        filtered_df,
+        cache_path,
+        run_start_str,
+        "non_tuned_filtered_ranks.csv",
+        analysis_type,
+    )
+
+    # Average rank across datasets:
+    aggregation_columns = [
+        col
+        for col in grouping_columns
+        if col not in [data_col, repetition_column, estimator_error_column]
+    ]
+    aggregated_df = (
+        filtered_df.groupby(aggregation_columns, observed=True)["rank"]
+        .mean()
+        .reset_index()
+    )
+
+    _run_and_save_friedman(
+        data=filtered_df,
+        breakout_col=[bench_col, data_size_col],
+        across_col=data_col,
+        entity_col=estimator_architecture_col,
+        rank_col="rank",
+        alpha=alpha,
+        cache_path=cache_path,
+        run_start_str=run_start_str,
+        filename="friedman_test_estimator_comparison.csv",
+        analysis_type=analysis_type,
+        logger=logger,
+        subfolder="estimator_comparison",
+    )
+
+    _run_and_save_nemenyi(
+        data=filtered_df,
+        breakout_col=[bench_col, data_size_col],
+        across_col=data_col,
+        entity_col=estimator_architecture_col,
+        rank_col="rank",
+        alpha=alpha,
+        cache_path=cache_path,
+        run_start_str=run_start_str,
+        filename="nemenyi_pairwise_test_estimator_comparison.csv",
+        analysis_type=analysis_type,
+        logger=logger,
+        subfolder="estimator_comparison",
+    )
+
+    # Use specialized plot function for tuning effect
+    path_manager = AnalysisPathManager(cache_path, run_start_str)
+    tuning_plots_path = path_manager.get_analysis_path(
+        analysis_type, "plots", "estimator_comparison"
+    )
+
+    _plot_and_save(
+        plot_func=run_plots,
+        data=aggregated_df,
+        cache_path=cache_path,
+        run_start_str=run_start_str,
+        filename_prefix="estimator_comparison_vs_data_size",
+        analysis_type=analysis_type,
+        subfolder="estimator_comparison",
+        logger=logger,
+        x_col=data_size_col,
+        y_cols=["rank"],
+        entity_col=estimator_architecture_col,
+        col_measure=tuning_iterations_column,
+        row_measure=bench_col,
+    )
+
+    logger.info(f"Estimator rank comparison plots saved in {tuning_plots_path}")

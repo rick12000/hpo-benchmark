@@ -1,6 +1,6 @@
 import pandas as pd
 import warnings
-
+from hpobench.prepare import setup_yahpo_instance_configs
 from hpobench.config.config import (
     COVERAGE_ANALYSIS_CONFIGURATIONS,
     ARCHITECTURE_VARIATION_CONFIGURATIONS,
@@ -12,17 +12,21 @@ from hpobench.config.config import (
     N_TRIALS,
     N_WARM_STARTS,
     TIMEOUT,
-    STATIC_TUNING_CONFIGURATIONS,
+    STATIC_ANALYSIS_ESTIMATOR_ARCHITECTURES,
 )
+from sklearn.metrics import mean_pinball_loss
+import numpy as np
 from hpobench.report.analyze import (
     analyze_tuning_effect,
     analyze_estimator_comparison,
 )
 from hpobench.report.orchestrate import (
-    load_benchmark_configs,
-    run_main_benchmark,
     run_and_analyze_main_benchmark,
 )
+from confopt.selection.conformalization import QuantileConformalEstimator
+from confopt.utils.encoding import ConfigurationEncoder
+from confopt.utils.preprocessing import train_val_split
+from hpobench.utils import generate_hyperparameter_combinations
 from hpobench.utils import setup_environment
 
 warnings.filterwarnings(
@@ -38,7 +42,7 @@ if __name__ == "__main__":
 
     # Section control dictionary
     run_sections = {
-        "run_main_benchmark": False,
+        "run_main_benchmark": True,
         "run_static_analysis": True,
     }
 
@@ -151,57 +155,151 @@ if __name__ == "__main__":
         data_sizes_to_run = [50, 200]
         estimator_error_results_list = []
         for data_size in data_sizes_to_run:
-            static_experiment_configs = load_benchmark_configs(
-                benchmarks=["lcbench"],
-                tuning_configurations=STATIC_TUNING_CONFIGURATIONS,
-                n_warm_starts=data_size,
-                # NOTE: Important that this remains set to 2. 0 trials would
-                # result in no conformal runs, 1 trial would result in
-                # a single conformal run with no tuning, 2 trials ensures that
-                # we get exactly one tuned run following a first untuned one,
-                # which we can then extract by filtering for the last iteration.
-                n_trials=data_size + 2,
-                timeout=TIMEOUT,
-                logger=logger,
-                max_n_instances_per_benchmark=DEFAULT_MAX_N_INSTANCES,
+            # Below we use setup function as shortcut, but we are only interested in
+            # the yahpo generator and param space generation, the other inputs are
+            # just placeholders:
+            experiment_configs = setup_yahpo_instance_configs(
+                benchmark="lcbench",
+                tuning_configurations=[],  # placeholder
+                n_warm_starts=data_size,  # placeholder
+                n_trials=0,  # placeholder
+                timeout=100000,  # placeholder
+                max_n_instances=DEFAULT_MAX_N_INSTANCES,  # placeholder
             )
-            result_df = run_main_benchmark(
-                experiment_configs=static_experiment_configs,
-                n_repetitions=N_REPETITIONS_PER_TUNER_CONFIG,
-                base_random_state=BASE_RANDOM_STATE,
-                cache_path=CACHE_PATH,
-                run_start_str=run_start_str,
-                logger=logger,
-            )
-            # Replace NaN/None in tuning_framework with string "None"
-            result_df["searcher_tuning_framework"] = result_df[
-                "searcher_tuning_framework"
-            ].mask(result_df["searcher_tuning_framework"].isna(), "None")
-            group_cols = [
-                "estimator_architecture",
-                "searcher_tuning_framework",
-                "dataset",
-                "benchmark_identifier",
-                "repetition",
-            ]
-            # NOTE: As mentioned earlier, we only want the last iteration for each group,
-            # so we sort by runtime and then take the last row for each group:
-            result_df = (
-                result_df.sort_values(group_cols + ["runtime"])
-                .groupby(group_cols, as_index=False)
-                .tail(1)
-            )
-            result_df["data_size"] = data_size
-            estimator_error_results_list.append(result_df)
-        estimator_error_results = pd.concat(
-            estimator_error_results_list, ignore_index=True
-        )
-        # Convert "None" string in tuning_framework back to pd.NA
-        estimator_error_results["searcher_tuning_framework"] = estimator_error_results[
-            "searcher_tuning_framework"
-        ].replace("None", pd.NA)
+            for experiment_config in experiment_configs:
+                logger.info(f"Dataset: {experiment_config.dataset_identifier}")
+
+                # Extract some parameter space realizations to train the searcher on:
+                warm_start_configs_per_repetition = []
+                holdout_configs_per_repetition = []
+                for repetition in range(N_REPETITIONS_PER_TUNER_CONFIG):
+                    # TODO: Make both below a function to reduce code duplication
+                    consistent_warm_starts = generate_hyperparameter_combinations(
+                        params=experiment_config.search_space,
+                        n_combinations=data_size,
+                        random_state=repetition,
+                    )
+                    warm_start_configs = []
+                    for combination in consistent_warm_starts:
+                        performance = experiment_config.objective_function.predict(
+                            combination
+                        )
+                        warm_start_configs.append((combination, performance))
+                    warm_start_configs_per_repetition.append(warm_start_configs)
+
+                    consistent_warm_starts = generate_hyperparameter_combinations(
+                        params=experiment_config.search_space,
+                        n_combinations=data_size,
+                        random_state=N_REPETITIONS_PER_TUNER_CONFIG
+                        + repetition,  # chosen so it can't overlap with previous warm starts
+                    )
+                    warm_start_configs = []
+                    for combination in consistent_warm_starts:
+                        performance = experiment_config.objective_function.predict(
+                            combination
+                        )
+                        warm_start_configs.append((combination, performance))
+                    holdout_configs_per_repetition.append(warm_start_configs)
+
+                # Train the searcher on the warm start configurations and
+                # evaluate on the holdout configurations:
+                for estimator_architecture in STATIC_ANALYSIS_ESTIMATOR_ARCHITECTURES:
+                    logger.info(f"Loop Level | Tuner: {estimator_architecture}")
+                    for tuning_iterations in [0, 10]:
+                        for repetition in range(N_REPETITIONS_PER_TUNER_CONFIG):
+                            logger.info(f"Loop Level | Repetition: {repetition}")
+
+                            warm_start_configs = warm_start_configs_per_repetition[
+                                repetition
+                            ]
+                            experiment_configurations = [
+                                cfg for cfg, _ in warm_start_configs
+                            ]
+                            experiment_performances = [
+                                perf for _, perf in warm_start_configs
+                            ]
+
+                            holdout_configs = holdout_configs_per_repetition[repetition]
+                            holdout_configurations = [cfg for cfg, _ in holdout_configs]
+                            holdout_performances = [perf for _, perf in holdout_configs]
+
+                            # Encode the warm start and holdout configurations:
+                            encoder = ConfigurationEncoder()
+                            encoder.fit(experiment_configurations)
+                            tabularized_experiment_configurations = np.array(
+                                encoder.transform(experiment_configurations)
+                            )
+                            holdout_experiment_configurations = np.array(
+                                encoder.transform(holdout_configurations)
+                            )
+
+                            # Split the warm starts for conformal training and calibration:
+                            calibration_split = 0.2
+                            X_train, y_train, X_val, y_val = train_val_split(
+                                X=tabularized_experiment_configurations,
+                                y=np.array(experiment_performances),
+                                train_split=(1 - calibration_split),
+                                normalize=True,
+                                ordinal=False,
+                            )
+
+                            # Train conformal searcher:
+                            alpha = 0.1
+                            n_pre_conformal_trials = 20
+                            searcher = QuantileConformalEstimator(
+                                quantile_estimator_architecture=estimator_architecture,
+                                alphas=[alpha],
+                                n_pre_conformal_trials=n_pre_conformal_trials,
+                            )
+
+                            # Fit with tuning_iterations=0
+                            searcher.fit(
+                                X_train=X_train,
+                                y_train=y_train,
+                                X_val=X_val,
+                                y_val=y_val,
+                                tuning_iterations=tuning_iterations,
+                                min_obs_for_tuning=n_pre_conformal_trials,
+                                random_state=repetition,
+                            )
+
+                            # Evaluate on holdout configurations:
+                            holdout_predicted_intervals = searcher.predict_intervals(
+                                X=holdout_experiment_configurations,
+                            )[
+                                0
+                            ]  # [0] because we only have one alpha
+
+                            scores = []
+                            lower_quantile = alpha / 2
+                            upper_quantile = 1 - lower_quantile
+                            lo_y_pred = holdout_predicted_intervals.lower_bounds
+                            hi_y_pred = holdout_predicted_intervals.upper_bounds
+
+                            lo_score = mean_pinball_loss(
+                                holdout_performances, lo_y_pred, alpha=lower_quantile
+                            )
+                            hi_score = mean_pinball_loss(
+                                holdout_performances, hi_y_pred, alpha=upper_quantile
+                            )
+                            mean_loss = (lo_score + hi_score) / 2
+
+                            # Create dictionary with results:
+                            results = {
+                                "estimator_architecture": estimator_architecture,
+                                "dataset": experiment_config.dataset_identifier,
+                                "benchmark_identifier": "lcbench",
+                                "repetition": repetition,
+                                "tuning_iterations": tuning_iterations,
+                                "data_size": data_size,
+                                "alpha": alpha,
+                                "mean_pinball_loss": mean_loss,
+                            }
+                            estimator_error_results_list.append(results)
 
         logger.info("Estimator Error Analysis finished.")
+
+        estimator_error_results = pd.DataFrame(estimator_error_results_list)
 
         analyze_tuning_effect(
             results_df=estimator_error_results,

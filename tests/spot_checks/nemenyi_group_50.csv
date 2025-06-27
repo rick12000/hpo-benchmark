@@ -1,0 +1,16 @@
+benchmark_identifier,data_size,entity1,entity2,mean_rank_1,mean_rank_2,p_value,significant,better_entity
+lcbench,50,qens4,qgbm,3.55,3.05,0.928650682,False,qgbm
+lcbench,50,qens4,qgp,3.55,3.733333333,0.561027537,False,qens4
+lcbench,50,qens4,qknn,3.55,4.15,0.139429853,False,qens4
+lcbench,50,qens4,qlgbm,3.55,2.633333333,0.189165648,False,qlgbm
+lcbench,50,qens4,qrf,3.55,3.883333333,0.561027537,False,qens4
+lcbench,50,qgbm,qgp,3.05,3.733333333,0.091888621,False,qgbm
+lcbench,50,qgbm,qknn,3.05,4.15,0.008348979,True,qgbm
+lcbench,50,qgbm,qlgbm,3.05,2.633333333,0.759396711,False,qlgbm
+lcbench,50,qgbm,qrf,3.05,3.883333333,0.091888621,False,qgbm
+lcbench,50,qgp,qknn,3.733333333,4.15,0.968702055,False,qgp
+lcbench,50,qgp,qlgbm,3.733333333,2.633333333,0.001023228,True,qlgbm
+lcbench,50,qgp,qrf,3.733333333,3.883333333,1.0,False,qgp
+lcbench,50,qknn,qlgbm,4.15,2.633333333,2.83e-05,True,qlgbm
+lcbench,50,qknn,qrf,4.15,3.883333333,0.968702055,False,qrf
+lcbench,50,qlgbm,qrf,2.633333333,3.883333333,0.001023228,True,qlgbm

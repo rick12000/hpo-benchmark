@@ -3,6 +3,7 @@ import numpy as np
 import logging
 from copy import deepcopy
 from typing import Dict, List, Optional, Any
+
 from hpobench.utils import (
     q10,
     q90,
@@ -647,3 +648,28 @@ def process_performance_records(
             budget_unit=budget_unit,
         )
     return collapsed_performance_data
+
+
+def rank_and_collapse_data(
+    data: pd.DataFrame,
+    grouping_cols: list[str],
+    comparison_col: str,
+    value_col: str,
+    repetition_col: str,
+) -> pd.DataFrame:
+    df = data.copy()
+    rank_grouping_cols = [col for col in grouping_cols if col not in [comparison_col]]
+    ranked_df = calculate_ranks(
+        data=df,
+        aggregators=rank_grouping_cols,
+        rank_ascending=True,
+        metric_column=value_col,
+    )
+
+    collapsing_cols = [col for col in rank_grouping_cols if col != repetition_col]
+    collapsing_cols = collapsing_cols + [comparison_col]
+    collapsed_df = (
+        ranked_df.groupby(collapsing_cols, observed=True)["rank"].mean().reset_index()
+    )
+
+    return collapsed_df
