@@ -657,19 +657,35 @@ def rank_and_collapse_data(
     value_col: str,
     repetition_col: str,
 ) -> pd.DataFrame:
+    """
+    Ranks data within groups and collapses the results by averaging ranks across repetitions.
+
+    Args:
+        data: Input DataFrame containing the data to be ranked and collapsed.
+        grouping_cols: Total identifiers for grouping, may be inclusive of other cols in below inputs.
+        comparison_col: Column containing the entities to rank over (eg. tuners).
+        value_col: Column containing the values to be ranked.
+        repetition_col: Column containing experiment repetition values.
+
+    Returns:
+        pd.DataFrame: DataFrame with mean ranks collapsed across repetitions for each group and comparison.
+    """
     df = data.copy()
-    rank_grouping_cols = [col for col in grouping_cols if col not in [comparison_col]]
+    # Get the columns to group by during ranking (all grouping columns, except the thing to rank over):
+    ranking_aggregators = [col for col in grouping_cols if col != comparison_col]
     ranked_df = calculate_ranks(
         data=df,
-        aggregators=rank_grouping_cols,
+        aggregators=ranking_aggregators,
         rank_ascending=True,
         metric_column=value_col,
     )
 
-    collapsing_cols = [col for col in rank_grouping_cols if col != repetition_col]
-    collapsing_cols = collapsing_cols + [comparison_col]
+    # Collapse ranks by averaging across repetitions:
+    collapsing_aggregators = [col for col in grouping_cols if col != repetition_col]
     collapsed_df = (
-        ranked_df.groupby(collapsing_cols, observed=True)["rank"].mean().reset_index()
+        ranked_df.groupby(collapsing_aggregators, observed=True)["rank"]
+        .mean()
+        .reset_index()
     )
 
     return collapsed_df

@@ -31,7 +31,6 @@ def analyze_main_benchmark(
     raw_benchmark_data: pd.DataFrame,
     cache_path: str,
     run_start_str: str,
-    logger: logging.Logger,
     analysis_type: str,
     analysis_components: List[
         Literal[

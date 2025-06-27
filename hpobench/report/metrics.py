@@ -240,7 +240,6 @@ def _calculate_coverage_snapshots(
     cache_path: str,
     run_start_str: str,
     analysis_type: str,
-    logger: logging.Logger,
 ) -> None:
     """
     Calculates coverage analysis snapshots at specific budget cross-sections.
@@ -256,7 +255,6 @@ def _calculate_coverage_snapshots(
         cache_path: Base path for saving results
         run_start_str: Timestamp string for file naming
         analysis_type: Analysis type for folder organization
-        logger: Logger for status messages
     """
     max_iteration = iteration_data["iteration"].max()
     min_iteration = iteration_data["iteration"].min()

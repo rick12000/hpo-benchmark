@@ -3,7 +3,7 @@ from hpobench.report.metrics import (
     nemenyi_pairwise_test,
     _calculate_win_percentage,
 )
-
+from hpobench.utils import generate_hyperparameter_combinations
 import pandas as pd
 import logging
 import os
@@ -59,6 +59,29 @@ def _save_text_content(
         )
 
 
+def generate_configs_per_repetition(
+    search_space,
+    n_configs,
+    n_repetitions,
+    base_seed,
+    objective_function,
+    seed_offset=0,
+):
+    configs_per_repetition = []
+    for repetition in range(n_repetitions):
+        configs = []
+        consistent_configs = generate_hyperparameter_combinations(
+            params=search_space,
+            n_combinations=n_configs,
+            random_state=base_seed + seed_offset + repetition,
+        )
+        for combination in consistent_configs:
+            performance = objective_function.predict(combination)
+            configs.append((combination, performance))
+        configs_per_repetition.append(configs)
+    return configs_per_repetition
+
+
 def _run_and_save_friedman(
     data: pd.DataFrame,
     breakout_col: List[str],
@@ -70,9 +93,9 @@ def _run_and_save_friedman(
     run_start_str: str,
     filename: str,
     analysis_type: str,
-    logger: logging.Logger,
     subfolder: str = "statistical_tests",
 ):
+    logging.getLogger(__name__)
     results_df = friedman_test_runner(
         data=data,
         breakout_col=breakout_col,
@@ -102,11 +125,11 @@ def _run_and_save_nemenyi(
     run_start_str: str,
     filename: str,
     analysis_type: str,
-    logger: logging.Logger,
     subfolder: str = "statistical_tests",
     latex_vertical_breakout_col: Optional[str] = None,
     latex_layout_breakout_col: Optional[str] = None,
 ) -> pd.DataFrame:
+    logger = logging.getLogger(__name__)
     results_df = nemenyi_pairwise_test(
         data=data,
         breakout_col=breakout_col,
@@ -124,7 +147,7 @@ def _run_and_save_nemenyi(
         subfolder,
     )
     # Optionally generate LaTeX code for results
-    if latex_vertical_breakout_col:
+    if latex_vertical_breakout_col and latex_layout_breakout_col:
         latex_str = format_nemenyi_results_to_latex(
             results_df, latex_vertical_breakout_col, latex_layout_breakout_col
         )
@@ -290,11 +313,11 @@ def _run_and_save_win_percentage(
     run_start_str: str,
     filename: str,
     analysis_type: str,
-    logger: logging.Logger,
     subfolder: str = "win_percentages",
     latex_vertical_separator: Optional[str] = None,
     latex_comparison_column: Optional[str] = None,
 ) -> pd.DataFrame:
+    logger = logging.getLogger(__name__)
     win_percentage_results = _calculate_win_percentage(
         data=data,
         breakout_cols=breakout_cols,
@@ -327,7 +350,6 @@ def _run_and_save_win_percentage(
             analysis_type,
             "latex_outputs",
         )
-
     return win_percentage_results
 
 
