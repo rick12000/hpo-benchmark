@@ -68,7 +68,7 @@ def create_sampler_config_id(
     if quantile_arch:
         quantile_arch_upper = quantile_arch.upper()
         if adapter_name:
-            config_id += f"{adapter_name}-{quantile_arch_upper} {sampler_acronym}"
+            config_id += f"{quantile_arch_upper}-{adapter_name} {sampler_acronym}"
         else:
             config_id += f"{quantile_arch_upper} {sampler_acronym}"
     else:
@@ -233,7 +233,7 @@ def build_architecture_variation_configurations(
                 sampler=deepcopy(sampler),
                 n_pre_conformal_trials=n_pre_conformal_trials,
             )
-            config_id = create_sampler_config_id(searcher, custom_prefix="ArchVar")
+            config_id = create_sampler_config_id(searcher)
             configs.append(
                 TunerConfig(
                     tuner="confopt",
