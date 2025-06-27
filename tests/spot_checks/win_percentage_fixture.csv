@@ -1,0 +1,13 @@
+benchmark_identifier,tuner,win_count,total_datasets,win_percentage
+JAHS-201,ArchVar-DtACI-QENS4 EIS nq=8 ns=100,0,3,0
+JAHS-201,ArchVar-DtACI-QRF EIS nq=8 ns=100,0,3,0
+JAHS-201,GP,2,3,66.66666667
+JAHS-201,TPE,2,3,66.66666667
+lcbench,ArchVar-DtACI-QENS4 EIS nq=8 ns=100,0,3,0
+lcbench,ArchVar-DtACI-QRF EIS nq=8 ns=100,0,3,0
+lcbench,GP,3,3,100
+lcbench,TPE,1,3,33.33333333
+rbv2_xgboost,ArchVar-DtACI-QENS4 EIS nq=8 ns=100,1,3,33.33333333
+rbv2_xgboost,ArchVar-DtACI-QRF EIS nq=8 ns=100,1,3,33.33333333
+rbv2_xgboost,GP,3,3,100
+rbv2_xgboost,TPE,1,3,33.33333333

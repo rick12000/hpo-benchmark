@@ -15,13 +15,13 @@ from hpobench.process import rank_and_collapse_data
 
 # Import missing functions from metrics.py
 from hpobench.report.metrics import (
-    _calculate_win_percentage,
     _calculate_coverage_snapshots,
 )
 from hpobench.report.utils import (
     _run_and_save_friedman,
     _run_and_save_nemenyi,
     _aggregate_and_save,
+    _run_and_save_win_percentage,
 )
 
 logger = logging.getLogger(__name__)
@@ -149,20 +149,19 @@ def analyze_main_benchmark(
 
         # 2. Win rates:
         if "win_percentage" in analysis_components:
-            win_percentage_results = _calculate_win_percentage(
+            _run_and_save_win_percentage(
                 data=budget_data,
                 breakout_cols=[bench_col],
                 dataset_col="dataset",
                 entity_col="tuner",
                 rank_col="rank",
-            )
-            save_analysis_results(
-                win_percentage_results,
-                cache_path,
-                run_start_str,
-                "tuner_win_percentage.csv",
-                analysis_type,
-                "win_percentages",
+                cache_path=cache_path,
+                run_start_str=run_start_str,
+                filename="tuner_win_percentage.csv",
+                analysis_type=analysis_type,
+                logger=logger,
+                latex_vertical_separator=bench_col,
+                latex_comparison_column=tuner_col,
             )
 
     # Coverage analysis plots:
@@ -490,6 +489,8 @@ def analyze_tuning_effect(
         analysis_type=analysis_type,
         logger=logger,
         subfolder="tuning_effect",
+        latex_vertical_breakout_col=data_size_col,
+        latex_layout_breakout_col=None,
     )
 
     # Use specialized plot function for tuning effect
@@ -598,6 +599,8 @@ def analyze_estimator_comparison(
         analysis_type=analysis_type,
         logger=logger,
         subfolder="estimator_comparison",
+        latex_vertical_breakout_col=data_size_col,
+        latex_layout_breakout_col=None,
     )
 
     # Use specialized plot function for tuning effect

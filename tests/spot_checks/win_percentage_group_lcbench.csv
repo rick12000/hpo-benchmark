@@ -1,0 +1,5 @@
+benchmark_identifier,tuner,win_count,total_datasets,win_percentage
+lcbench,ArchVar-DtACI-QENS4 EIS nq=8 ns=100,0,3,0.0
+lcbench,ArchVar-DtACI-QRF EIS nq=8 ns=100,0,3,0.0
+lcbench,GP,3,3,100.0
+lcbench,TPE,1,3,33.33333333

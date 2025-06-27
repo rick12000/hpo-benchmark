@@ -1,0 +1,5 @@
+benchmark_identifier,tuner,win_count,total_datasets,win_percentage
+JAHS-201,ArchVar-DtACI-QENS4 EIS nq=8 ns=100,0,3,0.0
+JAHS-201,ArchVar-DtACI-QRF EIS nq=8 ns=100,0,3,0.0
+JAHS-201,GP,2,3,66.66666667
+JAHS-201,TPE,2,3,66.66666667

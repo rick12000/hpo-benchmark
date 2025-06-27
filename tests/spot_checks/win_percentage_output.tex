@@ -1,0 +1,34 @@
+\begin{table}[htbp]
+\caption{Tuner Win Percentage Across Benchmarks}
+\centering
+\begin{tabular}{@{}ll>{\centering\arraybackslash}p{2cm}@{}}
+\toprule
+\textbf{Benchmark\_Identifier} & \textbf{Tuner} & \textbf{Win \%} \\
+\midrule
+
+\multirow{4}{*}{JAHS-201}
+  & ArchVar-DtACI-QENS4 EIS nq=8 ns=100 & 0.00 \\
+  & ArchVar-DtACI-QRF EIS nq=8 ns=100 & 0.00 \\
+  & GP & 66.67 \\
+  & TPE & 66.67 \\
+
+\midrule
+
+\multirow{4}{*}{lcbench}
+  & ArchVar-DtACI-QENS4 EIS nq=8 ns=100 & 0.00 \\
+  & ArchVar-DtACI-QRF EIS nq=8 ns=100 & 0.00 \\
+  & GP & 100.00 \\
+  & TPE & 33.33 \\
+
+\midrule
+
+\multirow{4}{*}{rbv2\_xgboost}
+  & ArchVar-DtACI-QENS4 EIS nq=8 ns=100 & 33.33 \\
+  & ArchVar-DtACI-QRF EIS nq=8 ns=100 & 33.33 \\
+  & GP & 100.00 \\
+  & TPE & 33.33 \\
+
+\bottomrule
+\end{tabular}
+\label{tab:tuner_win_percentage}
+\end{table}

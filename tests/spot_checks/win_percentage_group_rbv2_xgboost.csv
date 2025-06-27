@@ -1,0 +1,5 @@
+benchmark_identifier,tuner,win_count,total_datasets,win_percentage
+rbv2_xgboost,ArchVar-DtACI-QENS4 EIS nq=8 ns=100,1,3,33.33333333
+rbv2_xgboost,ArchVar-DtACI-QRF EIS nq=8 ns=100,1,3,33.33333333
+rbv2_xgboost,GP,3,3,100.0
+rbv2_xgboost,TPE,1,3,33.33333333
