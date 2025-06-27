@@ -127,7 +127,6 @@ def analyze_main_benchmark(
                 run_start_str=run_start_str,
                 filename=f"friedman_test_budget_{budget}.csv",
                 analysis_type=analysis_type,
-                logger=logger,
             )
 
         if "nemenyi" in analysis_components:
@@ -142,7 +141,6 @@ def analyze_main_benchmark(
                 run_start_str=run_start_str,
                 filename=f"nemenyi_pairwise_budget_{budget}.csv",
                 analysis_type=analysis_type,
-                logger=logger,
             )
             nemenyi_df[norm_runtime_unit] = budget
 
@@ -158,7 +156,6 @@ def analyze_main_benchmark(
                 run_start_str=run_start_str,
                 filename="tuner_win_percentage.csv",
                 analysis_type=analysis_type,
-                logger=logger,
                 latex_vertical_separator=bench_col,
                 latex_comparison_column=tuner_col,
             )
@@ -176,7 +173,6 @@ def analyze_main_benchmark(
             filename_prefix="coverage_per_dataset",
             analysis_type=analysis_type,
             subfolder="coverage_breach_rates",
-            logger=logger,
             x_col=iter_unit,
             y_cols=["cumulative_breach_rate", "rolling_breach_rate"],
             entity_col=tuner_col,
@@ -193,7 +189,6 @@ def analyze_main_benchmark(
             cache_path=cache_path,
             run_start_str=run_start_str,
             analysis_type=analysis_type,
-            logger=logger,
         )
 
     else:
@@ -211,7 +206,6 @@ def analyze_main_benchmark(
             filename_prefix="perf_vs_iter",
             analysis_type=analysis_type,
             subfolder="dataset_performances",
-            logger=logger,
             x_col=iter_unit,
             y_cols=["best_performance", "rank"],
             entity_col=tuner_col,
@@ -236,7 +230,6 @@ def analyze_main_benchmark(
             run_start_str=run_start_str,
             filename="runtime_aggregated_results.csv",
             analysis_type=analysis_type,
-            logger=logger,
         )
 
         _plot_and_save(
@@ -247,7 +240,6 @@ def analyze_main_benchmark(
             filename_prefix="rank_vs_norm_runtime",
             analysis_type=analysis_type,
             subfolder="rank_analysis",
-            logger=logger,
             x_col=norm_runtime_unit,
             y_cols=["rank"],
             entity_col=tuner_col,
@@ -270,7 +262,6 @@ def analyze_main_benchmark(
             run_start_str=run_start_str,
             filename="iteration_aggregated_results.csv",
             analysis_type=analysis_type,
-            logger=logger,
         )
 
         _plot_and_save(
@@ -281,7 +272,6 @@ def analyze_main_benchmark(
             filename_prefix="rank_vs_iteration",
             analysis_type=analysis_type,
             subfolder="rank_analysis",
-            logger=logger,
             x_col=iter_unit,
             y_cols=["rank"],
             entity_col=tuner_col,
@@ -303,7 +293,6 @@ def analyze_main_benchmark(
             filename_prefix="sampler_partitioned_perf_vs_runtime",
             analysis_type=analysis_type,
             subfolder="sampler_comparison",
-            logger=logger,
             x_col=norm_runtime_unit,
             y_cols=["rank"],
             entity_col=tuner_col,
@@ -321,7 +310,6 @@ def analyze_main_benchmark(
             filename_prefix="architecture_partitioned_perf_vs_runtime",
             analysis_type=analysis_type,
             subfolder="architecture_comparison",
-            logger=logger,
             x_col=norm_runtime_unit,
             y_cols=["rank"],
             entity_col=tuner_col,
@@ -371,7 +359,6 @@ def analyze_main_benchmark(
                 run_start_str=run_start_str,
                 filename="placeholder.csv",
                 analysis_type=analysis_type,
-                logger=logger,
             )
 
             conformalized_vs_nonconformalized_results = pd.concat(
@@ -390,7 +377,6 @@ def analyze_main_benchmark(
             filename_prefix="perf_vs_runtime_n_pre_conformal_trials",
             analysis_type=analysis_type,
             subfolder="conformalization_effect",
-            logger=logger,
             x_col=norm_runtime_unit,
             y_cols=["rank"],
             entity_col=tuner_col,
@@ -471,7 +457,6 @@ def analyze_tuning_effect(
         run_start_str=run_start_str,
         filename="friedman_test_tuning_effect.csv",
         analysis_type=analysis_type,
-        logger=logger,
         subfolder="tuning_effect",
     )
 
@@ -486,7 +471,6 @@ def analyze_tuning_effect(
         run_start_str=run_start_str,
         filename="nemenyi_pairwise_test_tuning_effect.csv",
         analysis_type=analysis_type,
-        logger=logger,
         subfolder="tuning_effect",
         latex_vertical_breakout_col=data_size_col,
         latex_layout_breakout_col=None,
@@ -506,7 +490,6 @@ def analyze_tuning_effect(
         filename_prefix="tuning_effect_vs_data_size",
         analysis_type=analysis_type,
         subfolder="tuning_effect",
-        logger=logger,
         x_col=tuning_iterations_column,
         y_cols=["rank"],
         entity_col=estimator_architecture_col,
@@ -581,7 +564,6 @@ def analyze_estimator_comparison(
         run_start_str=run_start_str,
         filename="friedman_test_estimator_comparison.csv",
         analysis_type=analysis_type,
-        logger=logger,
         subfolder="estimator_comparison",
     )
 
@@ -596,7 +578,6 @@ def analyze_estimator_comparison(
         run_start_str=run_start_str,
         filename="nemenyi_pairwise_test_estimator_comparison.csv",
         analysis_type=analysis_type,
-        logger=logger,
         subfolder="estimator_comparison",
         latex_vertical_breakout_col=data_size_col,
         latex_layout_breakout_col=None,
@@ -616,7 +597,6 @@ def analyze_estimator_comparison(
         filename_prefix="estimator_comparison_vs_data_size",
         analysis_type=analysis_type,
         subfolder="estimator_comparison",
-        logger=logger,
         x_col=data_size_col,
         y_cols=["rank"],
         entity_col=estimator_architecture_col,
