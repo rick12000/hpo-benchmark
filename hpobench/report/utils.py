@@ -182,7 +182,7 @@ def _get_nemenyi_caption(col_name: str) -> str:
 
 
 def _get_nemenyi_entities(df: pd.DataFrame) -> List[str]:
-    return sorted(set(df["entity1"]).union(df["entity2"]))
+    return sorted(set(df["entity1"].str.upper()).union(df["entity2"].str.upper()))
 
 
 def _get_nemenyi_cell(df: pd.DataFrame, e1: str, e2: str) -> str:
