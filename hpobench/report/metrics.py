@@ -183,42 +183,68 @@ def nemenyi_pairwise_test(
     return pd.DataFrame(results)
 
 
-def _calculate_win_percentage(
+def calculate_win_percentage(
     data: pd.DataFrame,
     breakout_cols: List[str],
     dataset_col: str,
     entity_col: str,
     rank_col: str,
 ) -> pd.DataFrame:
-    df = data.copy()
+    """
+    Calculate the win percentage for each entity within experimental groupings.
+
+    For each group defined by `breakout_cols`, computes how often each entity achieves the best (minimum) rank on each dataset,
+    returning the proportion of datasets where the entity is the winner. Used in HPO benchmarking to summarize the frequency
+    with which each tuner or estimator achieves the best result across datasets and conditions.
+
+    As the data is pre-ranked, ensure the breakout_cols don't break the original rank groups and
+    ensure your data is ranked within each dataset.
+
+    Args:
+        data: DataFrame with results, including all grouping and ranking columns.
+        breakout_cols: Columns to stratify by (win rates will be averaged across datasets
+            but stratified by the groups in breakout_cols, so one set of results per group).
+        dataset_col: Column identifying the experiment dataset.
+        entity_col: Column identifying the entity being compared (usually a tuner).
+        rank_col: Column with the entity's performance rank.
+
+    Returns:
+        DataFrame with win percentages.
+
+    Raises:
+        ValueError: If the combination of grouping columns is not unique in the input data.
+    """
+    data_copy = data.copy()
+    key_cols = breakout_cols + [dataset_col, entity_col]
+    if data_copy.duplicated(subset=key_cols).any():
+        raise ValueError(
+            f"Non-unique key detected: The combination of {key_cols} is not unique in the input data."
+        )
+
     grouping_cols = breakout_cols + [dataset_col]
 
-    df["min_rank"] = df.groupby(grouping_cols)[rank_col].transform("min")
+    data_copy["min_rank"] = data_copy.groupby(grouping_cols)[rank_col].transform("min")
+    data_copy["is_winner"] = (data_copy[rank_col] == data_copy["min_rank"]).astype(int)
 
-    df["is_winner"] = (df[rank_col] == df["min_rank"]).astype(int)
-
+    # Calculate win rate by each entity across datasets:
     win_counts = (
-        df.groupby(breakout_cols + [entity_col], observed=True)["is_winner"]
+        data_copy.groupby(breakout_cols + [entity_col], observed=True)["is_winner"]
         .sum()
         .reset_index(name="win_count")
     )
-
     total_datasets = (
-        df.groupby(breakout_cols, observed=True)[dataset_col]
+        data_copy.groupby(breakout_cols, observed=True)[dataset_col]
         .nunique()
         .reset_index(name="total_datasets")
     )
 
-    all_combos = df[breakout_cols + [entity_col]].drop_duplicates()
-
+    all_combos = data_copy[breakout_cols + [entity_col]].drop_duplicates()
     win_analysis = pd.merge(
         all_combos, win_counts, on=breakout_cols + [entity_col], how="left"
     )
-
     win_analysis = pd.merge(win_analysis, total_datasets, on=breakout_cols, how="left")
 
     win_analysis["win_count"] = win_analysis["win_count"].fillna(0).astype(int)
-
     win_analysis["win_percentage"] = np.where(
         win_analysis["total_datasets"] > 0,
         (win_analysis["win_count"] / win_analysis["total_datasets"]) * 100,
@@ -231,9 +257,9 @@ def _calculate_win_percentage(
     ]
 
 
-def _calculate_coverage_snapshots(
+def calculate_coverage_snapshots(
     iteration_data: pd.DataFrame,
-    budget_cross_sections: List[int],
+    relativized_budget_cross_sections: List[int],
     identifier_cols: List[str],
     confidence_level_col: str,
     iteration_col: str,
@@ -245,44 +271,50 @@ def _calculate_coverage_snapshots(
     Calculates coverage analysis snapshots at specific budget cross-sections.
 
     Takes the already aggregated iteration data and extracts cumulative breach rates
-    at specified budget points by mapping relative budget to iteration numbers.
+    at specified budget points. Budget points are specified as normalized values
+    even if data is at iteration level. The function will relativize the budget
+    and then apply the specified budget filters.
 
     Args:
         iteration_data: Absolute iteration results with breach rates (already aggregated)
-        identifier_cols: Columns to identify the data
-        budget_cross_sections: Budget points to analyze (e.g., [50, 100])
+        identifier_cols: Columns you want to retain as identifiers in the output
+        relativized_budget_cross_sections: Relativized budget points to analyze (e.g., [50, 100])
         confidence_level_col: Column name for confidence levels
         cache_path: Base path for saving results
         run_start_str: Timestamp string for file naming
         analysis_type: Analysis type for folder organization
     """
-    max_iteration = iteration_data["iteration"].max()
-    min_iteration = iteration_data["iteration"].min()
+    # Normalize budget:
+    max_iteration = iteration_data[iteration_col].max()
+    min_iteration = iteration_data[iteration_col].min()
     iteration_targets = []
-    for budget in budget_cross_sections:
+    for budget in relativized_budget_cross_sections:
         target_iteration = min_iteration + (budget / 100.0) * (
             max_iteration - min_iteration
         )
         target_iteration = round(target_iteration)
         iteration_targets.append(target_iteration)
 
+    # Subset the data to only include the target budgets:
     coverage_data = iteration_data[
-        iteration_data["iteration"].isin(iteration_targets)
+        iteration_data[iteration_col].isin(iteration_targets)
     ].copy()
-    iteration_to_budget = dict(zip(iteration_targets, budget_cross_sections))
-    coverage_data["relativized_budget"] = coverage_data["iteration"].map(
+    iteration_to_budget = dict(
+        zip(iteration_targets, relativized_budget_cross_sections)
+    )
+    coverage_data["relativized_budget"] = coverage_data[iteration_col].map(
         iteration_to_budget
     )
 
-    identifier_cols = identifier_cols + [confidence_level_col]
-    output_cols = identifier_cols + [
-        "relativized_budget",
+    # Retain only relevant columns:
+    identifier_cols_copy = identifier_cols.copy()
+    output_cols = identifier_cols_copy + [
+        confidence_level_col,
         iteration_col,
+        "relativized_budget",
         "cumulative_breach_rate",
     ]
-
-    final_cols = [col for col in output_cols if col in coverage_data.columns]
-    final_data = coverage_data[final_cols]
+    final_data = coverage_data[output_cols]
 
     save_analysis_results(
         final_data,

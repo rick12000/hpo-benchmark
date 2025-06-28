@@ -13,8 +13,8 @@ from hpobench.config.config import (
     STATIC_ANALYSIS_ESTIMATOR_ARCHITECTURES,
 )
 from hpobench.report.analyze import (
-    analyze_tuning_effect,
-    analyze_estimator_comparison,
+    analyze_searcher_tuning_effect,
+    analyze_searcher_estimator_comparison,
 )
 from hpobench.report.orchestrate import (
     run_and_analyze_main_benchmark,
@@ -28,24 +28,24 @@ warnings.filterwarnings(
     module="statsmodels.regression.quantile_regression",
 )
 
+CACHE_PATH = "cache/"
+BASE_RANDOM_STATE = 42
+
+# Section control dictionary
+run_sections = {
+    "run_main_benchmark": True,
+    "run_static_analysis": True,
+}
+
+run_start_str, logger = setup_environment(cache_path=CACHE_PATH)
+DEFAULT_MAX_N_INSTANCES = 3
+TUNING_PATH_MAX_N_INSTANCES = 3
+STATIC_DATA_SIZES = [50, 200]
+TUNING_ITERATIONS = [0, 10]
 
 if __name__ == "__main__":
-    CACHE_PATH = "cache/"
-    BASE_RANDOM_STATE = 42
-
-    # Section control dictionary
-    run_sections = {
-        "run_main_benchmark": True,
-        "run_static_analysis": True,
-    }
-
-    run_start_str, logger = setup_environment(cache_path=CACHE_PATH)
-    DEFAULT_MAX_N_INSTANCES = 3
-    TUNING_PATH_MAX_N_INSTANCES = 3
-
     # Main Benchmark Section
     if run_sections["run_main_benchmark"]:
-
         # Coverage Analysis:
         raw_benchmark_data = run_and_analyze_main_benchmark(
             benchmarks=["jahs201"],
@@ -57,7 +57,7 @@ if __name__ == "__main__":
             cache_path=CACHE_PATH,
             run_start_str=run_start_str,
             analysis_type="01_coverage_analysis",
-            max_n_instances_per_benchmark=1,
+            max_n_instances_per_benchmark=1,  # NOTE: Hard coded, leave as is
             analysis_components=["coverage"],
         )
 
@@ -140,34 +140,32 @@ if __name__ == "__main__":
     if run_sections["run_static_analysis"]:
         logger.info("Starting Estimator Error Analysis (STATIC configs)...")
 
-        data_sizes_to_run = [50, 200]
-        estimator_error_results = run_static_benchmark(
-            data_size_range=data_sizes_to_run,
+        static_results = run_static_benchmark(
+            data_size_range=STATIC_DATA_SIZES,
             estimator_architectures=STATIC_ANALYSIS_ESTIMATOR_ARCHITECTURES,
             n_repetitions_per_estimator=N_REPETITIONS_PER_TUNER_CONFIG,
-            tuning_iterations_range=[0, 10],
+            tuning_iterations_range=TUNING_ITERATIONS,
             calibration_split=0.2,
             alpha=0.1,
-            n_pre_conformal_trials=20,
+            n_pre_conformal_trials=min(TUNING_ITERATIONS) - 1,
             max_n_instances=DEFAULT_MAX_N_INSTANCES,
         )
 
-        analyze_tuning_effect(
-            results_df=estimator_error_results,
+        logger.info("Starting Tuning Effect Analysis...")
+        analyze_searcher_tuning_effect(
+            results_df=static_results,
             cache_path=CACHE_PATH,
             run_start_str=run_start_str,
             analysis_type="05_static_analysis",
-            alpha=0.05,
         )
         logger.info("Tuning Effect Analysis finished.")
 
-        logger.info("Starting Estimator Comparison Analysis (STATIC configs)...")
-        analyze_estimator_comparison(
-            results_df=estimator_error_results,
+        logger.info("Starting Estimator Comparison Analysis...")
+        analyze_searcher_estimator_comparison(
+            results_df=static_results,
             cache_path=CACHE_PATH,
             run_start_str=run_start_str,
             analysis_type="05_static_analysis",
-            alpha=0.05,
         )
         logger.info("Estimator Comparison Analysis finished.")
 

@@ -5,8 +5,7 @@ from hpobench.utils import AnalysisPathManager
 
 from hpobench.utils import save_analysis_results
 from hpobench.plot import (
-    run_plots,
-    _plot_and_save,
+    plot_and_save,
 )
 from hpobench.process import (
     process_performance_records,
@@ -15,12 +14,12 @@ from hpobench.process import rank_and_collapse_data
 
 # Import missing functions from metrics.py
 from hpobench.report.metrics import (
-    _calculate_coverage_snapshots,
+    calculate_coverage_snapshots,
 )
 from hpobench.report.utils import (
-    _run_and_save_friedman,
-    _run_and_save_nemenyi,
-    _aggregate_and_save,
+    run_and_save_friedman,
+    run_and_save_nemenyi,
+    aggregate_and_save,
     _run_and_save_win_percentage,
 )
 
@@ -45,16 +44,60 @@ def analyze_main_benchmark(
             "conformalization_effect",
         ]
     ],
+    alpha: float = 0.05,
 ):
-    # Save raw benchmark data:
-    save_analysis_results(
-        raw_benchmark_data,
-        cache_path,
-        run_start_str,
-        "raw_benchmark_data.csv",
-        analysis_type,
-    )
+    """Analyze HPO benchmark results with comprehensive statistical and visual analysis.
 
+    Performs multi-faceted analysis of hyperparameter optimization benchmark data including
+    statistical significance testing, ranking analysis, coverage assessment, and performance
+    comparisons across different tuning configurations, samplers, and estimator architectures.
+    Generates both statistical results and visualization plots for each analysis component.
+
+    The function processes raw benchmark data through multiple analytical lenses:
+    - Statistical tests (Friedman, Nemenyi) to assess tuner performance differences
+    - Win percentage calculations for pairwise comparisons
+    - Coverage analysis for conformal prediction breach rates
+    - Rank-based performance analysis across runtime and iteration budgets
+    - Architecture and sampler comparison breakdowns
+    - Conformalization effect assessment for conformal vs non-conformal methods
+
+    Args:
+        raw_benchmark_data: DataFrame containing benchmark results with columns:
+            - benchmark_identifier: Unique identifier for benchmark suite
+            - dataset: Dataset name within benchmark
+            - tuner: HPO algorithm/configuration identifier
+            - repetition: Experimental repetition number
+            - sampler: Sampling strategy used (e.g., TPE, Random)
+            - confidence_level: Confidence level for conformal prediction
+            - estimator_architecture: ML model architecture type
+            - performance: Objective function value achieved
+            - runtime: Wall-clock time elapsed
+            - iteration: Number of optimization iterations
+        cache_path: Root directory path for saving analysis outputs and plots.
+        run_start_str: Timestamp string identifying this experimental run for file organization.
+        analysis_type: Category label for analysis (e.g., "coverage_analysis", "sampler_variation").
+        analysis_components: List of analysis types to execute. Valid options:
+            - "friedman": Friedman test for overall statistical significance
+            - "nemenyi": Nemenyi post-hoc test for pairwise comparisons
+            - "win_percentage": Win rate calculations between tuners
+            - "coverage": Coverage breach rate analysis for conformal prediction
+            - "dataset_performances": Per-dataset performance trajectory plots
+            - "rank_analysis": Ranking evolution across runtime and iteration budgets
+            - "sampler_comparison": Performance comparison partitioned by sampler
+            - "architecture_comparison": Performance comparison by estimator architecture
+            - "conformalization_effect": Conformal vs non-conformal method comparison
+
+    Side Effects:
+        - Generates and saves statistical test results as CSV files
+        - Creates performance visualization plots in organized subdirectories
+        - Logs analysis progress and completion status
+        - Saves aggregated results for different budget cross-sections
+
+    Note:
+        Coverage analysis is only performed for single-dataset benchmarks to ensure
+        meaningful coverage rate calculations. Multi-dataset benchmarks will skip
+        coverage components with a warning message.
+    """
     # Define constants and column names:
     grouping_cols = [
         "benchmark_identifier",
@@ -77,7 +120,6 @@ def analyze_main_benchmark(
     iter_unit = "iteration"
     norm_runtime_unit = f"normalized_{runtime_unit}"
     budget_cross_sections = [50, 100]
-    alpha = 0.05
 
     # Create broad use processed data:
     # 1. Relativized runtime results:
@@ -116,7 +158,7 @@ def analyze_main_benchmark(
 
         # 1. Statistical tests:
         if "friedman" in analysis_components:
-            _run_and_save_friedman(
+            run_and_save_friedman(
                 data=budget_data,
                 breakout_col=[bench_col],
                 across_col=data_col,
@@ -130,7 +172,7 @@ def analyze_main_benchmark(
             )
 
         if "nemenyi" in analysis_components:
-            nemenyi_df = _run_and_save_nemenyi(
+            nemenyi_df = run_and_save_nemenyi(
                 data=budget_data,
                 breakout_col=[bench_col],
                 across_col=data_col,
@@ -149,8 +191,8 @@ def analyze_main_benchmark(
             _run_and_save_win_percentage(
                 data=budget_data,
                 breakout_cols=[bench_col],
-                dataset_col="dataset",
-                entity_col="tuner",
+                dataset_col=data_col,
+                entity_col=tuner_col,
                 rank_col="rank",
                 cache_path=cache_path,
                 run_start_str=run_start_str,
@@ -165,24 +207,25 @@ def analyze_main_benchmark(
         absolute_iteration_results[data_col].nunique() == 1
         and "coverage" in analysis_components
     ):
-        _plot_and_save(
-            plot_func=run_plots,
+        plot_and_save(
             data=absolute_iteration_results,
-            cache_path=cache_path,
-            run_start_str=run_start_str,
-            filename_prefix="coverage_per_dataset",
-            analysis_type=analysis_type,
-            subfolder="coverage_breach_rates",
             x_col=iter_unit,
             y_cols=["cumulative_breach_rate", "rolling_breach_rate"],
             entity_col=tuner_col,
             col_measure=confidence_level_col,
             row_measure=data_col,
+            cache_path=cache_path,
+            run_start_str=run_start_str,
+            filename_prefix="coverage_per_dataset",
+            analysis_type=analysis_type,
+            subfolder="coverage_breach_rates",
+            y_cols_lower=["cumulative_breach_rate_q10", "rolling_breach_rate_q10"],
+            y_cols_upper=["cumulative_breach_rate_q90", "rolling_breach_rate_q90"],
         )
 
-        _calculate_coverage_snapshots(
+        calculate_coverage_snapshots(
             iteration_data=absolute_iteration_results,
-            budget_cross_sections=budget_cross_sections,
+            relativized_budget_cross_sections=budget_cross_sections,
             identifier_cols=[bench_col, data_col, tuner_col],
             iteration_col=iter_unit,
             confidence_level_col=confidence_level_col,
@@ -198,25 +241,26 @@ def analyze_main_benchmark(
 
     # Dataset level analysis:
     if "dataset_performances" in analysis_components:
-        _plot_and_save(
-            plot_func=run_plots,
+        plot_and_save(
             data=absolute_iteration_results,
-            cache_path=cache_path,
-            run_start_str=run_start_str,
-            filename_prefix="perf_vs_iter",
-            analysis_type=analysis_type,
-            subfolder="dataset_performances",
             x_col=iter_unit,
             y_cols=["best_performance", "rank"],
             entity_col=tuner_col,
             col_measure=data_col,
             row_measure=bench_col,
+            cache_path=cache_path,
+            run_start_str=run_start_str,
+            filename_prefix="perf_vs_iter",
+            analysis_type=analysis_type,
+            subfolder="dataset_performances",
+            y_cols_lower=["best_performance_q10", "rank_q10"],
+            y_cols_upper=["best_performance_q90", "rank_q90"],
         )
 
     # Rank analysis:
     if "rank_analysis" in analysis_components:
         # Group at benchmark level:
-        relativized_runtime_aggregated_results = _aggregate_and_save(
+        relativized_runtime_aggregated_results = aggregate_and_save(
             data=relativized_runtime_results,
             grouping_cols=[
                 bench_col,
@@ -232,23 +276,24 @@ def analyze_main_benchmark(
             analysis_type=analysis_type,
         )
 
-        _plot_and_save(
-            plot_func=run_plots,
+        plot_and_save(
             data=relativized_runtime_aggregated_results,
-            cache_path=cache_path,
-            run_start_str=run_start_str,
-            filename_prefix="rank_vs_norm_runtime",
-            analysis_type=analysis_type,
-            subfolder="rank_analysis",
             x_col=norm_runtime_unit,
             y_cols=["rank"],
             entity_col=tuner_col,
             col_measure=bench_col,
             row_measure=None,
+            cache_path=cache_path,
+            run_start_str=run_start_str,
+            filename_prefix="rank_vs_norm_runtime",
+            analysis_type=analysis_type,
+            subfolder="rank_analysis",
+            y_cols_lower=["rank_q10"],
+            y_cols_upper=["rank_q90"],
         )
 
         # Group at benchmark level:
-        iteration_aggregated_results = _aggregate_and_save(
+        iteration_aggregated_results = aggregate_and_save(
             data=absolute_iteration_results,
             grouping_cols=[
                 bench_col,
@@ -264,19 +309,20 @@ def analyze_main_benchmark(
             analysis_type=analysis_type,
         )
 
-        _plot_and_save(
-            plot_func=run_plots,
+        plot_and_save(
             data=iteration_aggregated_results,
-            cache_path=cache_path,
-            run_start_str=run_start_str,
-            filename_prefix="rank_vs_iteration",
-            analysis_type=analysis_type,
-            subfolder="rank_analysis",
             x_col=iter_unit,
             y_cols=["rank"],
             entity_col=tuner_col,
             col_measure=bench_col,
             row_measure=None,
+            cache_path=cache_path,
+            run_start_str=run_start_str,
+            filename_prefix="rank_vs_iteration",
+            analysis_type=analysis_type,
+            subfolder="rank_analysis",
+            y_cols_lower=["rank_q10"],
+            y_cols_upper=["rank_q90"],
         )
 
     # NOTE: For next two breakout plots, values are first ranked by benchmark
@@ -285,36 +331,38 @@ def analyze_main_benchmark(
     # then split in post.
     # Sampler comparison plots:
     if "sampler_comparison" in analysis_components:
-        _plot_and_save(
-            plot_func=run_plots,
+        plot_and_save(
             data=relativized_runtime_aggregated_results,
-            cache_path=cache_path,
-            run_start_str=run_start_str,
-            filename_prefix="sampler_partitioned_perf_vs_runtime",
-            analysis_type=analysis_type,
-            subfolder="sampler_comparison",
             x_col=norm_runtime_unit,
             y_cols=["rank"],
             entity_col=tuner_col,
             col_measure=sampler_col,
             row_measure=bench_col,
+            cache_path=cache_path,
+            run_start_str=run_start_str,
+            filename_prefix="sampler_partitioned_perf_vs_runtime",
+            analysis_type=analysis_type,
+            subfolder="sampler_comparison",
+            y_cols_lower=["rank_q10"],
+            y_cols_upper=["rank_q90"],
         )
 
     # Architecture comparison plots:
     if "architecture_comparison" in analysis_components:
-        _plot_and_save(
-            plot_func=run_plots,
+        plot_and_save(
             data=relativized_runtime_aggregated_results,
-            cache_path=cache_path,
-            run_start_str=run_start_str,
-            filename_prefix="architecture_partitioned_perf_vs_runtime",
-            analysis_type=analysis_type,
-            subfolder="architecture_comparison",
             x_col=norm_runtime_unit,
             y_cols=["rank"],
             entity_col=tuner_col,
             col_measure=estimator_architecture_col,
             row_measure=bench_col,
+            cache_path=cache_path,
+            run_start_str=run_start_str,
+            filename_prefix="architecture_partitioned_perf_vs_runtime",
+            analysis_type=analysis_type,
+            subfolder="architecture_comparison",
+            y_cols_lower=["rank_q10"],
+            y_cols_upper=["rank_q90"],
         )
 
     # Conformalization effect analysis:
@@ -346,7 +394,7 @@ def analyze_main_benchmark(
                 estimator_architecture_column=estimator_architecture_col,
             )
 
-            estimator_slice_aggregated_runtime_results = _aggregate_and_save(
+            estimator_slice_aggregated_runtime_results = aggregate_and_save(
                 data=estimator_slice_relativized_runtime_results,
                 grouping_cols=[
                     bench_col,
@@ -369,29 +417,55 @@ def analyze_main_benchmark(
             )
 
         # Architecture partitioned plots (each ranking conf vs. unconf):
-        _plot_and_save(
-            plot_func=run_plots,
+        plot_and_save(
             data=conformalized_vs_nonconformalized_results,
-            cache_path=cache_path,
-            run_start_str=run_start_str,
-            filename_prefix="perf_vs_runtime_n_pre_conformal_trials",
-            analysis_type=analysis_type,
-            subfolder="conformalization_effect",
             x_col=norm_runtime_unit,
             y_cols=["rank"],
             entity_col=tuner_col,
             col_measure=estimator_architecture_col,
             row_measure=bench_col,
+            cache_path=cache_path,
+            run_start_str=run_start_str,
+            filename_prefix="perf_vs_runtime_n_pre_conformal_trials",
+            analysis_type=analysis_type,
+            subfolder="conformalization_effect",
+            y_cols_lower=["rank_q10"],
+            y_cols_upper=["rank_q90"],
         )
 
 
-def analyze_tuning_effect(
+def analyze_searcher_tuning_effect(
     results_df: pd.DataFrame,
     cache_path: str,
     run_start_str: str,
     analysis_type: str,
     alpha: float = 0.05,
 ):
+    """Analyze the effect of searcher tuning iterations on search estimator performance.
+
+    Args:
+        results_df: DataFrame containing static benchmark results with columns:
+            - benchmark_identifier: Benchmark suite identifier
+            - dataset: Dataset name within benchmark
+            - data_size: Number of training samples used
+            - repetition: Experimental repetition number
+            - estimator_architecture: ML model architecture (e.g., "RF", "XGBoost")
+            - alpha: Significance level for conformal prediction
+            - tuning_iterations: Number of HPO iterations performed
+            - mean_pinball_loss: Average pinball loss across test samples
+        cache_path: Root directory for saving analysis outputs.
+        run_start_str: Timestamp identifier for this experimental run.
+        analysis_type: Analysis category label for file organization.
+        alpha: Significance level for statistical tests. Defaults to 0.05.
+
+    Side Effects:
+        - Saves filtered ranking data to "filtered_ranks.csv"
+        - Generates Friedman test results CSV with overall significance tests
+        - Creates Nemenyi pairwise comparison results with LaTeX formatting
+        - Produces rank vs tuning iteration plots partitioned by data size and architecture
+        - Logs plot save locations for reference
+    """
+    # Define constants and column names:
     grouping_columns = [
         "benchmark_identifier",
         "dataset",
@@ -408,6 +482,7 @@ def analyze_tuning_effect(
     bench_col = "benchmark_identifier"
     data_col = "dataset"
     data_size_col = "data_size"
+
     filtered_df = rank_and_collapse_data(
         data=results_df,
         grouping_cols=grouping_columns,
@@ -424,33 +499,21 @@ def analyze_tuning_effect(
         analysis_type,
     )
 
-    # Create a tuner column by concatenating tuning_iterations
-    # and estimator_architecture (ensure this is unique if changing
-    # columns in the dataframe or nature of experiment)
-    filtered_df["tuner"] = (
-        filtered_df["tuning_iterations"].astype(str)
-        + "|"
-        + filtered_df["estimator_architecture"].astype(str)
+    # Create an entity column by joining the estimator architecture and tuning iterations:
+    filtered_df["comparison_entity"] = (
+        filtered_df["estimator_architecture"].astype(str)
+        + "ti="
+        + filtered_df["tuning_iterations"].astype(str)
     )
-    tuner_col = "tuner"
+    comparison_col = "comparison_entity"
 
-    # Average rank across datasets:
-    aggregation_columns = [
-        col
-        for col in grouping_columns
-        if col not in [data_col, repetition_column, estimator_error_column]
-    ]
-    aggregated_df = (
-        filtered_df.groupby(aggregation_columns, observed=True)["rank"]
-        .mean()
-        .reset_index()
-    )
-
-    _run_and_save_friedman(
+    run_and_save_friedman(
         data=filtered_df,
+        # We only want pair test of same estimator architecture but different
+        # tuning iterations, so we break out by bench, data size AND estimator architecture:
         breakout_col=[bench_col, estimator_architecture_col, data_size_col],
         across_col=data_col,
-        entity_col=tuner_col,
+        entity_col=comparison_col,
         rank_col="rank",
         alpha=alpha,
         cache_path=cache_path,
@@ -460,11 +523,13 @@ def analyze_tuning_effect(
         subfolder="tuning_effect",
     )
 
-    _run_and_save_nemenyi(
+    run_and_save_nemenyi(
         data=filtered_df,
+        # We only want pair test of same estimator architecture but different
+        # tuning iterations, so we break out by bench, data size AND estimator architecture:
         breakout_col=[bench_col, estimator_architecture_col, data_size_col],
         across_col=data_col,
-        entity_col=tuner_col,
+        entity_col=comparison_col,
         rank_col="rank",
         alpha=alpha,
         cache_path=cache_path,
@@ -476,37 +541,90 @@ def analyze_tuning_effect(
         latex_layout_breakout_col=None,
     )
 
-    # Use specialized plot function for tuning effect
     path_manager = AnalysisPathManager(cache_path, run_start_str)
     tuning_plots_path = path_manager.get_analysis_path(
         analysis_type, "plots", "tuning_effect"
     )
 
-    _plot_and_save(
-        plot_func=run_plots,
+    # Average rank across datasets AND repetitions in one go (assumes
+    # an equal number of repetitions per configuration):
+    aggregation_columns = [
+        col
+        for col in grouping_columns
+        if col not in [data_col, repetition_column, estimator_error_column]
+    ]
+    aggregated_df = (
+        filtered_df.groupby(aggregation_columns, observed=True)["rank"]
+        .mean()
+        .reset_index()
+    )
+
+    plot_and_save(
         data=aggregated_df,
-        cache_path=cache_path,
-        run_start_str=run_start_str,
-        filename_prefix="tuning_effect_vs_data_size",
-        analysis_type=analysis_type,
-        subfolder="tuning_effect",
         x_col=tuning_iterations_column,
         y_cols=["rank"],
         entity_col=estimator_architecture_col,
         col_measure=data_size_col,
         row_measure=bench_col,
+        cache_path=cache_path,
+        run_start_str=run_start_str,
+        filename_prefix="tuning_effect_vs_data_size",
+        analysis_type=analysis_type,
+        subfolder="tuning_effect",
+        y_cols_lower=["rank_q10"],
+        y_cols_upper=["rank_q90"],
     )
 
     logger.info(f"Tuning rank comparison plots saved in {tuning_plots_path}")
 
 
-def analyze_estimator_comparison(
+def analyze_searcher_estimator_comparison(
     results_df: pd.DataFrame,
     cache_path: str,
     run_start_str: str,
     analysis_type: str,
     alpha: float = 0.05,
 ):
+    """Compare baseline performance across different searcher estimator architectures.
+
+    Analyzes the inherent performance differences between estimator architectures (e.g.,
+    Random Forest, XGBoost, Neural Networks) when used without hyperparameter optimization.
+    This provides baseline comparisons to understand which architectures perform better
+    out-of-the-box before any tuning effort is applied.
+
+    The analysis focuses on:
+    1. Filtering results to only include non-tuned configurations (tuning_iterations == 0)
+    2. Ranking estimator architectures by performance within experimental conditions
+    3. Statistical testing to identify significant architecture differences
+    4. Visualization of performance patterns across data sizes and benchmarks
+
+    Args:
+        results_df: DataFrame containing static benchmark results with columns:
+            - benchmark_identifier: Benchmark suite identifier
+            - dataset: Dataset name within benchmark
+            - data_size: Number of training samples used
+            - repetition: Experimental repetition number
+            - estimator_architecture: ML model architecture identifier
+            - alpha: Significance level for conformal prediction
+            - tuning_iterations: Number of HPO iterations (filtered to 0)
+            - mean_pinball_loss: Average pinball loss performance metric
+        cache_path: Root directory for saving analysis outputs.
+        run_start_str: Timestamp identifier for this experimental run.
+        analysis_type: Analysis category label for file organization.
+        alpha: Significance level for statistical tests. Defaults to 0.05.
+
+    Side Effects:
+        - Saves non-tuned filtered ranking data to "non_tuned_filtered_ranks.csv"
+        - Generates Friedman test results for architecture comparison significance
+        - Creates Nemenyi pairwise test results with LaTeX table formatting
+        - Produces estimator comparison plots showing rank vs data size relationships
+        - Logs analysis completion and plot save locations
+
+    Note:
+        Only analyzes configurations with tuning_iterations == 0 to isolate the effect
+        of estimator architecture choice from hyperparameter optimization effects.
+    """
+    # Define constants and column names:
     grouping_columns = [
         "benchmark_identifier",
         "dataset",
@@ -524,7 +642,9 @@ def analyze_estimator_comparison(
     data_col = "dataset"
     data_size_col = "data_size"
 
+    # Filter results to only include non-tuned configurations:
     non_tuned_results_df = results_df[results_df["tuning_iterations"] == 0]
+    # Rank and collapse the data:
     filtered_df = rank_and_collapse_data(
         data=non_tuned_results_df,
         grouping_cols=grouping_columns,
@@ -541,20 +661,11 @@ def analyze_estimator_comparison(
         analysis_type,
     )
 
-    # Average rank across datasets:
-    aggregation_columns = [
-        col
-        for col in grouping_columns
-        if col not in [data_col, repetition_column, estimator_error_column]
-    ]
-    aggregated_df = (
-        filtered_df.groupby(aggregation_columns, observed=True)["rank"]
-        .mean()
-        .reset_index()
-    )
-
-    _run_and_save_friedman(
+    run_and_save_friedman(
         data=filtered_df,
+        # Ranks were calculated within benchmark and data size, so we
+        # break out by the same granularity (omit tuning iterations,
+        # since filtered out in previous step):
         breakout_col=[bench_col, data_size_col],
         across_col=data_col,
         entity_col=estimator_architecture_col,
@@ -567,8 +678,11 @@ def analyze_estimator_comparison(
         subfolder="estimator_comparison",
     )
 
-    _run_and_save_nemenyi(
+    run_and_save_nemenyi(
         data=filtered_df,
+        # Ranks were calculated within benchmark and data size, so we
+        # break out by the same granularity (omit tuning iterations,
+        # since filtered out in previous step):
         breakout_col=[bench_col, data_size_col],
         across_col=data_col,
         entity_col=estimator_architecture_col,
@@ -583,25 +697,35 @@ def analyze_estimator_comparison(
         latex_layout_breakout_col=None,
     )
 
-    # Use specialized plot function for tuning effect
     path_manager = AnalysisPathManager(cache_path, run_start_str)
     tuning_plots_path = path_manager.get_analysis_path(
         analysis_type, "plots", "estimator_comparison"
     )
 
-    _plot_and_save(
-        plot_func=run_plots,
+    # Average rank across datasets:
+    aggregation_columns = [
+        col
+        for col in grouping_columns
+        if col not in [data_col, repetition_column, estimator_error_column]
+    ]
+    aggregated_df = (
+        filtered_df.groupby(aggregation_columns, observed=True)["rank"]
+        .mean()
+        .reset_index()
+    )
+    plot_and_save(
         data=aggregated_df,
-        cache_path=cache_path,
-        run_start_str=run_start_str,
-        filename_prefix="estimator_comparison_vs_data_size",
-        analysis_type=analysis_type,
-        subfolder="estimator_comparison",
         x_col=data_size_col,
         y_cols=["rank"],
         entity_col=estimator_architecture_col,
         col_measure=tuning_iterations_column,
         row_measure=bench_col,
+        cache_path=cache_path,
+        run_start_str=run_start_str,
+        filename_prefix="estimator_comparison_vs_data_size",
+        analysis_type=analysis_type,
+        subfolder="estimator_comparison",
+        y_cols_lower=["rank_q10"],
+        y_cols_upper=["rank_q90"],
     )
-
     logger.info(f"Estimator rank comparison plots saved in {tuning_plots_path}")
