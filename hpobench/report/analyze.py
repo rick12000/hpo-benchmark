@@ -196,7 +196,7 @@ def analyze_main_benchmark(
                 rank_col="rank",
                 cache_path=cache_path,
                 run_start_str=run_start_str,
-                filename="tuner_win_percentage.csv",
+                filename=f"tuner_win_percentage_{budget}.csv",
                 analysis_type=analysis_type,
                 latex_vertical_separator=bench_col,
                 latex_comparison_column=tuner_col,

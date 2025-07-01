@@ -293,7 +293,7 @@ def confopt_tune(
 
     if n_trials is not None:
         if warm_start_configs is not None:
-            adj_n_trials = n_trials - len(warm_start_configs)
+            adj_n_trials = n_trials  # - len(warm_start_configs)
         else:
             adj_n_trials = n_trials
     else:

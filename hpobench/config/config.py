@@ -18,7 +18,7 @@ from hpobench.config.types import (
 
 # Environment variables used in the main code:
 N_REPETITIONS_PER_TUNER_CONFIG = 2
-N_TRIALS = 40
+N_TRIALS = 69
 TIMEOUT = None
 N_WARM_STARTS = 15
 
@@ -37,7 +37,7 @@ STATIC_ANALYSIS_ESTIMATOR_ARCHITECTURES = [
 
 # 2. Create configurations feeding the coverage charts:
 COVERAGE_ANALYSIS_CONFIGURATIONS = []
-COVERAGE_INTERVAL_WIDTHS = [0.1, 0.5, 0.9]
+COVERAGE_INTERVAL_WIDTHS = [0.1, 0.5]  # , 0.9]
 ADAPTERS = ["ACI", "DtACI", None]
 
 for interval_width in COVERAGE_INTERVAL_WIDTHS:
@@ -121,10 +121,10 @@ ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurati
         "qrf",
         "qknn",
         # "qgbm",
-        # "qens4",
+        "qens4",
     ],
     samplers=[
-        ExpectedImprovementSampler(n_quantiles=8, num_ei_samples=100, adapter="DtACI"),
+        ExpectedImprovementSampler(n_quantiles=20, num_ei_samples=1000, adapter=None),
         ThompsonSampler(
             n_quantiles=8, enable_optimistic_sampling=False, adapter="DtACI"
         ),
@@ -134,19 +134,21 @@ ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurati
 
 LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurations(
     architectures=[
-        "qrf",
-        # "qgp",
+        # "qrf",
+        "qgp",
         "qens4",
     ],
     samplers=[
-        ExpectedImprovementSampler(n_quantiles=8, num_ei_samples=100, adapter="DtACI")
+        ExpectedImprovementSampler(n_quantiles=20, num_ei_samples=1000, adapter=None)
     ],
+    # TODO: TEMP:
+    # n_pre_conformal_trials=10000,  # Simulate no pre-conformal trials
 )
 
 PRECONFORMAL_COMPARISON_CONFIGURATIONS = []
 for architecture in [
     "qgbm",
-    # "qgp",
+    "qgp",
     # "qens4",
 ]:
     # Simulate normal pre-conformal cutoff vs. unreachable one:

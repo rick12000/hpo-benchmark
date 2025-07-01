@@ -239,6 +239,8 @@ def build_architecture_variation_configurations(
                     tuner="confopt",
                     searcher=searcher,
                     config_identifier=config_id,
+                    # TODO: TEMP, revert to None:
+                    # searcher_tuning_framework="fixed",
                     searcher_tuning_framework=None,
                 )
             )

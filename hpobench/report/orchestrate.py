@@ -6,6 +6,7 @@ from typing import Literal, Optional
 import gc
 import numpy as np
 from sklearn.metrics import mean_pinball_loss
+from sklearn.preprocessing import StandardScaler
 from confopt.selection.conformalization import QuantileConformalEstimator
 from confopt.utils.encoding import ConfigurationEncoder
 from confopt.utils.preprocessing import train_val_split
@@ -519,9 +520,15 @@ def run_static_benchmark(
                             X=X_experiment_encoded,
                             y=np.array(y_experiment),
                             train_split=(1 - calibration_split),
-                            normalize=True,
+                            normalize=False,
                             ordinal=False,
                         )
+
+                        scaler = StandardScaler()
+                        scaler.fit(X=X_train)
+                        X_train = scaler.transform(X=X_train)
+                        X_val = scaler.transform(X=X_val)
+                        X_holdout_encoded = scaler.transform(X=X_holdout_encoded)
 
                         # Train conformal searcher:
                         searcher = QuantileConformalEstimator(

@@ -1,10 +1,6 @@
 import warnings
+
 from hpobench.config.config import (
-    COVERAGE_ANALYSIS_CONFIGURATIONS,
-    ARCHITECTURE_VARIATION_CONFIGURATIONS,
-    LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS,
-    SAMPLER_VARIATION_CONFIGURATIONS,
-    EXTERNAL_TUNING_CONFIGURATIONS,
     PRECONFORMAL_COMPARISON_CONFIGURATIONS,
     N_REPETITIONS_PER_TUNER_CONFIG,
     N_TRIALS,
@@ -34,11 +30,11 @@ BASE_RANDOM_STATE = 42
 # Section control dictionary
 run_sections = {
     "run_main_benchmark": True,
-    "run_static_analysis": True,
+    "run_static_analysis": False,
 }
 
 run_start_str, logger = setup_environment(cache_path=CACHE_PATH)
-DEFAULT_MAX_N_INSTANCES = 3
+DEFAULT_MAX_N_INSTANCES = 10
 TUNING_PATH_MAX_N_INSTANCES = 3
 STATIC_DATA_SIZES = [50, 200]
 TUNING_ITERATIONS = [0, 10]
@@ -47,74 +43,75 @@ if __name__ == "__main__":
     # Main Benchmark Section
     if run_sections["run_main_benchmark"]:
         # Coverage Analysis:
-        raw_benchmark_data = run_and_analyze_main_benchmark(
-            benchmarks=["jahs201"],
-            tuning_configurations=COVERAGE_ANALYSIS_CONFIGURATIONS,
-            n_warm_starts=N_WARM_STARTS,
-            n_trials=N_TRIALS,
-            timeout=TIMEOUT,
-            base_random_state=BASE_RANDOM_STATE,
-            cache_path=CACHE_PATH,
-            run_start_str=run_start_str,
-            analysis_type="01_coverage_analysis",
-            max_n_instances_per_benchmark=1,  # NOTE: Hard coded, leave as is
-            analysis_components=["coverage"],
-        )
+        # raw_benchmark_data = run_and_analyze_main_benchmark(
+        #     benchmarks=["jahs201"],
+        #     tuning_configurations=COVERAGE_ANALYSIS_CONFIGURATIONS,
+        #     n_warm_starts=N_WARM_STARTS,
+        #     n_trials=N_TRIALS,
+        #     timeout=TIMEOUT,
+        #     base_random_state=BASE_RANDOM_STATE,
+        #     cache_path=CACHE_PATH,
+        #     run_start_str=run_start_str,
+        #     analysis_type="01_coverage_analysis",
+        #     max_n_instances_per_benchmark=1,  # NOTE: Hard coded, leave as is
+        #     analysis_components=["coverage"],
+        # )
 
         # Sampler Variation Analysis:
-        raw_benchmark_data = run_and_analyze_main_benchmark(
-            benchmarks=["lcbench"],
-            tuning_configurations=SAMPLER_VARIATION_CONFIGURATIONS,
-            n_warm_starts=N_WARM_STARTS,
-            n_trials=N_TRIALS,
-            timeout=TIMEOUT,
-            base_random_state=BASE_RANDOM_STATE,
-            cache_path=CACHE_PATH,
-            run_start_str=run_start_str,
-            analysis_type="02_sampler_variation",
-            max_n_instances_per_benchmark=DEFAULT_MAX_N_INSTANCES,
-            analysis_components=["rank_analysis"],
-        )
+        # raw_benchmark_data = run_and_analyze_main_benchmark(
+        #     benchmarks=["lcbench"],
+        #     tuning_configurations=SAMPLER_VARIATION_CONFIGURATIONS,
+        #     n_warm_starts=N_WARM_STARTS,
+        #     n_trials=N_TRIALS,
+        #     timeout=TIMEOUT,
+        #     base_random_state=BASE_RANDOM_STATE,
+        #     cache_path=CACHE_PATH,
+        #     run_start_str=run_start_str,
+        #     analysis_type="02_sampler_variation",
+        #     max_n_instances_per_benchmark=DEFAULT_MAX_N_INSTANCES,
+        #     analysis_components=["rank_analysis"],
+        # )
 
         # Architecture Variation Analysis:
-        raw_benchmark_data = run_and_analyze_main_benchmark(
-            benchmarks=["lcbench"],
-            tuning_configurations=ARCHITECTURE_VARIATION_CONFIGURATIONS,
-            n_warm_starts=N_WARM_STARTS,
-            n_trials=N_TRIALS,
-            timeout=TIMEOUT,
-            base_random_state=BASE_RANDOM_STATE,
-            cache_path=CACHE_PATH,
-            run_start_str=run_start_str,
-            analysis_type="03_architecture_variation",
-            max_n_instances_per_benchmark=DEFAULT_MAX_N_INSTANCES,
-            analysis_components=[
-                "architecture_comparison",
-                "rank_analysis",
-                "sampler_comparison",
-            ],
-        )
+        # raw_benchmark_data = run_and_analyze_main_benchmark(
+        #     benchmarks=["lcbench"],
+        #     tuning_configurations=ARCHITECTURE_VARIATION_CONFIGURATIONS,
+        #     n_warm_starts=N_WARM_STARTS,
+        #     n_trials=N_TRIALS,
+        #     timeout=TIMEOUT,
+        #     base_random_state=BASE_RANDOM_STATE,
+        #     cache_path=CACHE_PATH,
+        #     run_start_str=run_start_str,
+        #     analysis_type="03_architecture_variation",
+        #     max_n_instances_per_benchmark=DEFAULT_MAX_N_INSTANCES,
+        #     analysis_components=[
+        #         "architecture_comparison",
+        #         "rank_analysis",
+        #         "sampler_comparison",
+        #     ],
+        # )
 
         # External Tuning Analysis:
-        raw_benchmark_data = run_and_analyze_main_benchmark(
-            benchmarks=["lcbench", "jahs201", "rbv2_xgboost"],
-            tuning_configurations=LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS
-            + EXTERNAL_TUNING_CONFIGURATIONS,
-            n_warm_starts=N_WARM_STARTS,
-            n_trials=N_TRIALS,
-            timeout=TIMEOUT,
-            base_random_state=BASE_RANDOM_STATE,
-            cache_path=CACHE_PATH,
-            run_start_str=run_start_str,
-            analysis_type="04_external_tuning",
-            max_n_instances_per_benchmark=DEFAULT_MAX_N_INSTANCES,
-            analysis_components=[
-                "friedman",
-                "nemenyi",
-                "win_percentage",
-                "rank_analysis",
-            ],
-        )
+        # raw_benchmark_data = run_and_analyze_main_benchmark(
+        #     benchmarks=["lcbench"], #, "rbv2_xgboost"
+        #     tuning_configurations=LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS
+        #     + EXTERNAL_TUNING_CONFIGURATIONS,
+        #     n_warm_starts=N_WARM_STARTS,
+        #     n_trials=N_TRIALS,
+        #     timeout=TIMEOUT,
+        #     base_random_state=BASE_RANDOM_STATE,
+        #     cache_path=CACHE_PATH,
+        #     run_start_str=run_start_str,
+        #     analysis_type="04_external_tuning",
+        #     max_n_instances_per_benchmark=DEFAULT_MAX_N_INSTANCES,
+        #     analysis_components=[
+        #         "friedman",
+        #         "nemenyi",
+        #         "win_percentage",
+        #         "rank_analysis",
+        #         "dataset_performances"
+        #     ],
+        # )
 
         # Preconformal Comparison Analysis:
         raw_benchmark_data = run_and_analyze_main_benchmark(
@@ -149,6 +146,7 @@ if __name__ == "__main__":
             alpha=0.1,
             n_pre_conformal_trials=min(TUNING_ITERATIONS) - 1,
             max_n_instances=DEFAULT_MAX_N_INSTANCES,
+            base_random_state=BASE_RANDOM_STATE,
         )
 
         logger.info("Starting Tuning Effect Analysis...")
