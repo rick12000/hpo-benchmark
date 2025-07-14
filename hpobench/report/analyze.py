@@ -546,17 +546,20 @@ def analyze_searcher_tuning_effect(
         analysis_type, "plots", "tuning_effect"
     )
 
-    # Average rank across datasets AND repetitions in one go (assumes
-    # an equal number of repetitions per configuration):
+    # Average rank across datasets AND repetitions with proper quantile calculation:
     aggregation_columns = [
         col
         for col in grouping_columns
         if col not in [data_col, repetition_column, estimator_error_column]
     ]
-    aggregated_df = (
-        filtered_df.groupby(aggregation_columns, observed=True)["rank"]
-        .mean()
-        .reset_index()
+    aggregated_df = aggregate_and_save(
+        data=filtered_df,
+        grouping_cols=aggregation_columns,
+        metrics=["rank"],
+        cache_path=cache_path,
+        run_start_str=run_start_str,
+        filename="tuning_effect_aggregated_results.csv",
+        analysis_type=analysis_type,
     )
 
     plot_and_save(
@@ -564,13 +567,13 @@ def analyze_searcher_tuning_effect(
         x_col=tuning_iterations_column,
         y_cols=["rank"],
         entity_col=estimator_architecture_col,
-        col_measure=data_size_col,
-        row_measure=bench_col,
         cache_path=cache_path,
         run_start_str=run_start_str,
         filename_prefix="tuning_effect_vs_data_size",
         analysis_type=analysis_type,
         subfolder="tuning_effect",
+        col_measure=data_size_col,
+        row_measure=bench_col,
         y_cols_lower=["rank_q10"],
         y_cols_upper=["rank_q90"],
     )
@@ -636,7 +639,6 @@ def analyze_searcher_estimator_comparison(
     ]
     estimator_architecture_col = "estimator_architecture"
     repetition_column = "repetition"
-    tuning_iterations_column = "tuning_iterations"
     estimator_error_column = "mean_pinball_loss"
     bench_col = "benchmark_identifier"
     data_col = "dataset"
@@ -702,29 +704,33 @@ def analyze_searcher_estimator_comparison(
         analysis_type, "plots", "estimator_comparison"
     )
 
-    # Average rank across datasets:
+    # Average rank across datasets with proper quantile calculation:
     aggregation_columns = [
         col
         for col in grouping_columns
         if col not in [data_col, repetition_column, estimator_error_column]
     ]
-    aggregated_df = (
-        filtered_df.groupby(aggregation_columns, observed=True)["rank"]
-        .mean()
-        .reset_index()
+    aggregated_df = aggregate_and_save(
+        data=filtered_df,
+        grouping_cols=aggregation_columns,
+        metrics=["rank"],
+        cache_path=cache_path,
+        run_start_str=run_start_str,
+        filename="estimator_comparison_aggregated_results.csv",
+        analysis_type=analysis_type,
     )
     plot_and_save(
         data=aggregated_df,
         x_col=data_size_col,
         y_cols=["rank"],
         entity_col=estimator_architecture_col,
-        col_measure=tuning_iterations_column,
-        row_measure=bench_col,
         cache_path=cache_path,
         run_start_str=run_start_str,
         filename_prefix="estimator_comparison_vs_data_size",
         analysis_type=analysis_type,
         subfolder="estimator_comparison",
+        col_measure=bench_col,
+        row_measure=None,
         y_cols_lower=["rank_q10"],
         y_cols_upper=["rank_q90"],
     )

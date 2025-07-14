@@ -3,13 +3,14 @@ from confopt.selection.acquisition import (
     QuantileConformalSearcher,
 )
 from copy import deepcopy
-from confopt.selection.sampling import (
-    ThompsonSampler,
+from confopt.selection.sampling.bound_samplers import (
     LowerBoundSampler,
-    ExpectedImprovementSampler,
-    InformationGainSampler,
-    MaxValueEntropySearchSampler,
 )
+from confopt.selection.sampling.entropy_samplers import MaxValueEntropySearchSampler
+from confopt.selection.sampling.expected_improvement_samplers import (
+    ExpectedImprovementSampler,
+)
+from confopt.selection.sampling.thompson_samplers import ThompsonSampler
 from confopt.selection.acquisition import QuantileEstimatorArchitecture
 from hpobench.config.types import TunerConfig
 
@@ -166,12 +167,12 @@ def build_sampler_variation_configurations(
             ThompsonSampler,
             LowerBoundSampler,
             ExpectedImprovementSampler,
-            InformationGainSampler,
             MaxValueEntropySearchSampler,
         ]
     ],
     quantile_arch: QuantileEstimatorArchitecture,
     n_pre_conformal_trials: int = 20,
+    searcher_tuning_framework: Optional[str] = None,
 ) -> List[TunerConfig]:
     """Build tuning configurations for different samplers with a fixed quantile architecture.
 
@@ -179,6 +180,7 @@ def build_sampler_variation_configurations(
         samplers: List of sampler instances.
         quantile_arch: Quantile estimator architecture.
         n_pre_conformal_trials: Number of pre-conformal trials.
+        searcher_tuning_framework: Value to set in TunerConfig for searcher_tuning_framework.
 
     Returns:
         List of tuning configuration objects for each sampler.
@@ -196,7 +198,7 @@ def build_sampler_variation_configurations(
                 tuner="confopt",
                 searcher=searcher,
                 config_identifier=config_id,
-                searcher_tuning_framework=None,
+                searcher_tuning_framework=searcher_tuning_framework,
             )
         )
     return configs
@@ -209,11 +211,11 @@ def build_architecture_variation_configurations(
             ThompsonSampler,
             LowerBoundSampler,
             ExpectedImprovementSampler,
-            InformationGainSampler,
             MaxValueEntropySearchSampler,
         ]
     ],
     n_pre_conformal_trials: int = 20,
+    searcher_tuning_framework: Optional[str] = None,
 ) -> List[TunerConfig]:
     """Build tuning configurations for different quantile architectures and samplers.
 
@@ -221,6 +223,7 @@ def build_architecture_variation_configurations(
         architectures: List of quantile estimator architectures.
         samplers: List of sampler instances.
         n_pre_conformal_trials: Number of pre-conformal trials.
+        searcher_tuning_framework: Value to set in TunerConfig for searcher_tuning_framework.
 
     Returns:
         List of tuning configuration objects for each architecture and sampler combination.
@@ -239,9 +242,7 @@ def build_architecture_variation_configurations(
                     tuner="confopt",
                     searcher=searcher,
                     config_identifier=config_id,
-                    # TODO: TEMP, revert to None:
-                    # searcher_tuning_framework="fixed",
-                    searcher_tuning_framework=None,
+                    searcher_tuning_framework=searcher_tuning_framework,
                 )
             )
     return configs
@@ -259,11 +260,17 @@ def get_external_tuning_configurations() -> List[TunerConfig]:
             searcher="gp",
             config_identifier="GP",
         ),
-        TunerConfig(
-            tuner="optuna",
-            searcher="tpe",
-            config_identifier="TPE",
-        ),
+        # TunerConfig(
+        #     tuner="optuna",
+        #     searcher="tpe",
+        #     config_identifier="TPE",
+        # ),
+        # # Syne-Tune CQR configurations using string searchers
+        # TunerConfig(
+        #     tuner="syne_tune_cqr",
+        #     searcher="cqr_thompson",
+        #     config_identifier="CQR-THOMPSON",
+        # ),
         # TunerConfig(
         #     tuner="optuna",
         #     searcher="random",

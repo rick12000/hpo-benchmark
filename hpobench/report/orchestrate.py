@@ -40,6 +40,7 @@ def load_benchmark_configs(
     n_trials: int,
     timeout: Optional[float],
     max_n_instances_per_benchmark: int = 10,
+    datasets_per_benchmark: Optional[list[list[str]]] = None,
 ) -> list[ExperimentConfig]:
     """Load and configure benchmark instances for hyperparameter optimization experiments.
 
@@ -64,6 +65,9 @@ def load_benchmark_configs(
         max_n_instances_per_benchmark: Maximum number of dataset instances to use per
             benchmark. For JAHS-Bench-201, this limits how many of the 3 available
             datasets are selected.
+        datasets_per_benchmark: Optional list of lists, each containing specific dataset
+            identifiers to use for the corresponding benchmark. If provided, overrides
+            the default dataset selection logic for benchmarks.
 
     Returns:
         List of ExperimentConfig objects, each containing a benchmark instance paired
@@ -73,7 +77,7 @@ def load_benchmark_configs(
     logger.info("Setting up benchmark instances...")
 
     experiment_configs = []
-    for benchmark in benchmarks:
+    for i, benchmark in enumerate(benchmarks):
         if benchmark in ["rbv2_xgboost", "lcbench"]:
             configs = setup_yahpo_instance_configs(
                 benchmark=benchmark,
@@ -86,8 +90,14 @@ def load_benchmark_configs(
             experiment_configs.extend(configs)
 
     if "jahs201" in benchmarks:
+        idx = benchmarks.index("jahs201")
         all_datasets = ["cifar10", "fashion_mnist", "colorectal_histology"]
-        if max_n_instances_per_benchmark < len(all_datasets):
+        if (
+            datasets_per_benchmark is not None
+            and datasets_per_benchmark[idx] is not None
+        ):
+            selected_datasets = datasets_per_benchmark[idx]
+        elif max_n_instances_per_benchmark < len(all_datasets):
             selected_datasets = all_datasets[:max_n_instances_per_benchmark]
         else:
             selected_datasets = all_datasets
@@ -306,6 +316,7 @@ def run_and_analyze_main_benchmark(
     ],
     max_n_instances_per_benchmark: int = 10,
     n_repetitions: int = N_REPETITIONS_PER_TUNER_CONFIG,
+    datasets_per_benchmark: Optional[list[list[str]]] = None,
 ) -> pd.DataFrame:
     """
     Complete end-to-end hyperparameter optimization benchmark pipeline with analysis.
@@ -358,6 +369,9 @@ def run_and_analyze_main_benchmark(
         n_repetitions: Number of independent experimental repetitions for statistical
             validity. Minimum 10 recommended for meaningful confidence intervals,
             30+ for publication-quality results.
+        datasets_per_benchmark: Optional list of lists, each containing specific dataset
+            identifiers to use for the corresponding benchmark. If provided, overrides
+            the default dataset selection logic for benchmarks.
 
     Returns:
         Complete experimental dataset as DataFrame with all trial results, performance
@@ -371,6 +385,7 @@ def run_and_analyze_main_benchmark(
         n_trials=n_trials,
         timeout=timeout,
         max_n_instances_per_benchmark=max_n_instances_per_benchmark,
+        datasets_per_benchmark=datasets_per_benchmark,
     )
 
     raw_benchmark_data = run_main_benchmark(
@@ -393,6 +408,7 @@ def run_and_analyze_main_benchmark(
 
 
 def run_static_benchmark(
+    benchmarks: list[Literal["jahs201", "lcbench"]],
     data_size_range: list[int],
     estimator_architectures: list[str],
     n_repetitions_per_estimator: int,
@@ -405,7 +421,7 @@ def run_static_benchmark(
 ) -> pd.DataFrame:
     """Evaluate conformal prediction estimator architectures in controlled static setting.
 
-    Focuses exclusively on the lcbench benchmark.
+    Supports both lcbench and jahs201 benchmarks.
 
     This function performs a controlled evaluation of different quantile estimator
     architectures for conformal prediction by training on fixed datasets of varying
@@ -421,6 +437,9 @@ def run_static_benchmark(
     5. Evaluate holdout prediction interval quality using pinball loss metrics
 
     Args:
+        benchmarks: List of benchmark names to evaluate. Supported benchmarks are:
+            - "lcbench": Learning Curves Benchmark for machine learning algorithms
+            - "jahs201": JAHS-Bench-201 neural architecture search benchmark
         data_size_range: List of training dataset sizes to evaluate. Allows studying
             how estimator performance scales with available data, typically ranging
             from small (50-100) to moderate (500-1000) sample sizes.
@@ -459,21 +478,53 @@ def run_static_benchmark(
           measuring prediction interval quality (lower is better)
     """
     estimator_error_results = []
-    # Below we use setup function as shortcut, but we are only interested in
-    # the yahpo generator and param space generation, the other inputs are
-    # just placeholders:
-    experiment_configs = setup_yahpo_instance_configs(
-        benchmark="lcbench",  # hard coded, leave as is
-        tuning_configurations=[],  # placeholder
-        n_warm_starts=1,  # placeholder
-        n_trials=0,  # placeholder
-        timeout=100000,  # placeholder
-        max_n_instances=max_n_instances,  # placeholder
-    )
-    for data_size in data_size_range:
-        logger.info(f"Loop Level | Dataset Size: {data_size}")
-        for experiment_config in experiment_configs:
-            logger.info(f"Loop Level | Dataset: {experiment_config.dataset_identifier}")
+
+    # Process each benchmark
+    for benchmark in benchmarks:
+        logger.info(f"Processing benchmark: {benchmark}")
+        experiment_configs = []
+        if benchmark == "lcbench":
+            # Below we use setup function as shortcut, but we are only interested in
+            # the yahpo generator and param space generation, the other inputs are
+            # just placeholders:
+            yahpo_configs = setup_yahpo_instance_configs(
+                benchmark="lcbench",  # hard coded, leave as is
+                tuning_configurations=[],  # placeholder
+                n_warm_starts=1,  # placeholder
+                n_trials=0,  # placeholder
+                timeout=100000,  # placeholder
+                max_n_instances=max_n_instances,
+            )
+            experiment_configs.extend(yahpo_configs)
+
+        elif benchmark == "jahs201":
+            # Use setup function as shortcut, but we are only interested in
+            # the objective function and search space generation, the other inputs are
+            # just placeholders:
+            all_datasets = ["cifar10", "fashion_mnist", "colorectal_histology"]
+            selected_datasets = (
+                all_datasets[:max_n_instances]
+                if max_n_instances < len(all_datasets)
+                else all_datasets
+            )
+            jahs201_configs = setup_jahs201_configs(
+                datasets=selected_datasets,
+                tuning_configurations=[],  # placeholder
+                n_warm_starts=1,  # placeholder
+                n_trials=0,  # placeholder
+                timeout=100000,  # placeholder
+            )
+            experiment_configs.extend(jahs201_configs)
+
+        else:
+            raise ValueError(f"Unsupported benchmark: {benchmark}")
+
+        for data_size in data_size_range:
+            logger.info(f"Loop Level | Dataset Size: {data_size}")
+            for experiment_config in experiment_configs:
+                logger.info(
+                    f"Loop Level | Dataset: {experiment_config.dataset_identifier}"
+                )
 
             # Extract some parameter space realizations to train the estimator on:
             experiment_configs_per_repetition = generate_configs_per_repetition(
@@ -572,7 +623,7 @@ def run_static_benchmark(
                         results = {
                             "estimator_architecture": estimator_architecture,
                             "dataset": experiment_config.dataset_identifier,
-                            "benchmark_identifier": "lcbench",  # hard coded, leave as is
+                            "benchmark_identifier": experiment_config.benchmark_identifier,
                             "repetition": repetition,
                             "tuning_iterations": tuning_iterations,
                             "data_size": data_size,

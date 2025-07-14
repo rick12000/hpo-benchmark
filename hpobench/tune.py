@@ -16,6 +16,7 @@ from confopt.selection.acquisition import (
 from confopt import wrapping as ranges
 from copy import deepcopy
 from functools import partial
+from hpobench.syne_tune_integration import syne_tune_cqr_tune
 
 # Constants:
 SKOPT_GP_ACQ_FUNC = "EI"
@@ -302,13 +303,13 @@ def confopt_tune(
     # NOTE: Zero random searches because this benchmark repository uses warm-starting:
     searcher.tune(
         searcher=deepcopy(sampler),
-        runtime_budget=int(timeout) if timeout is not None else None,
-        max_iter=adj_n_trials,
+        max_runtime=int(timeout) if timeout is not None else None,
+        max_searches=adj_n_trials,
         n_random_searches=0,
         conformal_retraining_frequency=CONFOPT_RETRAINING_FREQUENCY,
         verbose=False,
         random_state=random_state,
-        searcher_tuning_framework=searcher_tuning_framework
+        optimizer_framework=searcher_tuning_framework
         if searcher_tuning_framework in ("reward_cost", "fixed")
         else None,
     )
@@ -537,6 +538,13 @@ def tune(
         if not isinstance(tuner_config.searcher, str):
             raise ValueError("Skopt tuner requires a string searcher.")
         history = skopt_tune(
+            sampler=tuner_config.searcher,
+            **shared_kwargs,
+        )
+    elif tuner_config.tuner == "syne_tune_cqr":
+        if not isinstance(tuner_config.searcher, str):
+            raise ValueError("Syne-Tune CQR tuner requires a string searcher.")
+        history = syne_tune_cqr_tune(
             sampler=tuner_config.searcher,
             **shared_kwargs,
         )

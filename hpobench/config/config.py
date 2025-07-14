@@ -1,12 +1,15 @@
 from confopt.selection.acquisition import (
     QuantileConformalSearcher,
 )
-from confopt.selection.sampling import (
-    ThompsonSampler,
+from confopt.selection.sampling.bound_samplers import (
     LowerBoundSampler,
-    ExpectedImprovementSampler,
-    MaxValueEntropySearchSampler,
+    PessimisticLowerBoundSampler,
 )
+from confopt.selection.sampling.entropy_samplers import MaxValueEntropySearchSampler
+from confopt.selection.sampling.expected_improvement_samplers import (
+    ExpectedImprovementSampler,
+)
+from confopt.selection.sampling.thompson_samplers import ThompsonSampler
 from hpobench.config.utils import (
     get_external_tuning_configurations,
     build_sampler_variation_configurations,
@@ -17,8 +20,8 @@ from hpobench.config.types import (
 )
 
 # Environment variables used in the main code:
-N_REPETITIONS_PER_TUNER_CONFIG = 2
-N_TRIALS = 69
+N_REPETITIONS_PER_TUNER_CONFIG = 20
+N_TRIALS = 100
 TIMEOUT = None
 N_WARM_STARTS = 15
 
@@ -27,17 +30,17 @@ DEFAULT_INTERVAL_WIDTH = 0.9
 
 # 1. Create configurations feeding the static tuning charts and tables:
 STATIC_ANALYSIS_ESTIMATOR_ARCHITECTURES = [
-    "qgbm",
+    "qgp",
+    "ql",
     "qrf",
-    # "qknn",
-    # "qlgbm",
-    # "qgp",
-    # "qens4",
+    "qgbm",
+    "qens3",
+    "qens4",
 ]
 
 # 2. Create configurations feeding the coverage charts:
 COVERAGE_ANALYSIS_CONFIGURATIONS = []
-COVERAGE_INTERVAL_WIDTHS = [0.1, 0.5]  # , 0.9]
+COVERAGE_INTERVAL_WIDTHS = [0.1, 0.5, 0.9]  # , 0.9]
 ADAPTERS = ["ACI", "DtACI", None]
 
 for interval_width in COVERAGE_INTERVAL_WIDTHS:
@@ -48,7 +51,7 @@ for interval_width in COVERAGE_INTERVAL_WIDTHS:
             c=1,
         )
         SEARCHER = QuantileConformalSearcher(
-            quantile_estimator_architecture="qrf",
+            quantile_estimator_architecture="qgbm",
             sampler=SAMPLER,
         )
         if adapter is None:
@@ -70,7 +73,7 @@ for interval_width in COVERAGE_INTERVAL_WIDTHS:
         TunerConfig(
             tuner="confopt",
             searcher=QuantileConformalSearcher(
-                quantile_estimator_architecture="qrf",
+                quantile_estimator_architecture="qgbm",
                 sampler=LowerBoundSampler(
                     interval_width=interval_width,
                     adapter=None,
@@ -84,85 +87,141 @@ for interval_width in COVERAGE_INTERVAL_WIDTHS:
     )
 
 # 3. Create configurations feeding the comparative tuner rank plots:
+SAMPLER_VARIATION_N_DEFAULT_QUANTILES = 10
+SAMPLER_VARIATION_DEFAULT_ADAPTER = None
 SAMPLER_VARIATION_CONFIGURATIONS = build_sampler_variation_configurations(
     samplers=[
-        #     InformationGainSampler(
-        #         n_quantiles=8,
-        #         adapter="DtACI",
-        #         n_paths=100,
-        #         n_X_candidates=10,
-        #         n_y_candidates_per_x=4,
-        #         sampling_strategy="thompson",
-        #     ),
         MaxValueEntropySearchSampler(
-            n_quantiles=8,
-            adapter="DtACI",
-            n_min_samples=100,
-            n_y_samples=30,
+            n_quantiles=SAMPLER_VARIATION_N_DEFAULT_QUANTILES,
+            adapter=SAMPLER_VARIATION_DEFAULT_ADAPTER,
+            n_paths=1000,
+            n_y_candidates_per_x=1000,
             entropy_method="distance",
         ),
         LowerBoundSampler(
             interval_width=DEFAULT_INTERVAL_WIDTH,
-            adapter="DtACI",
+            adapter=SAMPLER_VARIATION_DEFAULT_ADAPTER,
             c=2,
             beta_decay="logarithmic_decay",
         ),
-        # ExpectedImprovementSampler(n_quantiles=8, num_ei_samples=100, adapter="DtACI"),
-        # ThompsonSampler(n_quantiles=8, enable_optimistic_sampling=False, adapter="DtACI"),
-        # ThompsonSampler(
-        #     n_quantiles=8, enable_optimistic_sampling=True, adapter="DtACI"
-        # ),
+        LowerBoundSampler(
+            interval_width=DEFAULT_INTERVAL_WIDTH,
+            adapter=SAMPLER_VARIATION_DEFAULT_ADAPTER,
+            c=1,
+            beta_decay="logarithmic_decay",
+        ),
+        PessimisticLowerBoundSampler(
+            interval_width=DEFAULT_INTERVAL_WIDTH,
+            adapter=SAMPLER_VARIATION_DEFAULT_ADAPTER,
+        ),
+        ExpectedImprovementSampler(
+            n_quantiles=SAMPLER_VARIATION_N_DEFAULT_QUANTILES,
+            num_ei_samples=1000,
+            adapter=SAMPLER_VARIATION_DEFAULT_ADAPTER,
+        ),
+        ThompsonSampler(
+            n_quantiles=SAMPLER_VARIATION_N_DEFAULT_QUANTILES,
+            enable_optimistic_sampling=False,
+            adapter=SAMPLER_VARIATION_DEFAULT_ADAPTER,
+        ),
+        ThompsonSampler(
+            n_quantiles=SAMPLER_VARIATION_N_DEFAULT_QUANTILES,
+            enable_optimistic_sampling=True,
+            adapter=SAMPLER_VARIATION_DEFAULT_ADAPTER,
+        ),
     ],
     quantile_arch="qgbm",
 )
 
+ARCHITECTURE_VARIATION_ADAPTER = None
+ARCHITECTURE_VARIATION_N_QUANTILES = 10
 ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurations(
     architectures=[
+        "qgp",
+        "ql",
         "qrf",
-        "qknn",
-        # "qgbm",
+        "qgbm",
+        "qens3",
         "qens4",
     ],
     samplers=[
-        ExpectedImprovementSampler(n_quantiles=20, num_ei_samples=1000, adapter=None),
+        ExpectedImprovementSampler(
+            n_quantiles=ARCHITECTURE_VARIATION_N_QUANTILES,
+            num_ei_samples=1000,
+            adapter=ARCHITECTURE_VARIATION_ADAPTER,
+        ),
         ThompsonSampler(
-            n_quantiles=8, enable_optimistic_sampling=False, adapter="DtACI"
+            n_quantiles=ARCHITECTURE_VARIATION_N_QUANTILES,
+            enable_optimistic_sampling=False,
+            adapter=ARCHITECTURE_VARIATION_ADAPTER,
         ),
     ],
 )
 
-
+LIMITED_ARCHITECTURE_ADAPTER = None
+LIMITED_ARCHITECTURE_N_QUANTILES = 10
 LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurations(
     architectures=[
+        # "qgp",
         # "qrf",
-        "qgp",
+        "qgbm",
+        "qens3",
         "qens4",
     ],
     samplers=[
-        ExpectedImprovementSampler(n_quantiles=20, num_ei_samples=1000, adapter=None)
+        ExpectedImprovementSampler(
+            n_quantiles=LIMITED_ARCHITECTURE_N_QUANTILES,
+            num_ei_samples=1000,
+            adapter=LIMITED_ARCHITECTURE_ADAPTER,
+        ),
     ],
-    # TODO: TEMP:
-    # n_pre_conformal_trials=10000,  # Simulate no pre-conformal trials
+    n_pre_conformal_trials=32,
+    searcher_tuning_framework=None,
 )
 
+# TODO: TEMP
+# LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS.extend(build_architecture_variation_configurations(
+#     architectures=[
+#         # "qrf",
+#         # "qgbm",
+#     "qgp",
+#         # "qens4",
+#     ],
+#     samplers=[
+#         ExpectedImprovementSampler(n_quantiles=50, num_ei_samples=1000, adapter=None),
+#         # ThompsonSampler(
+#         #     n_quantiles=20, enable_optimistic_sampling=False, adapter=None
+#         # ),
+#     ],
+#     # TODO: TEMP:
+#     n_pre_conformal_trials=10000,  # Simulate no pre-conformal trials
+# ))
+
+
+PRECONFORMAL_ADAPTER = None
+PRECONFORMAL_N_QUANTILES = 10
 PRECONFORMAL_COMPARISON_CONFIGURATIONS = []
 for architecture in [
-    "qgbm",
     "qgp",
-    # "qens4",
+    "qgbm",
+    "qrf",
+    "qens3",
+    "qens4",
 ]:
     # Simulate normal pre-conformal cutoff vs. unreachable one:
-    for pre_conformal_trials in [20, 10000]:
+    for pre_conformal_trials in [32, 10000]:
         if pre_conformal_trials == 10000:
             adapter = None
         else:
-            adapter = "DtACI"
+            adapter = PRECONFORMAL_ADAPTER
         PRECONFORMAL_COMPARISON_CONFIGURATIONS.extend(
             build_architecture_variation_configurations(
                 architectures=[architecture],
                 samplers=[
                     ExpectedImprovementSampler(
-                        n_quantiles=8, num_ei_samples=100, adapter=adapter
+                        n_quantiles=PRECONFORMAL_N_QUANTILES,
+                        num_ei_samples=1000,
+                        adapter=adapter,
                     )
                 ],
                 n_pre_conformal_trials=pre_conformal_trials,

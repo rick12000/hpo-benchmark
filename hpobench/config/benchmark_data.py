@@ -8,7 +8,6 @@ JAHS201_SEARCH_SPACE = {
     "Activation": CategoricalRange(choices=["ReLU", "Hardswish", "Mish"]),
     "LearningRate": FloatRange(lower=0.001, upper=1),
     "WeightDecay": FloatRange(lower=1e-5, upper=1e-2),
-    "N": CategoricalRange(choices=[5]),
     "Op1": CategoricalRange(choices=list(range(5))),
     "Op2": CategoricalRange(choices=list(range(5))),
     "Op3": CategoricalRange(choices=list(range(5))),
@@ -16,10 +15,7 @@ JAHS201_SEARCH_SPACE = {
     "Op5": CategoricalRange(choices=list(range(5))),
     "Op6": CategoricalRange(choices=list(range(5))),
     "Optimizer": CategoricalRange(choices=["SGD"]),
-    "Resolution": CategoricalRange(choices=[1]),
     "TrivialAugment": CategoricalRange(choices=[True, False]),
-    "W": CategoricalRange(choices=[16]),
-    "epoch": CategoricalRange(choices=[200]),
 }
 
 

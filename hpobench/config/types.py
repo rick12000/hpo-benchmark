@@ -22,9 +22,20 @@ class CategoricalRange(BaseModel):
 
 
 class TunerConfig(BaseModel):
-    tuner: Literal["confopt", "optuna", "skopt"]
+    tuner: Literal["confopt", "optuna", "skopt", "syne_tune_cqr"]
     searcher: Union[
-        Literal["tpe", "random", "cmaes", "gbrt", "forest", "gp"],
+        Literal[
+            "tpe",
+            "random",
+            "cmaes",
+            "gbrt",
+            "forest",
+            "gp",
+            "cqr_thompson",
+            "cqr_ucb",
+            "cqr_optimistic",
+            "cqr_pessimistic",
+        ],
         QuantileConformalSearcher,
         LocallyWeightedConformalSearcher,
     ]

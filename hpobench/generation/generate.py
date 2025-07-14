@@ -133,18 +133,19 @@ class Jahs201Generator(ObjectiveMetricGenerator):
         self._lazy = lazy
         self._initialized = False
 
-        # Only initialize benchmark if not lazy loading:
+        self.default_fidelities = {
+            "epoch": 200,
+            "W": 16,
+            "N": 5,
+            "Resolution": 1,
+        }
+
         if not self._lazy:
             self._initialize_generator()
         else:
             self.generator = None
 
     def _initialize_generator(self) -> None:
-        """Initialize the JAHS-201 benchmark generator if not already initialized.
-
-        Returns:
-            None
-        """
         if not self._initialized:
             self.generator = Benchmark(
                 task=self._dataset, lazy=False, metrics=self._metrics
@@ -152,38 +153,30 @@ class Jahs201Generator(ObjectiveMetricGenerator):
             self._initialized = True
 
     def initialize(self) -> None:
-        """Public method to initialize the generator.
-
-        Returns:
-            None
-        """
         self._initialize_generator()
+
+    def _merge_with_fidelities(
+        self, configuration: dict[str, Union[str, int, float, bool]]
+    ) -> dict[str, Union[str, int, float, bool]]:
+        merged = configuration.copy()
+        merged.update(self.default_fidelities)
+        return merged
 
     def predict(self, configuration: dict[str, Union[str, int, float, bool]]) -> float:
-        """Return the negative validation accuracy for the given configuration.
-
-        Args:
-            configuration: Dictionary mapping parameter names to their values.
-
-        Returns:
-            Negative validation accuracy.
-        """
         self._initialize_generator()
-        return -self.generator(configuration)[200]["valid-acc"]
+        merged_config = self._merge_with_fidelities(configuration)
+        return -self.generator(merged_config)[self.default_fidelities["epoch"]][
+            "valid-acc"
+        ]
 
     def predict_runtime(
         self, configuration: dict[str, Union[str, int, float, bool]]
     ) -> float:
-        """Return the runtime for the given configuration.
-
-        Args:
-            configuration: Dictionary mapping parameter names to their values.
-
-        Returns:
-            Runtime.
-        """
         self._initialize_generator()
-        return self.generator(configuration)[200]["runtime"]
+        merged_config = self._merge_with_fidelities(configuration)
+        return self.generator(merged_config)[self.default_fidelities["epoch"]][
+            "runtime"
+        ]
 
 
 class YahpoGenerator(ObjectiveMetricGenerator):

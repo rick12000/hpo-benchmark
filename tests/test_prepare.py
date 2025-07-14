@@ -7,7 +7,8 @@ from hpobench.config.types import (
     ExperimentConfig,
 )
 from hpobench.config.benchmark_data import JAHS201_SEARCH_SPACE, BLACK_BOX_SEARCH_SPACE
-from hpobench.config.config import SEARCHER, create_sampler_config_id, TunerConfig
+from hpobench.config.config import SEARCHER, TunerConfig
+from hpobench.config.utils import create_sampler_config_id
 
 DEV_TUNING_CONFIGURATIONS = [
     TunerConfig(

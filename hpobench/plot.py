@@ -135,11 +135,26 @@ def plot_benchmark_data(
     row_values = _get_axis_values(data, row_measure)
     col_values = _get_axis_values(data, col_measure)
 
-    fig, axes = plt.subplots(nrows=len(row_values), ncols=len(col_values))
+    # Set consistent figure size and aspect ratio for academic readability
+    base_width = 4.0
+    base_height = 3.0
+    fig_width = base_width * len(col_values)
+    fig_height = base_height * len(row_values)
+    # Use constrained_layout for better spacing
+    fig, axes = plt.subplots(
+        nrows=len(row_values),
+        ncols=len(col_values),
+        figsize=(fig_width, fig_height),
+        sharex=True,
+        sharey=True,
+        constrained_layout=True,
+    )
     # Ensure axes is always 2D for easier iteration
-    if len(row_values) == 1:
+    if len(row_values) == 1 and len(col_values) == 1:
+        axes = [[axes]]
+    elif len(row_values) == 1:
         axes = [axes]
-    if len(col_values) == 1:
+    elif len(col_values) == 1:
         axes = [[ax] for ax in axes]
 
     # Plotting
@@ -185,37 +200,52 @@ def plot_benchmark_data(
                 )
                 ax.set_ylabel(
                     f"{formatted_row_measure}: {row_value}\n\n{y_label_to_use}",
-                    fontsize=12,
+                    fontsize=13,
                 )
             if col_measure is not None and i == 0:
-                ax.set_title(f"{formatted_col_measure}: {col_value}", fontsize=12)
+                ax.set_title(f"{formatted_col_measure}: {col_value}", fontsize=13)
             x_label_to_use = x_label if x_label is not None else _get_label(None, x_col)
-            ax.set_xlabel(x_label_to_use, fontsize=12)
-            ax.grid(True)
+            ax.set_xlabel(x_label_to_use, fontsize=13)
+            ax.grid(True, which="both", linestyle="--", linewidth=0.5, alpha=0.7)
+            # Thicker axis lines for academic style
+            ax.spines["top"].set_linewidth(1.2)
+            ax.spines["right"].set_linewidth(1.2)
+            ax.spines["bottom"].set_linewidth(1.2)
+            ax.spines["left"].set_linewidth(1.2)
+            # Set tick parameters for readability
+            ax.tick_params(
+                axis="both", which="major", labelsize=11, length=6, width=1.2
+            )
+            ax.tick_params(axis="both", which="minor", labelsize=9, length=3, width=1.0)
 
     # Add legend below the chart, ensuring no overlap with chart or x label
     handles, labels = ax.get_legend_handles_labels()
-    fig.tight_layout(rect=[0, 0.08, 1, 1])  # Leave space at the bottom for the legend
+    # Use fig.legend for a single, consistent legend
     fig.legend(
         handles,
         labels,
         loc="lower center",
-        ncol=2,
-        fontsize=10,
-        bbox_to_anchor=(0.5, 0.01),
-        bbox_transform=fig.transFigure,
+        ncol=min(4, len(labels)),
+        fontsize=12,
+        bbox_to_anchor=(0.5, -0.02),
         frameon=False,
+    )
+    # Tight layout for academic papers
+    fig.subplots_adjust(
+        wspace=0.15, hspace=0.18, bottom=0.13, top=0.93, left=0.09, right=0.98
     )
 
     # Save the plot
     for file_format in PLOT_FORMATS:
-        plt.savefig(
+        fig.savefig(
             f"{plot_path}-{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.{file_format}",
             dpi=PLOT_DPI,
             format=file_format,
+            bbox_inches="tight",
+            transparent=False,
         )
 
-    plt.close()
+    plt.close(fig)
 
 
 def plot_and_save(
@@ -223,15 +253,15 @@ def plot_and_save(
     x_col: str,
     y_cols: list,
     entity_col: str,
-    col_measure: str,
-    row_measure: str,
     cache_path: str,
     run_start_str: str,
     filename_prefix: str,
     analysis_type: str,
     subfolder: str,
-    y_cols_lower: list = None,
-    y_cols_upper: list = None,
+    col_measure: Optional[str],
+    row_measure: Optional[str],
+    y_cols_lower: Optional[list] = None,
+    y_cols_upper: Optional[list] = None,
     x_label: Optional[str] = None,
     y_label: Optional[str] = None,
     col_measure_label: Optional[str] = None,
