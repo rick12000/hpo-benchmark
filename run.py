@@ -1,5 +1,3 @@
-import warnings
-
 from hpobench.config.config import (
     PRECONFORMAL_COMPARISON_CONFIGURATIONS,
     EXTERNAL_TUNING_CONFIGURATIONS,
@@ -23,12 +21,6 @@ from hpobench.report.orchestrate import (
 )
 from hpobench.utils import setup_environment
 
-warnings.filterwarnings(
-    "ignore",
-    message="Maximum number of iterations .* reached",
-    module="statsmodels.regression.quantile_regression",
-)
-
 BASE_RANDOM_STATE = 42
 
 # Section control dictionary
@@ -38,9 +30,9 @@ run_sections = {
     "run_coverage_analysis": False,
     "run_sampler_variation_analysis": False,
     "run_architecture_variation_analysis": False,
-    "run_external_tuning_analysis": False,
+    "run_external_tuning_analysis": True,
     "run_preconformal_comparison_analysis": False,
-    "run_static_analysis": True,
+    "run_static_analysis": False,
 }
 
 CACHE_PATH = "cache/"
@@ -107,7 +99,7 @@ if __name__ == "__main__":
     # External Tuning Analysis
     if run_sections["run_external_tuning_analysis"]:
         raw_benchmark_data = run_and_analyze_main_benchmark(
-            benchmarks=["lcbench", "rbv2_xgboost"],  # , "rbv2_xgboost"
+            benchmarks=["jahs201"],  # , "rbv2_xgboost", "lcbench", "rbv2_xgboost"
             tuning_configurations=LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS
             + EXTERNAL_TUNING_CONFIGURATIONS,
             n_warm_starts=N_WARM_STARTS,

@@ -165,7 +165,7 @@ LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_con
         # "qgp",
         # "qrf",
         "qgbm",
-        "qens3",
+        # "qens3",
         # "qens4",
     ],
     samplers=[

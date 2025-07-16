@@ -14,8 +14,8 @@ import logging
 # Import required Syne-Tune components
 try:
     from syne_tune.config_space import Domain, Float, Integer, Categorical
-    from syne_tune.optimizer.schedulers.searchers.conformal.surrogate_searcher import (
-        SurrogateSearcher,
+    from syne_tune.optimizer.schedulers.searchers.conformal.legacy_surrogate_searcher import (
+        LegacySurrogateSearcher,
     )
     from syne_tune.optimizer.schedulers.searchers.conformal.surrogate.quantile_regression_surrogate import (
         QuantileRegressionSurrogateModel,
@@ -119,8 +119,8 @@ def convert_params_to_syne_tune_config_space(
     return config_space
 
 
-class CustomSurrogateSearcher(SurrogateSearcher):
-    """Custom SurrogateSearcher that allows full control over surrogate model parameters."""
+class CustomSurrogateSearcher(LegacySurrogateSearcher):
+    """Custom LegacySurrogateSearcher that allows full control over surrogate model parameters."""
 
     def __init__(self, *args, **kwargs):
         # Extract our custom parameters
