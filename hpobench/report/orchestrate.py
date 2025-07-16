@@ -526,111 +526,115 @@ def run_static_benchmark(
                     f"Loop Level | Dataset: {experiment_config.dataset_identifier}"
                 )
 
-            # Extract some parameter space realizations to train the estimator on:
-            experiment_configs_per_repetition = generate_configs_per_repetition(
-                search_space=experiment_config.search_space,
-                n_configs=data_size,
-                n_repetitions=n_repetitions_per_estimator,
-                base_seed=base_random_state,
-                objective_function=experiment_config.objective_function,
-                seed_offset=0,
-            )
-            holdout_configs_per_repetition = generate_configs_per_repetition(
-                search_space=experiment_config.search_space,
-                n_configs=data_size,
-                n_repetitions=n_repetitions_per_estimator,
-                base_seed=base_random_state,
-                objective_function=experiment_config.objective_function,
-                seed_offset=n_repetitions_per_estimator,
-            )
+                # Extract some parameter space realizations to train the estimator on:
+                experiment_configs_per_repetition = generate_configs_per_repetition(
+                    search_space=experiment_config.search_space,
+                    n_configs=data_size,
+                    n_repetitions=n_repetitions_per_estimator,
+                    base_seed=base_random_state,
+                    objective_function=experiment_config.objective_function,
+                    seed_offset=0,
+                )
+                holdout_configs_per_repetition = generate_configs_per_repetition(
+                    search_space=experiment_config.search_space,
+                    n_configs=data_size,
+                    n_repetitions=n_repetitions_per_estimator,
+                    base_seed=base_random_state,
+                    objective_function=experiment_config.objective_function,
+                    seed_offset=n_repetitions_per_estimator,
+                )
 
-            # Train the searcher on the warm start configurations and
-            # evaluate on the holdout configurations:
-            for estimator_architecture in estimator_architectures:
-                logger.info(f"Loop Level | Tuner: {estimator_architecture}")
-                for tuning_iterations in tuning_iterations_range:
-                    for repetition in range(n_repetitions_per_estimator):
-                        logger.info(f"Loop Level | Repetition: {repetition}")
+                # Train the searcher on the warm start configurations and
+                # evaluate on the holdout configurations:
+                for estimator_architecture in estimator_architectures:
+                    logger.info(f"Loop Level | Tuner: {estimator_architecture}")
+                    for tuning_iterations in tuning_iterations_range:
+                        for repetition in range(n_repetitions_per_estimator):
+                            logger.info(f"Loop Level | Repetition: {repetition}")
 
-                        experiment_data = experiment_configs_per_repetition[repetition]
-                        X_experiment = [cfg for cfg, _ in experiment_data]
-                        y_experiment = [perf for _, perf in experiment_data]
+                            experiment_data = experiment_configs_per_repetition[
+                                repetition
+                            ]
+                            X_experiment = [cfg for cfg, _ in experiment_data]
+                            y_experiment = [perf for _, perf in experiment_data]
 
-                        holdout_data = holdout_configs_per_repetition[repetition]
-                        X_holdout = [cfg for cfg, _ in holdout_data]
-                        y_holdout = [perf for _, perf in holdout_data]
+                            holdout_data = holdout_configs_per_repetition[repetition]
+                            X_holdout = [cfg for cfg, _ in holdout_data]
+                            y_holdout = [perf for _, perf in holdout_data]
 
-                        # Encode the warm start and holdout configurations:
-                        encoder = ConfigurationEncoder()
-                        encoder.fit(X_experiment)
-                        X_experiment_encoded = np.array(encoder.transform(X_experiment))
-                        X_holdout_encoded = np.array(encoder.transform(X_holdout))
+                            # Encode the warm start and holdout configurations:
+                            encoder = ConfigurationEncoder()
+                            encoder.fit(X_experiment)
+                            X_experiment_encoded = np.array(
+                                encoder.transform(X_experiment)
+                            )
+                            X_holdout_encoded = np.array(encoder.transform(X_holdout))
 
-                        # Split the warm starts for conformal training and calibration:
-                        X_train, y_train, X_val, y_val = train_val_split(
-                            X=X_experiment_encoded,
-                            y=np.array(y_experiment),
-                            train_split=(1 - calibration_split),
-                            normalize=False,
-                            ordinal=False,
-                        )
+                            # Split the warm starts for conformal training and calibration:
+                            X_train, y_train, X_val, y_val = train_val_split(
+                                X=X_experiment_encoded,
+                                y=np.array(y_experiment),
+                                train_split=(1 - calibration_split),
+                                normalize=False,
+                                ordinal=False,
+                            )
 
-                        scaler = StandardScaler()
-                        scaler.fit(X=X_train)
-                        X_train = scaler.transform(X=X_train)
-                        X_val = scaler.transform(X=X_val)
-                        X_holdout_encoded = scaler.transform(X=X_holdout_encoded)
+                            scaler = StandardScaler()
+                            scaler.fit(X=X_train)
+                            X_train = scaler.transform(X=X_train)
+                            X_val = scaler.transform(X=X_val)
+                            X_holdout_encoded = scaler.transform(X=X_holdout_encoded)
 
-                        # Train conformal searcher:
-                        searcher = QuantileConformalEstimator(
-                            quantile_estimator_architecture=estimator_architecture,
-                            alphas=[alpha],
-                            n_pre_conformal_trials=n_pre_conformal_trials,
-                        )
+                            # Train conformal searcher:
+                            searcher = QuantileConformalEstimator(
+                                quantile_estimator_architecture=estimator_architecture,
+                                alphas=[alpha],
+                                n_pre_conformal_trials=n_pre_conformal_trials,
+                            )
 
-                        # Fit with tuning_iterations
-                        searcher.fit(
-                            X_train=X_train,
-                            y_train=y_train,
-                            X_val=X_val,
-                            y_val=y_val,
-                            tuning_iterations=tuning_iterations,
-                            min_obs_for_tuning=n_pre_conformal_trials,
-                            random_state=base_random_state + repetition,
-                        )
+                            # Fit with tuning_iterations
+                            searcher.fit(
+                                X_train=X_train,
+                                y_train=y_train,
+                                X_val=X_val,
+                                y_val=y_val,
+                                tuning_iterations=tuning_iterations,
+                                min_obs_for_tuning=n_pre_conformal_trials,
+                                random_state=base_random_state + repetition,
+                            )
 
-                        # Evaluate on holdout configurations:
-                        holdout_predicted_intervals = searcher.predict_intervals(
-                            X=X_holdout_encoded,
-                        )[
-                            0
-                        ]  # [0] because we only have one alpha
+                            # Evaluate on holdout configurations:
+                            holdout_predicted_intervals = searcher.predict_intervals(
+                                X=X_holdout_encoded,
+                            )[
+                                0
+                            ]  # [0] because we only have one alpha
 
-                        lower_quantile = alpha / 2
-                        upper_quantile = 1 - lower_quantile
-                        lo_y_pred = holdout_predicted_intervals.lower_bounds
-                        hi_y_pred = holdout_predicted_intervals.upper_bounds
+                            lower_quantile = alpha / 2
+                            upper_quantile = 1 - lower_quantile
+                            lo_y_pred = holdout_predicted_intervals.lower_bounds
+                            hi_y_pred = holdout_predicted_intervals.upper_bounds
 
-                        lo_score = mean_pinball_loss(
-                            y_holdout, lo_y_pred, alpha=lower_quantile
-                        )
-                        hi_score = mean_pinball_loss(
-                            y_holdout, hi_y_pred, alpha=upper_quantile
-                        )
-                        mean_loss = (lo_score + hi_score) / 2
+                            lo_score = mean_pinball_loss(
+                                y_holdout, lo_y_pred, alpha=lower_quantile
+                            )
+                            hi_score = mean_pinball_loss(
+                                y_holdout, hi_y_pred, alpha=upper_quantile
+                            )
+                            mean_loss = (lo_score + hi_score) / 2
 
-                        # Create dictionary with results:
-                        results = {
-                            "estimator_architecture": estimator_architecture,
-                            "dataset": experiment_config.dataset_identifier,
-                            "benchmark_identifier": experiment_config.benchmark_identifier,
-                            "repetition": repetition,
-                            "tuning_iterations": tuning_iterations,
-                            "data_size": data_size,
-                            "alpha": alpha,
-                            "mean_pinball_loss": mean_loss,
-                        }
-                        estimator_error_results.append(results)
+                            # Create dictionary with results:
+                            results = {
+                                "estimator_architecture": estimator_architecture,
+                                "dataset": experiment_config.dataset_identifier,
+                                "benchmark_identifier": experiment_config.benchmark_identifier,
+                                "repetition": repetition,
+                                "tuning_iterations": tuning_iterations,
+                                "data_size": data_size,
+                                "alpha": alpha,
+                                "mean_pinball_loss": mean_loss,
+                            }
+                            estimator_error_results.append(results)
 
     logger.info("Estimator Error Analysis finished.")
     return pd.DataFrame(estimator_error_results)

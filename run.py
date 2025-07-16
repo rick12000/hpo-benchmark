@@ -29,7 +29,6 @@ warnings.filterwarnings(
     module="statsmodels.regression.quantile_regression",
 )
 
-CACHE_PATH = "cache/"
 BASE_RANDOM_STATE = 42
 
 # Section control dictionary
@@ -37,16 +36,17 @@ BASE_RANDOM_STATE = 42
 # Granular run section control
 run_sections = {
     "run_coverage_analysis": False,
-    "run_sampler_variation_analysis": True,
+    "run_sampler_variation_analysis": False,
     "run_architecture_variation_analysis": False,
-    "run_external_tuning_analysis": True,
+    "run_external_tuning_analysis": False,
     "run_preconformal_comparison_analysis": False,
-    "run_static_analysis": False,
+    "run_static_analysis": True,
 }
 
+CACHE_PATH = "cache/"
 run_start_str, logger = setup_environment(cache_path=CACHE_PATH)
-DEFAULT_MAX_N_INSTANCES = 3
-STATIC_DATA_SIZES = [50, 200]
+DEFAULT_MAX_N_INSTANCES = 20
+STATIC_DATA_SIZES = [15, 50, 100, 200]
 TUNING_ITERATIONS = [0, 10]
 
 
@@ -107,7 +107,7 @@ if __name__ == "__main__":
     # External Tuning Analysis
     if run_sections["run_external_tuning_analysis"]:
         raw_benchmark_data = run_and_analyze_main_benchmark(
-            benchmarks=["jahs201"],  # , "rbv2_xgboost"
+            benchmarks=["lcbench", "rbv2_xgboost"],  # , "rbv2_xgboost"
             tuning_configurations=LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS
             + EXTERNAL_TUNING_CONFIGURATIONS,
             n_warm_starts=N_WARM_STARTS,
@@ -153,7 +153,7 @@ if __name__ == "__main__":
         logger.info("Starting Estimator Error Analysis (STATIC configs)...")
 
         static_results = run_static_benchmark(
-            benchmarks=["lcbench", "jahs201"],
+            benchmarks=["jahs201"],
             data_size_range=STATIC_DATA_SIZES,
             estimator_architectures=STATIC_ANALYSIS_ESTIMATOR_ARCHITECTURES,
             n_repetitions_per_estimator=N_REPETITIONS_PER_TUNER_CONFIG,

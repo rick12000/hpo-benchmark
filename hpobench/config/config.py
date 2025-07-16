@@ -95,7 +95,7 @@ SAMPLER_VARIATION_CONFIGURATIONS = build_sampler_variation_configurations(
             n_quantiles=SAMPLER_VARIATION_N_DEFAULT_QUANTILES,
             adapter=SAMPLER_VARIATION_DEFAULT_ADAPTER,
             n_paths=1000,
-            n_y_candidates_per_x=1000,
+            n_y_candidates_per_x=100,  # Should be 1000, but too slow
             entropy_method="distance",
         ),
         LowerBoundSampler(
@@ -166,7 +166,7 @@ LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_con
         # "qrf",
         "qgbm",
         "qens3",
-        "qens4",
+        # "qens4",
     ],
     samplers=[
         ExpectedImprovementSampler(
