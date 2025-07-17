@@ -14,6 +14,7 @@ from hpobench.config.types import (
     ExperimentConfig,
     TunerConfig,
 )
+from hpobench.tune import setup_confopt_params
 from hpobench.report.utils import generate_configs_per_repetition
 from hpobench.config.config import (
     N_REPETITIONS_PER_TUNER_CONFIG,
@@ -563,8 +564,11 @@ def run_static_benchmark(
                             y_holdout = [perf for _, perf in holdout_data]
 
                             # Encode the warm start and holdout configurations:
-                            encoder = ConfigurationEncoder()
-                            encoder.fit(X_experiment)
+                            encoder = ConfigurationEncoder(
+                                search_space=setup_confopt_params(
+                                    experiment_config.search_space
+                                )
+                            )
                             X_experiment_encoded = np.array(
                                 encoder.transform(X_experiment)
                             )
