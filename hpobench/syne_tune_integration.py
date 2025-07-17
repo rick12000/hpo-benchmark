@@ -11,20 +11,13 @@ from datetime import datetime
 from typing import Union, Optional, Any, Dict, List, Tuple
 import logging
 
-# Import required Syne-Tune components
-try:
-    from syne_tune.config_space import Domain, Float, Integer, Categorical
-    from syne_tune.optimizer.schedulers.searchers.conformal.legacy_surrogate_searcher import (
-        LegacySurrogateSearcher,
-    )
-    from syne_tune.optimizer.schedulers.searchers.conformal.surrogate.quantile_regression_surrogate import (
-        QuantileRegressionSurrogateModel,
-    )
-
-    SYNE_TUNE_AVAILABLE = True
-except ImportError:
-    SYNE_TUNE_AVAILABLE = False
-    logging.warning("Syne-Tune not available. SyneTune CQR tuner will not work.")
+from syne_tune.config_space import Domain, Float, Integer, Categorical
+from syne_tune.optimizer.schedulers.searchers.conformal.surrogate.surrogate_model import (
+    SurrogateModel,
+)
+from syne_tune.optimizer.schedulers.searchers.conformal.surrogate.quantile_regression_surrogate import (
+    QuantileRegressionSurrogateModel,
+)
 
 from hpobench.config.types import IntRange, FloatRange, CategoricalRange
 from hpobench.generation.generate import ObjectiveMetricGenerator
@@ -99,10 +92,6 @@ def convert_params_to_syne_tune_config_space(
     Returns:
         Dictionary mapping parameter names to Syne-Tune Domain objects.
     """
-    if not SYNE_TUNE_AVAILABLE:
-        raise ImportError(
-            "Syne-Tune is not available. Please install it to use SyneTune CQR."
-        )
 
     config_space = {}
 
@@ -119,8 +108,8 @@ def convert_params_to_syne_tune_config_space(
     return config_space
 
 
-class CustomSurrogateSearcher(LegacySurrogateSearcher):
-    """Custom LegacySurrogateSearcher that allows full control over surrogate model parameters."""
+class CustomSurrogateSearcher(SurrogateModel):
+    """Custom SurrogateModel that allows full control over surrogate model parameters."""
 
     def __init__(self, *args, **kwargs):
         # Extract our custom parameters
@@ -181,10 +170,6 @@ class SyneTuneCQRWrapper:
             warm_start_configs: Optional warm start configurations.
             random_seed: Random seed for reproducibility.
         """
-        if not SYNE_TUNE_AVAILABLE:
-            raise ImportError(
-                "Syne-Tune is not available. Please install it to use SyneTune CQR."
-            )
 
         self.raw_params = raw_params
         self.performance_generator = performance_generator
@@ -312,10 +297,6 @@ def syne_tune_cqr_tune(
     Returns:
         DataFrame with tuning history.
     """
-    if not SYNE_TUNE_AVAILABLE:
-        raise ImportError(
-            "Syne-Tune is not available. Please install it to use SyneTune CQR."
-        )
 
     # Map string sampler to CQR configuration parameters
     acquisition_strategy_map = {
@@ -383,54 +364,3 @@ def syne_tune_cqr_tune(
             break
 
     return wrapper.get_history_dataframe()
-
-
-def test_syne_tune_cqr_basic_functionality():
-    """Basic test function to verify Syne-Tune CQR integration works."""
-    if not SYNE_TUNE_AVAILABLE:
-        logger.warning("Syne-Tune not available, skipping test.")
-        return
-
-    # Simple test parameters
-    test_params = {
-        "x1": IntRange(lower=0, upper=10),
-        "x2": FloatRange(lower=0.0, upper=5.0),
-    }
-
-    # Mock objective function
-    class MockGenerator:
-        def predict(self, configuration):
-            return configuration["x1"] ** 2 + configuration["x2"] ** 2
-
-    try:
-        # Test parameter conversion
-        config_space = convert_params_to_syne_tune_config_space(test_params)
-        assert "x1" in config_space
-        assert "x2" in config_space
-
-        # Test CQR parameters creation
-        cqr_params = _create_cqr_params("thompson", 0)
-        assert cqr_params["acquisition_strategy"] == "thompson"
-        assert cqr_params["quantiles"] == DEFAULT_QUANTILES
-
-        # Test with warm starts
-        cqr_params_with_warm_starts = _create_cqr_params("thompson", 10)
-        assert cqr_params_with_warm_starts["num_init_random_draws"] == 0
-
-        # Test without warm starts
-        cqr_params_no_warm_starts = _create_cqr_params("thompson", 0)
-        assert (
-            cqr_params_no_warm_starts["num_init_random_draws"]
-            == DEFAULT_NUM_INIT_RANDOM_DRAWS
-        )
-
-        logger.info("Syne-Tune CQR integration basic tests passed.")
-        return True
-
-    except Exception as e:
-        logger.error(f"Syne-Tune CQR test failed: {e}")
-        return False
-
-
-if __name__ == "__main__":
-    test_syne_tune_cqr_basic_functionality()
