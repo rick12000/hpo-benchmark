@@ -8,7 +8,7 @@ import numpy as np
 from sklearn.metrics import mean_pinball_loss
 from sklearn.preprocessing import StandardScaler
 from confopt.selection.conformalization import QuantileConformalEstimator
-from confopt.utils.encoding import ConfigurationEncoder
+from confopt.utils.configurations.encoding import ConfigurationEncoder
 from confopt.utils.preprocessing import train_val_split
 from hpobench.config.types import (
     ExperimentConfig,
