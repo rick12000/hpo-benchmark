@@ -13,6 +13,10 @@ from confopt.selection.acquisition import (
     LocallyWeightedConformalSearcher,
     QuantileConformalSearcher,
 )
+from confopt.selection.sampling.bound_samplers import (
+    LowerBoundSampler,
+    PessimisticLowerBoundSampler,
+)
 from confopt import wrapping as ranges
 from copy import deepcopy
 from functools import partial
@@ -26,14 +30,68 @@ CONFOPT_RETRAINING_FREQUENCY = 1
 N_CANDIDATES = 1000  # 10000
 
 
+def calculate_breach_status(
+    lower_bound: float,
+    upper_bound: float,
+    realization: float,
+) -> int:
+    """Calculate breach status based on prediction interval and realization.
+
+    Args:
+        lower_bound: Lower bound of prediction interval.
+        upper_bound: Upper bound of prediction interval.
+        realization: True realization (performance value).
+
+    Returns:
+        1 if breach occurred, 0 if not.
+    """
+    return 1 if (realization <= lower_bound or realization >= upper_bound) else 0
+
+
+def calculate_winkler_components(
+    lower_bound: float,
+    upper_bound: float,
+    realization: float,
+    alpha: float,
+) -> tuple[float, float, float]:
+    """Calculate Winkler score components.
+
+    Args:
+        lower_bound: Lower bound of prediction interval.
+        upper_bound: Upper bound of prediction interval.
+        realization: True realization (performance value).
+        alpha: Miscoverage rate (1 - confidence_level).
+
+    Returns:
+        Tuple of (winkler_score, width, miscoverage_penalty).
+    """
+    width = upper_bound - lower_bound
+
+    # Calculate miscoverage penalty
+    lower_penalty = (
+        (2 / alpha) * (lower_bound - realization) if realization <= lower_bound else 0.0
+    )
+    upper_penalty = (
+        (2 / alpha) * (realization - upper_bound) if realization >= upper_bound else 0.0
+    )
+    miscoverage_penalty = lower_penalty + upper_penalty
+
+    winkler_score = width + miscoverage_penalty
+
+    return winkler_score, width, miscoverage_penalty
+
+
 def build_history_entry(
     end_time: Optional[Any] = None,
     performance: Optional[Any] = None,
     configurations: Optional[Any] = None,
     iteration: Optional[int] = None,
-    breach_status: Optional[Any] = None,
     estimator_error: Optional[Any] = None,
     searcher_training_time: Optional[Any] = None,
+    breach_status: Optional[int] = None,
+    winkler_score: Optional[float] = None,
+    width: Optional[float] = None,
+    miscoverage_penalty: Optional[float] = None,
 ) -> dict[str, Any]:
     """Standardizes the history entry structure for all tuners.
 
@@ -42,9 +100,12 @@ def build_history_entry(
         performance: Performance metric value.
         configurations: Parameter configuration dictionary.
         iteration: Iteration number (1-based).
-        breach_status: Breach status for conformal methods.
         estimator_error: Error from estimator, if available.
         searcher_training_time: Time spent training the searcher, if available.
+        breach_status: Breach status (0 or 1) indicating if the prediction interval was breached.
+        winkler_score: Winkler score for the trial, indicating the quality of the prediction interval.
+        width: Width of the prediction interval.
+        miscoverage_penalty: Penalty for miscoverage, indicating the cost of the prediction interval not covering the true value.
 
     Returns:
         Dictionary with standardized keys for tuning history.
@@ -54,9 +115,12 @@ def build_history_entry(
         "performance": performance,
         "configurations": configurations,
         "iteration": iteration,
-        "breach_status": breach_status,
         "estimator_error": estimator_error,
         "searcher_training_time": searcher_training_time,
+        "breach_status": breach_status,
+        "winkler_score": winkler_score,
+        "width": width,
+        "miscoverage_penalty": miscoverage_penalty,
     }
 
 
@@ -206,10 +270,16 @@ def optuna_tune(
             performance=trial.value,
             configurations=trial.params,
             iteration=idx + 1,
+            estimator_error=None,
+            searcher_training_time=None,
+            breach_status=None,
+            winkler_score=None,
+            width=None,
+            miscoverage_penalty=None,
         )
         for idx, trial in enumerate(study.trials)
     ]
-    return pd.DataFrame(history)  # Remove best_value from return value
+    return pd.DataFrame(history)
 
 
 def confopt_objective_function(
@@ -314,18 +384,42 @@ def confopt_tune(
         else None,
     )
 
-    history = [
-        build_history_entry(
-            end_time=trial.timestamp,
-            performance=trial.performance,
-            configurations=trial.configuration,
-            iteration=idx + 1,
-            breach_status=trial.breached_interval,
-            estimator_error=trial.primary_estimator_error,
-            searcher_training_time=trial.searcher_runtime,
+    history = []
+    for idx, trial in enumerate(searcher.study.trials):
+        # Only extract alpha and calculate metrics if sampler.sampler is LowerBoundSampler or PessimisticLowerBoundSampler
+        if (
+            isinstance(
+                sampler.sampler, (LowerBoundSampler, PessimisticLowerBoundSampler)
+            )
+            and trial.lower_bound is not None
+            and trial.upper_bound is not None
+        ):
+            alpha = sampler.sampler.alpha
+            breach_status = calculate_breach_status(
+                trial.lower_bound, trial.upper_bound, trial.performance
+            )
+            winkler_score, width, miscoverage_penalty = calculate_winkler_components(
+                trial.lower_bound, trial.upper_bound, trial.performance, alpha
+            )
+        else:
+            breach_status = None
+            winkler_score = None
+            width = None
+            miscoverage_penalty = None
+        history.append(
+            build_history_entry(
+                end_time=trial.timestamp,
+                performance=trial.performance,
+                configurations=trial.configuration,
+                iteration=idx + 1,
+                estimator_error=trial.primary_estimator_error,
+                searcher_training_time=trial.searcher_runtime,
+                breach_status=breach_status,
+                winkler_score=winkler_score,
+                width=width,
+                miscoverage_penalty=miscoverage_penalty,
+            )
         )
-        for idx, trial in enumerate(searcher.study.trials)
-    ]
     return pd.DataFrame(history)
 
 
@@ -477,6 +571,12 @@ def skopt_tune(
             performance=performance,
             iteration=idx + 1,
             configurations=dict(zip(param_names, params_list)),
+            estimator_error=None,
+            searcher_training_time=None,
+            breach_status=None,
+            winkler_score=None,
+            width=None,
+            miscoverage_penalty=None,
         )
         for idx, (performance, params_list, end_time) in enumerate(zipped)
     ]

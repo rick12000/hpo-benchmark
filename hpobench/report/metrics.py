@@ -6,6 +6,7 @@ from scikit_posthocs import posthoc_nemenyi_friedman
 
 from hpobench.utils import save_analysis_results
 from hpobench.utils import get_group_dict
+from hpobench.process import bootstrap_aggregate
 from scipy.stats import friedmanchisquare
 
 
@@ -324,3 +325,82 @@ def calculate_coverage_snapshots(
         analysis_type,
         "coverage_analysis",
     )
+
+
+def _bootstrap_calibration_group(
+    group_data: pd.DataFrame,
+    score_columns: List[str],
+    n_bootstraps: int,
+    random_state: Optional[int],
+) -> pd.Series:
+    """Bootstrap aggregation for calibration score groups.
+
+    Args:
+        group_data: Data for a single group.
+        score_columns: List of score column names to process.
+        n_bootstraps: Number of bootstrap samples.
+        random_state: Random seed for reproducible results.
+
+    Returns:
+        Series with bootstrap statistics for each score column.
+    """
+    results = {}
+    for score_col in score_columns:
+        score_values = group_data[score_col].values
+
+        if len(score_values) > 5:
+            # Bootstrap the observations
+            bootstrap_result = bootstrap_aggregate(
+                pd.Series(score_values), n_bootstraps, random_state
+            )
+            results[f"{score_col}_mean"] = bootstrap_result["value"]
+            results[f"{score_col}_lower"] = bootstrap_result["q10"]
+            results[f"{score_col}_upper"] = bootstrap_result["q90"]
+        else:
+            # No observations
+            results[f"{score_col}_mean"] = np.mean(score_values)
+            results[f"{score_col}_lower"] = np.nan
+            results[f"{score_col}_upper"] = np.nan
+
+    return pd.Series(results)
+
+
+def calculate_calibration_statistics(
+    raw_benchmark_data: pd.DataFrame,
+    aggregators: List[str],
+    repetition_column: str,
+    n_bootstraps: int = 1000,
+    random_state: Optional[int] = None,
+) -> pd.DataFrame:
+    """Calculate calibration statistics for conformal prediction methods.
+
+    Args:
+        raw_benchmark_data: Raw benchmark results with winkler scores and intervals.
+        aggregators: List of aggregation column names.
+        repetition_column: Name of the repetition column.
+        confidence_level: Confidence level for bootstrap intervals.
+        n_bootstraps: Number of bootstrap samples for confidence estimation.
+        random_state: Random seed for reproducible results.
+
+    Returns:
+        DataFrame with averaged scores and confidence intervals per group.
+    """
+    score_columns = ["winkler_score", "width", "miscoverage_penalty"]
+
+    avg_scores_per_repetition = (
+        raw_benchmark_data.groupby(aggregators)[score_columns].mean().reset_index()
+    )
+
+    bootstrap_aggregators = [col for col in aggregators if col != repetition_column]
+    summary_statistics = (
+        avg_scores_per_repetition.groupby(bootstrap_aggregators)
+        .apply(
+            _bootstrap_calibration_group,
+            score_columns=score_columns,
+            n_bootstraps=n_bootstraps,
+            random_state=random_state,
+        )
+        .reset_index()
+    )
+
+    return summary_statistics

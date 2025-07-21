@@ -7,10 +7,7 @@ from hpobench.utils import save_analysis_results
 from hpobench.plot import (
     plot_and_save,
 )
-from hpobench.process import (
-    process_performance_records,
-)
-from hpobench.process import rank_and_collapse_data
+from hpobench.process import process_performance_records, rank_and_collapse_data
 
 # Import missing functions from metrics.py
 from hpobench.report.metrics import (
@@ -21,6 +18,7 @@ from hpobench.report.utils import (
     run_and_save_nemenyi,
     aggregate_and_save,
     _run_and_save_win_percentage,
+    run_and_save_calibration_statistics,
 )
 
 logger = logging.getLogger(__name__)
@@ -232,6 +230,19 @@ def analyze_main_benchmark(
             cache_path=cache_path,
             run_start_str=run_start_str,
             analysis_type=analysis_type,
+        )
+
+        run_and_save_calibration_statistics(
+            raw_benchmark_data=raw_benchmark_data,
+            aggregators=grouping_cols,
+            repetition_column=rep_col,
+            cache_path=cache_path,
+            run_start_str=run_start_str,
+            filename="calibration_statistics.csv",
+            analysis_type=analysis_type,
+            subfolder="coverage",
+            latex_layout_breakout_col=None,  # Can be modified to include estimator_architecture if needed
+            random_state=42,
         )
 
     else:
@@ -698,12 +709,6 @@ def analyze_searcher_estimator_comparison(
         latex_vertical_breakout_col=data_size_col,
         latex_layout_breakout_col=None,
     )
-
-    path_manager = AnalysisPathManager(cache_path, run_start_str)
-    tuning_plots_path = path_manager.get_analysis_path(
-        analysis_type, "plots", "estimator_comparison"
-    )
-
     # Average rank across datasets with proper quantile calculation:
     aggregation_columns = [
         col
@@ -734,4 +739,3 @@ def analyze_searcher_estimator_comparison(
         y_cols_lower=["rank_q10"],
         y_cols_upper=["rank_q90"],
     )
-    logger.info(f"Estimator rank comparison plots saved in {tuning_plots_path}")

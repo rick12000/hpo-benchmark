@@ -16,6 +16,7 @@ from hpobench.process import (
 from hpobench.report.latex import (
     format_nemenyi_results_to_latex,
     format_win_percentage_to_latex,
+    format_calibration_statistics_to_latex,
 )
 
 
@@ -245,3 +246,75 @@ def _run_and_save_win_percentage(
             "latex_outputs",
         )
     return win_percentage_results
+
+
+def run_and_save_calibration_statistics(
+    raw_benchmark_data: pd.DataFrame,
+    aggregators: List[str],
+    repetition_column: str,
+    cache_path: str,
+    run_start_str: str,
+    filename: str,
+    analysis_type: str,
+    subfolder: str = "coverage",
+    latex_layout_breakout_col: Optional[str] = None,
+    random_state: int = 42,
+) -> pd.DataFrame:
+    """Calculate calibration statistics and optionally generate LaTeX output.
+
+    Args:
+        raw_benchmark_data: Raw benchmark data
+        aggregators: List of columns to aggregate by
+        repetition_column: Column name for repetitions
+        cache_path: Base cache path
+        run_start_str: Run identifier
+        filename: CSV filename to save
+        analysis_type: Analysis type for path organization
+        subfolder: Subfolder for saving results
+        latex_layout_breakout_col: Optional column for LaTeX layout breakout
+        random_state: Random state for reproducibility
+
+    Returns:
+        DataFrame with calibration statistics
+    """
+    from hpobench.report.metrics import calculate_calibration_statistics
+
+    logger = logging.getLogger(__name__)
+
+    calibration_stats = calculate_calibration_statistics(
+        raw_benchmark_data=raw_benchmark_data,
+        aggregators=aggregators,
+        repetition_column=repetition_column,
+        random_state=random_state,
+    )
+
+    save_analysis_results(
+        df=calibration_stats,
+        cache_path=cache_path,
+        run_start_str=run_start_str,
+        filename=filename,
+        analysis_type=analysis_type,
+        subfolder=subfolder,
+    )
+
+    # Generate LaTeX table for calibration statistics
+    latex_str = format_calibration_statistics_to_latex(
+        calibration_stats,
+        layout_breakout_col=latex_layout_breakout_col,
+    )
+
+    if latex_str:
+        latex_filename = f"{filename.replace('.csv', '')}_latex.tex"
+        _save_text_content(
+            latex_str,
+            cache_path,
+            run_start_str,
+            latex_filename,
+            analysis_type,
+            "latex_outputs",
+        )
+        logger.info("Generated LaTeX table for calibration statistics")
+    else:
+        logger.warning("Failed to generate LaTeX for calibration statistics")
+
+    return calibration_stats

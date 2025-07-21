@@ -20,7 +20,7 @@ from hpobench.config.types import (
 )
 
 # Environment variables used in the main code:
-N_REPETITIONS_PER_TUNER_CONFIG = 20
+N_REPETITIONS_PER_TUNER_CONFIG = 10
 N_TRIALS = 100
 TIMEOUT = None
 N_WARM_STARTS = 15

@@ -24,6 +24,34 @@ from hpobench.generation.generate import ObjectiveMetricGenerator
 
 logger = logging.getLogger(__name__)
 
+
+def build_history_entry(
+    end_time: Optional[Any] = None,
+    performance: Optional[Any] = None,
+    configurations: Optional[Any] = None,
+    iteration: Optional[int] = None,
+    estimator_error: Optional[Any] = None,
+    searcher_training_time: Optional[Any] = None,
+    breach_status: Optional[int] = None,
+    winkler_score: Optional[float] = None,
+    width: Optional[float] = None,
+    miscoverage_penalty: Optional[float] = None,
+) -> dict[str, Any]:
+    """Standardizes the history entry structure for syne-tune integration."""
+    return {
+        "end_time": end_time,
+        "performance": performance,
+        "configurations": configurations,
+        "iteration": iteration,
+        "estimator_error": estimator_error,
+        "searcher_training_time": searcher_training_time,
+        "breach_status": breach_status,
+        "winkler_score": winkler_score,
+        "width": width,
+        "miscoverage_penalty": miscoverage_penalty,
+    }
+
+
 # Constants for CQR configuration
 DEFAULT_NUM_INIT_RANDOM_DRAWS = 5
 DEFAULT_UPDATE_FREQUENCY = 1
@@ -56,27 +84,6 @@ def _create_cqr_params(
         "min_samples_to_conformalize": DEFAULT_MIN_SAMPLES_TO_CONFORMALIZE,
         "valid_fraction": DEFAULT_VALID_FRACTION,
         "acquisition_strategy": acquisition_strategy,
-    }
-
-
-def build_history_entry(
-    end_time: Optional[Any] = None,
-    performance: Optional[Any] = None,
-    configurations: Optional[Any] = None,
-    iteration: Optional[int] = None,
-    breach_status: Optional[Any] = None,
-    estimator_error: Optional[Any] = None,
-    searcher_training_time: Optional[Any] = None,
-) -> dict[str, Any]:
-    """Standardizes the history entry structure for all tuners."""
-    return {
-        "end_time": end_time,
-        "performance": performance,
-        "configurations": configurations,
-        "iteration": iteration,
-        "breach_status": breach_status,
-        "estimator_error": estimator_error,
-        "searcher_training_time": searcher_training_time,
     }
 
 
@@ -259,6 +266,12 @@ class SyneTuneCQRWrapper:
                 performance=performance,
                 configurations=config,
                 iteration=self.trial_counter + 1,
+                estimator_error=None,
+                searcher_training_time=None,
+                breach_status=None,
+                winkler_score=None,
+                width=None,
+                miscoverage_penalty=None,
             )
         )
         self.trial_counter += 1

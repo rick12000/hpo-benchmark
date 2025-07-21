@@ -27,12 +27,12 @@ BASE_RANDOM_STATE = 42
 
 # Granular run section control
 run_sections = {
-    "run_coverage_analysis": False,
+    "run_coverage_analysis": True,
     "run_sampler_variation_analysis": False,
     "run_architecture_variation_analysis": False,
     "run_external_tuning_analysis": False,
     "run_preconformal_comparison_analysis": False,
-    "run_static_analysis": True,
+    "run_static_analysis": False,
 }
 
 CACHE_PATH = "cache/"
