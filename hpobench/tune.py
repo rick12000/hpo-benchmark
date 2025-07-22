@@ -65,7 +65,10 @@ def calculate_winkler_components(
     Returns:
         Tuple of (winkler_score, width, miscoverage_penalty).
     """
-    width = upper_bound - lower_bound
+    if upper_bound < lower_bound:
+        width = 0.0
+    else:
+        width = upper_bound - lower_bound
 
     # Calculate miscoverage penalty
     lower_penalty = (

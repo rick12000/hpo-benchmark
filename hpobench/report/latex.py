@@ -393,7 +393,7 @@ def _format_calibration_rows_simple(
     show_dataset: bool = True,
     show_confidence: bool = True,
 ) -> List[str]:
-    """Simplified row formatting without multirow complexity."""
+    """Simplified row formatting with proper multirow support for confidence levels."""
     lines: List[str] = []
 
     if df.empty:
@@ -406,7 +406,7 @@ def _format_calibration_rows_simple(
     for idx, (_, row) in enumerate(df_sorted.iterrows()):
         row_parts: List[str] = []
 
-        # Add group column values only for the first row
+        # Add group column values using multirow for the first row only
         if idx == 0:
             if group_values and len(group_values) >= 3:
                 # benchmark, dataset, confidence_level
@@ -414,26 +414,37 @@ def _format_calibration_rows_simple(
                     bench_val = (
                         str(group_values[0]) if group_values[0] is not None else ""
                     )
-                    row_parts.append(_escape_latex_text(bench_val))
+                    row_parts.append(
+                        f"\\multirow{{{num_rows}}}{{*}}{{{_escape_latex_text(bench_val)}}}"
+                    )
                 if show_dataset:
                     dataset_val = (
                         str(group_values[1]) if group_values[1] is not None else ""
                     )
-                    row_parts.append(_escape_latex_text(dataset_val))
+                    row_parts.append(
+                        f"\\multirow{{{num_rows}}}{{*}}{{{_escape_latex_text(dataset_val)}}}"
+                    )
                 if show_confidence:
                     conf_val = (
                         str(group_values[2]) if group_values[2] is not None else ""
                     )
-                    row_parts.append(_escape_latex_text(conf_val))
+                    # Clean up confidence level formatting - remove "@ " and "%"
+                    cleaned_conf = conf_val.replace("@ ", "").replace("%", "\\%")
+                    row_parts.append(
+                        f"\\multirow{{{num_rows}}}{{*}}{{{_escape_latex_text(cleaned_conf)}}}"
+                    )
             elif group_values and len(group_values) == 1:
-                # Single grouping value
+                # Single grouping value - likely confidence level
                 val = str(group_values[0]) if group_values[0] is not None else ""
+                cleaned_val = val.replace("@ ", "").replace("%", "\\%")
                 if show_benchmark:
-                    row_parts.append(_escape_latex_text(val))
+                    row_parts.append("")
                 if show_dataset:
                     row_parts.append("")
                 if show_confidence:
-                    row_parts.append("")
+                    row_parts.append(
+                        f"\\multirow{{{num_rows}}}{{*}}{{{_escape_latex_text(cleaned_val)}}}"
+                    )
             else:
                 # Use actual row values
                 if show_benchmark:
@@ -442,21 +453,28 @@ def _format_calibration_rows_simple(
                         if pd.notna(row.get("benchmark_identifier"))
                         else ""
                     )
-                    row_parts.append(_escape_latex_text(bench_val))
+                    row_parts.append(
+                        f"\\multirow{{{num_rows}}}{{*}}{{{_escape_latex_text(bench_val)}}}"
+                    )
                 if show_dataset:
                     dataset_val = (
                         str(row.get("dataset", ""))
                         if pd.notna(row.get("dataset"))
                         else ""
                     )
-                    row_parts.append(_escape_latex_text(dataset_val))
+                    row_parts.append(
+                        f"\\multirow{{{num_rows}}}{{*}}{{{_escape_latex_text(dataset_val)}}}"
+                    )
                 if show_confidence:
                     conf_val = (
                         str(row.get("confidence_level", ""))
                         if pd.notna(row.get("confidence_level"))
                         else ""
                     )
-                    row_parts.append(_escape_latex_text(conf_val))
+                    cleaned_conf = conf_val.replace("@ ", "").replace("%", "\\%")
+                    row_parts.append(
+                        f"\\multirow{{{num_rows}}}{{*}}{{{_escape_latex_text(cleaned_conf)}}}"
+                    )
         else:
             # Empty cells for subsequent rows in the group
             if show_benchmark:
@@ -466,9 +484,11 @@ def _format_calibration_rows_simple(
             if show_confidence:
                 row_parts.append("")
 
-        # Add tuner
+        # Add tuner - clean up tuner names
         tuner_val = str(row["tuner"]) if pd.notna(row["tuner"]) else ""
-        row_parts.append(_escape_latex_text(tuner_val))
+        # Remove the confidence level part from tuner name (e.g., "@ 0.1%")
+        cleaned_tuner = tuner_val.split(" @ ")[0] if " @ " in tuner_val else tuner_val
+        row_parts.append(_escape_latex_text(cleaned_tuner))
 
         # Add score columns with confidence intervals
         score_configs = [

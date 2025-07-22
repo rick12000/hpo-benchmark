@@ -1,6 +1,12 @@
 import pytest
 import pandas as pd
-from hpobench.tune import optuna_tune, confopt_tune, skopt_tune
+from hpobench.tune import (
+    optuna_tune,
+    confopt_tune,
+    skopt_tune,
+    calculate_breach_status,
+    calculate_winkler_components,
+)
 from confopt.selection.acquisition import (
     LocallyWeightedConformalSearcher,
     QuantileConformalSearcher,
@@ -10,6 +16,55 @@ from confopt.selection.acquisition import (
 
 N_TRIALS = 30
 RANDOM_STATE = 1234
+
+
+@pytest.mark.parametrize(
+    "lower_bound,upper_bound,realization,expected",
+    [
+        (0.0, 1.0, 0.5, 0),  # inside interval
+        (0.0, 1.0, -0.1, 1),  # below lower
+        (0.0, 1.0, 1.1, 1),  # above upper
+        (1.0, 0.0, 0.5, 1),  # upper < lower, inside
+        (1.0, 0.0, -1.0, 1),  # upper < lower, below
+        (1.0, 0.0, 2.0, 1),  # upper < lower, above
+    ],
+)
+def test_calculate_breach_status(lower_bound, upper_bound, realization, expected):
+    assert calculate_breach_status(lower_bound, upper_bound, realization) == expected
+
+
+@pytest.mark.parametrize(
+    "lower_bound,upper_bound,realization,alpha,expected_width",
+    [
+        (0.0, 1.0, 0.5, 0.1, 1.0),  # normal interval
+        (1.0, 0.0, 0.5, 0.1, 0.0),  # upper < lower, width forced to zero
+        (2.0, 2.0, 2.0, 0.1, 0.0),  # zero width
+    ],
+)
+def test_calculate_winkler_components_width(
+    lower_bound, upper_bound, realization, alpha, expected_width
+):
+    winkler_score, width, miscoverage_penalty = calculate_winkler_components(
+        lower_bound, upper_bound, realization, alpha
+    )
+    assert width == expected_width
+
+
+@pytest.mark.parametrize(
+    "lower_bound,upper_bound,realization,alpha,expected_penalty",
+    [
+        (0.0, 1.0, -1.0, 0.1, 20.0),  # below lower
+        (0.0, 1.0, 2.0, 0.1, 20.0),  # above upper
+        (0.0, 1.0, 0.5, 0.1, 0.0),  # inside interval
+    ],
+)
+def test_calculate_winkler_components_penalty(
+    lower_bound, upper_bound, realization, alpha, expected_penalty
+):
+    _, _, miscoverage_penalty = calculate_winkler_components(
+        lower_bound, upper_bound, realization, alpha
+    )
+    assert miscoverage_penalty == expected_penalty
 
 
 @pytest.mark.slow
@@ -184,10 +239,11 @@ def test_confopt_generates_breach_intervals(
     )
 
     assert "breach_status" in result.columns
+    # breach_status is int or None, not bool
     assert (
-        result["breach_status"].dtype == bool or pd.isna(result["breach_status"]).any()
+        result["breach_status"].dtype in [int, float]
+        or pd.isna(result["breach_status"]).any()
     )
-
     non_na_breach = result["breach_status"].dropna()
     assert len(non_na_breach) > 0
 
@@ -198,7 +254,7 @@ def _verify_tune_core_functionality(result_df, n_trials, warm_start_configs):
     for i, (config, performance) in enumerate(warm_start_configs):
         row = result_df.iloc[i]
         assert row["configurations"] == config
-        assert abs(row["performance"] - performance) < 1e-6
+        assert pytest.approx(row["performance"], abs=1e-6) == performance
 
     required_columns = ["end_time", "performance", "configurations", "iteration"]
     for col in required_columns:

@@ -38,7 +38,7 @@ run_sections = {
 CACHE_PATH = "cache/"
 run_start_str, logger = setup_environment(cache_path=CACHE_PATH)
 DEFAULT_MAX_N_INSTANCES = 3
-STATIC_DATA_SIZES = [15, 50, 100, 200]
+STATIC_DATA_SIZES = [15, 50, 100]
 TUNING_ITERATIONS = [0, 10]
 
 

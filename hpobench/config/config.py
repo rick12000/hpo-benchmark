@@ -20,7 +20,7 @@ from hpobench.config.types import (
 )
 
 # Environment variables used in the main code:
-N_REPETITIONS_PER_TUNER_CONFIG = 10
+N_REPETITIONS_PER_TUNER_CONFIG = 20
 N_TRIALS = 100
 TIMEOUT = None
 N_WARM_STARTS = 15
@@ -154,6 +154,12 @@ ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurati
             n_quantiles=ARCHITECTURE_VARIATION_N_QUANTILES,
             enable_optimistic_sampling=False,
             adapter=ARCHITECTURE_VARIATION_ADAPTER,
+        ),
+        LowerBoundSampler(
+            interval_width=DEFAULT_INTERVAL_WIDTH,
+            adapter=ARCHITECTURE_VARIATION_ADAPTER,
+            c=1,
+            beta_decay="logarithmic_decay",
         ),
     ],
 )
