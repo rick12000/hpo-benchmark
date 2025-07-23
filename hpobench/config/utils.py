@@ -137,19 +137,19 @@ def build_static_tuning_configurations(
         c=1,
         beta_decay="logarithmic_decay",
     )
-
+    sampler_copy = deepcopy(placeholder_sampler)
     return [
         TunerConfig(
             tuner="confopt",
             searcher=QuantileConformalSearcher(
                 quantile_estimator_architecture=arch,
-                sampler=deepcopy(placeholder_sampler),
+                sampler=sampler_copy,
                 n_pre_conformal_trials=n_pre_conformal_trials,
             ),
             config_identifier=create_sampler_config_id(
                 QuantileConformalSearcher(
                     quantile_estimator_architecture=arch,
-                    sampler=deepcopy(placeholder_sampler),
+                    sampler=sampler_copy,
                     n_pre_conformal_trials=n_pre_conformal_trials,
                 ),
                 searcher_tuning_framework=framework,
@@ -187,9 +187,10 @@ def build_sampler_variation_configurations(
     """
     configs = []
     for sampler in samplers:
+        sampler_copy = deepcopy(sampler)
         searcher = QuantileConformalSearcher(
             quantile_estimator_architecture=quantile_arch,
-            sampler=deepcopy(sampler),
+            sampler=sampler_copy,
             n_pre_conformal_trials=n_pre_conformal_trials,
         )
         config_id = create_sampler_config_id(searcher)
@@ -231,9 +232,10 @@ def build_architecture_variation_configurations(
     configs = []
     for arch in architectures:
         for sampler in samplers:
+            sampler_copy = deepcopy(sampler)
             searcher = QuantileConformalSearcher(
                 quantile_estimator_architecture=arch,
-                sampler=deepcopy(sampler),
+                sampler=sampler_copy,
                 n_pre_conformal_trials=n_pre_conformal_trials,
             )
             config_id = create_sampler_config_id(searcher)

@@ -45,7 +45,7 @@ def calculate_breach_status(
     Returns:
         1 if breach occurred, 0 if not.
     """
-    return 1 if (realization <= lower_bound or realization >= upper_bound) else 0
+    return 1 if (realization < lower_bound or realization > upper_bound) else 0
 
 
 def calculate_winkler_components(
@@ -373,9 +373,10 @@ def confopt_tune(
     else:
         adj_n_trials = n_trials
 
+    sampler_copy = deepcopy(sampler)
     # NOTE: Zero random searches because this benchmark repository uses warm-starting:
     searcher.tune(
-        searcher=deepcopy(sampler),
+        searcher=sampler_copy,
         max_runtime=int(timeout) if timeout is not None else None,
         max_searches=adj_n_trials,
         n_random_searches=0,

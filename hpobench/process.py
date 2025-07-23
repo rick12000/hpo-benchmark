@@ -593,7 +593,7 @@ def process_performance_records(
             aggregators=aggregators,
             budget_unit=budget_unit,
             breach_column="breach_status",
-            rolling_breach_count=60,
+            rolling_breach_count=30,
         )
     elif budget_unit == "runtime":
         discretized_benchmark_data_time = time_discretize_benchmark_data(

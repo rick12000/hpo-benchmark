@@ -21,7 +21,7 @@ from hpobench.config.types import (
 
 # Environment variables used in the main code:
 N_REPETITIONS_PER_TUNER_CONFIG = 20
-N_TRIALS = 100
+N_TRIALS = 200
 TIMEOUT = None
 N_WARM_STARTS = 15
 
@@ -40,7 +40,7 @@ STATIC_ANALYSIS_ESTIMATOR_ARCHITECTURES = [
 
 # 2. Create configurations feeding the coverage charts:
 COVERAGE_ANALYSIS_CONFIGURATIONS = []
-COVERAGE_INTERVAL_WIDTHS = [0.1, 0.5, 0.9]  # , 0.9]
+COVERAGE_INTERVAL_WIDTHS = [0.5, 0.9, 0.95]  # , 0.9]
 ADAPTERS = ["ACI", "DtACI", None]
 
 for interval_width in COVERAGE_INTERVAL_WIDTHS:
