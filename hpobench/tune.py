@@ -374,6 +374,8 @@ def confopt_tune(
         adj_n_trials = n_trials
 
     sampler_copy = deepcopy(sampler)
+    if isinstance(sampler.sampler, (LowerBoundSampler, PessimisticLowerBoundSampler)):
+        alpha = sampler.sampler.alpha
     # NOTE: Zero random searches because this benchmark repository uses warm-starting:
     searcher.tune(
         searcher=sampler_copy,
@@ -398,7 +400,6 @@ def confopt_tune(
             and trial.lower_bound is not None
             and trial.upper_bound is not None
         ):
-            alpha = sampler.sampler.alpha
             breach_status = calculate_breach_status(
                 trial.lower_bound, trial.upper_bound, trial.performance
             )

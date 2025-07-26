@@ -74,9 +74,20 @@ def _get_y_bounds(
 
 
 def _plot_tuner(
-    ax, tuner_data, x_col, y_col, tuner, color, add_ci, y_col_lower, y_col_upper
+    ax,
+    tuner_data,
+    x_col,
+    y_col,
+    tuner,
+    color,
+    add_ci,
+    y_col_lower,
+    y_col_upper,
+    legend_label,
 ):
-    ax.plot(tuner_data[x_col], tuner_data[y_col], label=tuner, alpha=0.8, color=color)
+    ax.plot(
+        tuner_data[x_col], tuner_data[y_col], label=legend_label, alpha=0.8, color=color
+    )
     if add_ci and y_col_lower and y_col_upper:
         ax.fill_between(
             tuner_data[x_col],
@@ -102,6 +113,8 @@ def plot_benchmark_data(
     y_label: Optional[str] = None,
     col_measure_label: Optional[str] = None,
     row_measure_label: Optional[str] = None,
+    share_y_axis: bool = False,
+    entity_legend_mapping: Optional[dict] = None,
 ) -> None:
     """
     Plots benchmark data in a grid of subplots, with rows and columns determined by specified measures.
@@ -145,19 +158,34 @@ def plot_benchmark_data(
         nrows=len(row_values),
         ncols=len(col_values),
         figsize=(fig_width, fig_height),
-        sharex=True,
-        sharey=True,
+        sharex=False,
+        sharey=False,
         constrained_layout=True,
     )
     # Ensure axes is always 2D for easier iteration
+    single_row = False
+    single_col = False
     if len(row_values) == 1 and len(col_values) == 1:
         axes = [[axes]]
+        single_row = True
+        single_col = True
     elif len(row_values) == 1:
         axes = [axes]
+        single_row = True
     elif len(col_values) == 1:
         axes = [[ax] for ax in axes]
+        single_col = True
 
-    # Plotting
+    # Compute global y_min and y_max if sharing y axis
+    if share_y_axis:
+        global_y_min, global_y_max = _get_y_bounds(
+            data, y_col, y_col_lower, y_col_upper
+        )
+        y_range = global_y_max - global_y_min
+        buffer = 0.05 * y_range if y_range > 0 else 0.05
+        global_y_min -= buffer
+        global_y_max += buffer
+
     for i, row_value in enumerate(row_values):
         for j, col_value in enumerate(col_values):
             ax = axes[i][j]
@@ -176,6 +204,11 @@ def plot_benchmark_data(
                         f"with {row_measure}={row_value} and {col_measure}={col_value}. "
                         "Each X-axis unit must have only one value per line."
                     )
+                legend_label = (
+                    entity_legend_mapping.get(entity, entity)
+                    if entity_legend_mapping
+                    else entity
+                )
                 _plot_tuner(
                     ax=ax,
                     tuner_data=entity_data,
@@ -188,22 +221,38 @@ def plot_benchmark_data(
                     add_ci=add_confidence_intervals,
                     y_col_lower=y_col_lower,
                     y_col_upper=y_col_upper,
+                    legend_label=legend_label,
                 )
 
-            y_min, y_max = _get_y_bounds(subset, y_col, y_col_lower, y_col_upper)
-            ax.set_ylim((y_min, y_max))
+            if share_y_axis:
+                ax.set_ylim((global_y_min, global_y_max))
+            else:
+                y_min, y_max = _get_y_bounds(subset, y_col, y_col_lower, y_col_upper)
+                y_range = y_max - y_min
+                buffer = 0.05 * y_range if y_range > 0 else 0.05
+                ax.set_ylim((y_min - buffer, y_max + buffer))
 
             # Add titles and labels
             if row_measure is not None and j == 0:
                 y_label_to_use = (
                     y_label if y_label is not None else _get_label(None, y_col)
                 )
+                if single_row:
+                    row_title = f"{y_label_to_use}"
+                else:
+                    row_title = (
+                        f"{formatted_row_measure}: {row_value} \n\n{y_label_to_use}"
+                    )
                 ax.set_ylabel(
-                    f"{formatted_row_measure}: {row_value}\n\n{y_label_to_use}",
+                    row_title,
                     fontsize=13,
                 )
             if col_measure is not None and i == 0:
-                ax.set_title(f"{formatted_col_measure}: {col_value}", fontsize=13)
+                if single_col:
+                    col_title = f"{formatted_col_measure}"
+                else:
+                    col_title = f"{formatted_col_measure}: {col_value}"
+                ax.set_title(col_title, fontsize=13)
             x_label_to_use = x_label if x_label is not None else _get_label(None, x_col)
             ax.set_xlabel(x_label_to_use, fontsize=13)
             ax.grid(True, which="both", linestyle="--", linewidth=0.5, alpha=0.7)
@@ -227,12 +276,12 @@ def plot_benchmark_data(
         loc="lower center",
         ncol=min(4, len(labels)),
         fontsize=12,
-        bbox_to_anchor=(0.5, -0.02),
+        bbox_to_anchor=(0.5, -0.16),
         frameon=False,
     )
-    # Tight layout for academic papers
+    # Tight layout for academic papers with extra bottom space for legend
     fig.subplots_adjust(
-        wspace=0.15, hspace=0.18, bottom=0.13, top=0.93, left=0.09, right=0.98
+        wspace=0.15, hspace=0.18, bottom=0.20, top=0.93, left=0.09, right=0.98
     )
 
     # Save the plot
@@ -266,6 +315,8 @@ def plot_and_save(
     y_label: Optional[str] = None,
     col_measure_label: Optional[str] = None,
     row_measure_label: Optional[str] = None,
+    share_y_axis: bool = False,
+    entity_legend_mapping: Optional[dict] = None,
 ):
     """Generates and saves plots for specified y-columns, saving to the correct path."""
 
@@ -308,6 +359,8 @@ def plot_and_save(
                 y_label=y_label,
                 col_measure_label=col_measure_label,
                 row_measure_label=row_measure_label,
+                share_y_axis=share_y_axis,
+                entity_legend_mapping=entity_legend_mapping,
             )
             time.sleep(2)
         except Exception as e:

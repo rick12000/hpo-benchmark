@@ -133,7 +133,7 @@ def accumulate_breaches(
     )
     sorted_experiment_log["rolling_breach_rate"] = (
         sorted_experiment_log.groupby(aggregators)[breach_column]
-        .rolling(window=rolling_breach_count, min_periods=1)
+        .rolling(window=rolling_breach_count, min_periods=rolling_breach_count)
         .mean()
         .reset_index(level=aggregators, drop=True)
     )

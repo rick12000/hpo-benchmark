@@ -28,7 +28,7 @@ BASE_RANDOM_STATE = 42
 # Granular run section control
 run_sections = {
     "run_coverage_analysis": True,
-    "run_sampler_variation_analysis": False,
+    "run_sampler_variation_analysis": True,
     "run_architecture_variation_analysis": False,
     "run_external_tuning_analysis": False,
     "run_preconformal_comparison_analysis": False,
@@ -37,10 +37,10 @@ run_sections = {
 
 CACHE_PATH = "cache/"
 run_start_str, logger = setup_environment(cache_path=CACHE_PATH)
-DEFAULT_MAX_N_INSTANCES = 3
+DEFAULT_MAX_N_INSTANCES = 2
 STATIC_DATA_SIZES = [15, 50, 100]
 TUNING_ITERATIONS = [0, 10]
-
+N_COVERAGE_TRIALS = 200
 
 if __name__ == "__main__":
     # Coverage Analysis
@@ -49,13 +49,14 @@ if __name__ == "__main__":
             benchmarks=["jahs201"],
             tuning_configurations=COVERAGE_ANALYSIS_CONFIGURATIONS,
             n_warm_starts=N_WARM_STARTS,
-            n_trials=N_TRIALS,
+            n_trials=N_COVERAGE_TRIALS,
             timeout=TIMEOUT,
             base_random_state=BASE_RANDOM_STATE,
             cache_path=CACHE_PATH,
             run_start_str=run_start_str,
             analysis_type="01_coverage_analysis",
             max_n_instances_per_benchmark=DEFAULT_MAX_N_INSTANCES,
+            starting_coverage_trial=32,
             analysis_components=["coverage"],
             datasets_per_benchmark=[["cifar10"]],
         )

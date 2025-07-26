@@ -316,6 +316,7 @@ def run_and_analyze_main_benchmark(
         ]
     ],
     max_n_instances_per_benchmark: int = 10,
+    starting_coverage_trial: Optional[int] = None,
     n_repetitions: int = N_REPETITIONS_PER_TUNER_CONFIG,
     datasets_per_benchmark: Optional[list[list[str]]] = None,
 ) -> pd.DataFrame:
@@ -403,6 +404,7 @@ def run_and_analyze_main_benchmark(
         run_start_str=run_start_str,
         analysis_type=analysis_type,
         analysis_components=analysis_components,
+        starting_coverage_trial=starting_coverage_trial,
     )
 
     return raw_benchmark_data

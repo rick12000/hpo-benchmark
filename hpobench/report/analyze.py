@@ -1,6 +1,6 @@
 import pandas as pd
 import logging
-from typing import List, Literal
+from typing import List, Literal, Optional
 from hpobench.utils import AnalysisPathManager
 
 from hpobench.utils import save_analysis_results
@@ -43,6 +43,7 @@ def analyze_main_benchmark(
         ]
     ],
     alpha: float = 0.05,
+    starting_coverage_trial: Optional[int] = None,
 ):
     """Analyze HPO benchmark results with comprehensive statistical and visual analysis.
 
@@ -205,8 +206,28 @@ def analyze_main_benchmark(
         absolute_iteration_results[data_col].nunique() == 1
         and "coverage" in analysis_components
     ):
+        if starting_coverage_trial is not None:
+            raw_benchmark_data_adj = raw_benchmark_data[
+                raw_benchmark_data[iter_unit] >= starting_coverage_trial
+            ]
+            absolute_iteration_results_adj = process_performance_records(
+                raw_benchmark_data=raw_benchmark_data_adj,
+                aggregators=grouping_cols,
+                performance_column=perf_col,
+                budget_unit=iter_unit,
+                repetition_column=rep_col,
+                tuner_column=tuner_col,
+                relativize_budget=False,
+                sampler_column=sampler_col,
+                confidence_level_column=confidence_level_col,
+                estimator_architecture_column=estimator_architecture_col,
+            )
+        else:
+            raw_benchmark_data_adj = raw_benchmark_data.copy()
+            absolute_iteration_results_adj = absolute_iteration_results.copy()
+
         plot_and_save(
-            data=absolute_iteration_results,
+            data=absolute_iteration_results_adj,
             x_col=iter_unit,
             y_cols=["cumulative_breach_rate", "rolling_breach_rate"],
             entity_col=tuner_col,
@@ -219,10 +240,11 @@ def analyze_main_benchmark(
             subfolder="coverage_breach_rates",
             y_cols_lower=["cumulative_breach_rate_q10", "rolling_breach_rate_q10"],
             y_cols_upper=["cumulative_breach_rate_q90", "rolling_breach_rate_q90"],
+            share_y_axis=False,
         )
 
         calculate_coverage_snapshots(
-            iteration_data=absolute_iteration_results,
+            iteration_data=absolute_iteration_results_adj,
             relativized_budget_cross_sections=budget_cross_sections,
             identifier_cols=[bench_col, data_col, tuner_col],
             iteration_col=iter_unit,
@@ -233,7 +255,7 @@ def analyze_main_benchmark(
         )
 
         run_and_save_calibration_statistics(
-            raw_benchmark_data=raw_benchmark_data,
+            raw_benchmark_data=raw_benchmark_data_adj,
             aggregators=grouping_cols,
             repetition_column=rep_col,
             cache_path=cache_path,
@@ -266,6 +288,7 @@ def analyze_main_benchmark(
             subfolder="dataset_performances",
             y_cols_lower=["best_performance_q10", "rank_q10"],
             y_cols_upper=["best_performance_q90", "rank_q90"],
+            share_y_axis=False,
         )
 
     # Rank analysis:
@@ -301,6 +324,7 @@ def analyze_main_benchmark(
             subfolder="rank_analysis",
             y_cols_lower=["rank_q10"],
             y_cols_upper=["rank_q90"],
+            share_y_axis=False,
         )
 
         # Group at benchmark level:
@@ -334,6 +358,7 @@ def analyze_main_benchmark(
             subfolder="rank_analysis",
             y_cols_lower=["rank_q10"],
             y_cols_upper=["rank_q90"],
+            share_y_axis=False,
         )
 
     # NOTE: For next two breakout plots, values are first ranked by benchmark
@@ -356,6 +381,7 @@ def analyze_main_benchmark(
             subfolder="sampler_comparison",
             y_cols_lower=["rank_q10"],
             y_cols_upper=["rank_q90"],
+            share_y_axis=False,
         )
 
     # Architecture comparison plots:
@@ -374,6 +400,7 @@ def analyze_main_benchmark(
             subfolder="architecture_comparison",
             y_cols_lower=["rank_q10"],
             y_cols_upper=["rank_q90"],
+            share_y_axis=False,
         )
 
     # Conformalization effect analysis:
@@ -442,6 +469,7 @@ def analyze_main_benchmark(
             subfolder="conformalization_effect",
             y_cols_lower=["rank_q10"],
             y_cols_upper=["rank_q90"],
+            share_y_axis=False,
         )
 
 
@@ -587,6 +615,7 @@ def analyze_searcher_tuning_effect(
         row_measure=bench_col,
         y_cols_lower=["rank_q10"],
         y_cols_upper=["rank_q90"],
+        share_y_axis=False,
     )
 
     logger.info(f"Tuning rank comparison plots saved in {tuning_plots_path}")
@@ -738,4 +767,5 @@ def analyze_searcher_estimator_comparison(
         row_measure=None,
         y_cols_lower=["rank_q10"],
         y_cols_upper=["rank_q90"],
+        share_y_axis=False,
     )

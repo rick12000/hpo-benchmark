@@ -20,8 +20,8 @@ from hpobench.config.types import (
 )
 
 # Environment variables used in the main code:
-N_REPETITIONS_PER_TUNER_CONFIG = 20
-N_TRIALS = 200
+N_REPETITIONS_PER_TUNER_CONFIG = 10
+N_TRIALS = 100
 TIMEOUT = None
 N_WARM_STARTS = 15
 
@@ -40,7 +40,7 @@ STATIC_ANALYSIS_ESTIMATOR_ARCHITECTURES = [
 
 # 2. Create configurations feeding the coverage charts:
 COVERAGE_ANALYSIS_CONFIGURATIONS = []
-COVERAGE_INTERVAL_WIDTHS = [0.5, 0.9, 0.95]  # , 0.9]
+COVERAGE_INTERVAL_WIDTHS = [0.2, 0.4, 0.6, 0.8]  # , 0.9]
 ADAPTERS = ["ACI", "DtACI", None]
 
 for interval_width in COVERAGE_INTERVAL_WIDTHS:
@@ -48,16 +48,16 @@ for interval_width in COVERAGE_INTERVAL_WIDTHS:
         SAMPLER = LowerBoundSampler(
             interval_width=interval_width,
             adapter=adapter,
-            c=1,
+            c=0,
         )
         SEARCHER = QuantileConformalSearcher(
             quantile_estimator_architecture="qgbm",
             sampler=SAMPLER,
         )
         if adapter is None:
-            config_identifier = f"Conformalized @ {interval_width}%"
+            config_identifier = "Conformalized"
         elif adapter in ["ACI", "DtACI"]:
-            config_identifier = f"Conformalized + {adapter} @ {interval_width}%"
+            config_identifier = f"Conformalized + {adapter}"
         else:
             raise ValueError(f"Unknown adapter: {adapter}")
         COVERAGE_ANALYSIS_CONFIGURATIONS.append(
@@ -77,11 +77,11 @@ for interval_width in COVERAGE_INTERVAL_WIDTHS:
                 sampler=LowerBoundSampler(
                     interval_width=interval_width,
                     adapter=None,
-                    c=1,
+                    c=0,
                 ),
                 n_pre_conformal_trials=10000,
             ),
-            config_identifier=f"Unconformalized @ {interval_width}%",
+            config_identifier="Unconformalized",
             searcher_tuning_framework=None,
         )
     )
