@@ -3,6 +3,8 @@ import numpy as np
 import logging
 from typing import List, Optional
 from scikit_posthocs import posthoc_nemenyi_friedman
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
 
 from hpobench.utils import save_analysis_results
 from hpobench.utils import get_group_dict
@@ -327,6 +329,52 @@ def calculate_coverage_snapshots(
     )
 
 
+def _log_likelihood(model, X_input, y):
+    eps = 1e-15
+    probs = model.predict_proba(X_input)
+    return np.sum(y * np.log(probs[:, 1] + eps) + (1 - y) * np.log(probs[:, 0] + eps))
+
+
+def _compute_likelihood_ratio_statistic(
+    X: pd.DataFrame, y: pd.Series, random_state: Optional[int] = None
+) -> float:
+    """Compute likelihood ratio test statistic for logistic regression models.
+
+    Fits two logistic regression models:
+    1. Null model (intercept only)
+    2. Full model (with all features)
+
+    Computes the likelihood ratio test statistic: 2 * (log_likelihood_full - log_likelihood_null)
+
+    Args:
+        X: Feature matrix (configuration features).
+        y: Binary outcome vector (breach indicators).
+        random_state: Random seed for reproducible results.
+
+    Returns:
+        Likelihood ratio test statistic.
+    """
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+
+    # Fit null model (intercept only)
+    null_model = LogisticRegression(
+        fit_intercept=True, random_state=random_state, max_iter=1000
+    )
+    intercept_only = np.ones((len(X_scaled), 1))
+    null_model.fit(intercept_only, y)
+    ll_null = _log_likelihood(null_model, intercept_only, y)
+
+    # Fit full model
+    full_model = LogisticRegression(
+        fit_intercept=True, random_state=random_state, max_iter=1000
+    )
+    full_model.fit(X_scaled, y)
+    ll_full = _log_likelihood(full_model, X_scaled, y)
+
+    return 2 * (ll_full - ll_null)
+
+
 def _bootstrap_calibration_group(
     group_data: pd.DataFrame,
     score_columns: List[str],
@@ -369,6 +417,7 @@ def calculate_calibration_statistics(
     raw_benchmark_data: pd.DataFrame,
     aggregators: List[str],
     repetition_column: str,
+    breach_column: str,
     n_bootstraps: int = 1000,
     random_state: Optional[int] = None,
 ) -> pd.DataFrame:
@@ -378,17 +427,36 @@ def calculate_calibration_statistics(
         raw_benchmark_data: Raw benchmark results with winkler scores and intervals.
         aggregators: List of aggregation column names.
         repetition_column: Name of the repetition column.
-        confidence_level: Confidence level for bootstrap intervals.
+        breach_column: Name of the column containing binary breach indicators.
         n_bootstraps: Number of bootstrap samples for confidence estimation.
         random_state: Random seed for reproducible results.
 
     Returns:
         DataFrame with averaged scores and confidence intervals per group.
     """
-    score_columns = ["winkler_score", "width", "miscoverage_penalty"]
-
+    # Compute simple statistics:
+    score_columns = [
+        "winkler_score",
+        "width",
+        "miscoverage_penalty",
+        "chunked_target_coverage_deviation",
+    ]
     avg_scores_per_repetition = (
         raw_benchmark_data.groupby(aggregators)[score_columns].mean().reset_index()
+    )
+
+    # Compute likelihood ratio statistic:
+    tabularized_features = np.vstack(
+        raw_benchmark_data["tabularized_configuration"].values
+    )
+    llr_series = raw_benchmark_data.groupby(aggregators).apply(
+        lambda grp: _compute_likelihood_ratio_statistic(
+            tabularized_features, grp[breach_column], random_state
+        )
+    )
+    llr_df = llr_series.reset_index(name="llr_statistic")
+    avg_scores_per_repetition = avg_scores_per_repetition.merge(
+        llr_df, on=aggregators, how="left"
     )
 
     bootstrap_aggregators = [col for col in aggregators if col != repetition_column]
@@ -396,7 +464,7 @@ def calculate_calibration_statistics(
         avg_scores_per_repetition.groupby(bootstrap_aggregators)
         .apply(
             _bootstrap_calibration_group,
-            score_columns=score_columns,
+            score_columns=score_columns + ["llr_statistic"],
             n_bootstraps=n_bootstraps,
             random_state=random_state,
         )

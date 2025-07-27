@@ -95,6 +95,7 @@ def build_history_entry(
     winkler_score: Optional[float] = None,
     width: Optional[float] = None,
     miscoverage_penalty: Optional[float] = None,
+    tabularized_configuration: Optional[Any] = None,
 ) -> dict[str, Any]:
     """Standardizes the history entry structure for all tuners.
 
@@ -109,6 +110,7 @@ def build_history_entry(
         winkler_score: Winkler score for the trial, indicating the quality of the prediction interval.
         width: Width of the prediction interval.
         miscoverage_penalty: Penalty for miscoverage, indicating the cost of the prediction interval not covering the true value.
+        tabularized_configuration: Tabularized configuration data, if available.
 
     Returns:
         Dictionary with standardized keys for tuning history.
@@ -124,6 +126,7 @@ def build_history_entry(
         "winkler_score": winkler_score,
         "width": width,
         "miscoverage_penalty": miscoverage_penalty,
+        "tabularized_configuration": tabularized_configuration,
     }
 
 
@@ -279,6 +282,7 @@ def optuna_tune(
             winkler_score=None,
             width=None,
             miscoverage_penalty=None,
+            tabularized_configuration=None,
         )
         for idx, trial in enumerate(study.trials)
     ]
@@ -423,6 +427,7 @@ def confopt_tune(
                 winkler_score=winkler_score,
                 width=width,
                 miscoverage_penalty=miscoverage_penalty,
+                tabularized_configuration=trial.tabularized_configuration,
             )
         )
     return pd.DataFrame(history)
@@ -582,6 +587,7 @@ def skopt_tune(
             winkler_score=None,
             width=None,
             miscoverage_penalty=None,
+            tabularized_configuration=None,
         )
         for idx, (performance, params_list, end_time) in enumerate(zipped)
     ]

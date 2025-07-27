@@ -252,6 +252,7 @@ def run_and_save_calibration_statistics(
     raw_benchmark_data: pd.DataFrame,
     aggregators: List[str],
     repetition_column: str,
+    breach_column: str,
     cache_path: str,
     run_start_str: str,
     filename: str,
@@ -266,6 +267,7 @@ def run_and_save_calibration_statistics(
         raw_benchmark_data: Raw benchmark data
         aggregators: List of columns to aggregate by
         repetition_column: Column name for repetitions
+        breach_column: Column name for binary breach indicators
         cache_path: Base cache path
         run_start_str: Run identifier
         filename: CSV filename to save
@@ -285,6 +287,7 @@ def run_and_save_calibration_statistics(
         raw_benchmark_data=raw_benchmark_data,
         aggregators=aggregators,
         repetition_column=repetition_column,
+        breach_column=breach_column,
         random_state=random_state,
     )
 

@@ -36,6 +36,7 @@ def build_history_entry(
     winkler_score: Optional[float] = None,
     width: Optional[float] = None,
     miscoverage_penalty: Optional[float] = None,
+    tabularized_configuration: Optional[Any] = None,
 ) -> dict[str, Any]:
     """Standardizes the history entry structure for syne-tune integration."""
     return {
@@ -49,6 +50,7 @@ def build_history_entry(
         "winkler_score": winkler_score,
         "width": width,
         "miscoverage_penalty": miscoverage_penalty,
+        "tabularized_configuration": tabularized_configuration,
     }
 
 
@@ -272,6 +274,7 @@ class SyneTuneCQRWrapper:
                 winkler_score=None,
                 width=None,
                 miscoverage_penalty=None,
+                tabularized_configuration=None,
             )
         )
         self.trial_counter += 1

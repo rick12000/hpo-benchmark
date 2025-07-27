@@ -270,7 +270,13 @@ def _format_score_with_interval(
 
 
 def _identify_best_scores(group_df: pd.DataFrame) -> pd.DataFrame:
-    score_columns = ["winkler_score_mean", "width_mean", "miscoverage_penalty_mean"]
+    score_columns = [
+        "winkler_score_mean",
+        "width_mean",
+        "miscoverage_penalty_mean",
+        "llr_statistic_mean",
+        "chunked_target_coverage_deviation_mean",
+    ]
     result_df = group_df.copy()
 
     for score_col in score_columns:
@@ -300,7 +306,7 @@ def _build_calibration_table_block(df_block: pd.DataFrame, caption: str) -> str:
     )
 
     # Count visible columns for table structure
-    visible_cols = 4  # Tuner + 3 score columns (always shown)
+    visible_cols = 6  # Tuner + 5 score columns (always shown)
     if show_benchmark:
         visible_cols += 1
     if show_dataset:
@@ -332,6 +338,8 @@ def _build_calibration_table_block(df_block: pd.DataFrame, caption: str) -> str:
             "\\textbf{Winkler Score}",
             "\\textbf{Width}",
             "\\textbf{Miscoverage Penalty}",
+            "\\textbf{LLR Statistic}",
+            "\\textbf{Coverage MAD}",
         ]
     )
 
@@ -498,6 +506,16 @@ def _format_calibration_rows_simple(
                 "miscoverage_penalty_mean",
                 "miscoverage_penalty_lower",
                 "miscoverage_penalty_upper",
+            ),
+            (
+                "llr_statistic_mean",
+                "llr_statistic_lower",
+                "llr_statistic_upper",
+            ),
+            (
+                "chunked_target_coverage_deviation_mean",
+                "chunked_target_coverage_deviation_lower",
+                "chunked_target_coverage_deviation_upper",
             ),
         ]
 
