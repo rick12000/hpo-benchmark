@@ -115,20 +115,21 @@ class FixedConformalQuantileRegression(ConformalQuantileRegression):
     Fixed version of ConformalQuantileRegression that avoids parameter conflicts
     in the fit_model method.
     """
-    
+
     def fit_model(self):
         """Override fit_model to avoid parameter conflicts."""
         X, z = self.make_input_target()
-        
+
         # Filter out conflicting parameters from surrogate_kwargs
         safe_surrogate_kwargs = {
-            k: v for k, v in self.surrogate_kwargs.items() 
-            if k not in ['min_samples_to_conformalize', 'valid_fraction']
+            k: v
+            for k, v in self.surrogate_kwargs.items()
+            if k not in ["min_samples_to_conformalize", "valid_fraction"]
         }
-        
+
         logger.debug(f"Fitting CQR model with {len(X)} samples")
         logger.debug(f"Filtered surrogate_kwargs: {safe_surrogate_kwargs}")
-        
+
         try:
             self.surrogate_model = self.surrogate_cls(
                 config_space=self.config_space,
@@ -219,7 +220,7 @@ class SyneTuneCQRWrapper:
         logger.debug(f"Requesting suggestion for trial {self.trial_counter}")
         logger.debug(f"Searcher has {self.searcher.num_results()} results")
         logger.debug(f"Should update model: {self.searcher.should_update()}")
-        
+
         try:
             # Get suggestion from Syne-Tune searcher
             # The searcher will handle warm starts through points_to_evaluate internally
@@ -228,15 +229,21 @@ class SyneTuneCQRWrapper:
             if syne_tune_config is None:
                 # This should not happen in normal operation, but if it does,
                 # fall back to random sampling to ensure we can continue
-                logger.warning("Searcher returned None, falling back to random sampling")
+                logger.warning(
+                    "Searcher returned None, falling back to random sampling"
+                )
                 syne_tune_config = self.searcher.sample_random()
 
         except Exception as e:
             # If the searcher fails (e.g., model fitting error), fall back to random sampling
-            logger.error(f"Searcher failed with error: {e}, falling back to random sampling")
+            logger.error(
+                f"Searcher failed with error: {e}, falling back to random sampling"
+            )
             syne_tune_config = self.searcher.sample_random()
 
-        logger.debug(f"Suggested config for trial {self.trial_counter}: {syne_tune_config}")
+        logger.debug(
+            f"Suggested config for trial {self.trial_counter}: {syne_tune_config}"
+        )
         return syne_tune_config
 
     def report_result(self, config: Dict[str, Any], performance: float) -> None:
@@ -252,15 +259,19 @@ class SyneTuneCQRWrapper:
             if config == warm_config:
                 # Use the known performance from warm start
                 performance = warm_perf
-                logger.debug(f"Using warm start performance for trial {self.trial_counter}: {performance}")
+                logger.debug(
+                    f"Using warm start performance for trial {self.trial_counter}: {performance}"
+                )
                 break
 
         # Report to the searcher
         self.searcher.on_trial_complete(
             trial_id=self.trial_counter, config=config, metric=performance
         )
-        
-        logger.debug(f"Reported trial {self.trial_counter}: config={config}, performance={performance}")
+
+        logger.debug(
+            f"Reported trial {self.trial_counter}: config={config}, performance={performance}"
+        )
         logger.debug(f"Searcher now has {self.searcher.num_results()} results")
 
         # Add to our history
@@ -320,13 +331,15 @@ def syne_tune_cqr_tune(
     # All the different "acquisition strategies" map to the same implementation
     supported_samplers = {
         "cqr_thompson",
-        "cqr_ucb", 
+        "cqr_ucb",
         "cqr_optimistic",
         "cqr_pessimistic",
     }
 
     if sampler not in supported_samplers:
-        raise ValueError(f"Unknown Syne-Tune CQR sampler: {sampler}. Supported: {supported_samplers}")
+        raise ValueError(
+            f"Unknown Syne-Tune CQR sampler: {sampler}. Supported: {supported_samplers}"
+        )
 
     # Calculate number of warm starts
     num_warm_starts = len(warm_start_configs) if warm_start_configs else 0
@@ -353,7 +366,7 @@ def syne_tune_cqr_tune(
         # Follow the same pattern as other tuners: subtract warm start configs from total
         # since warm start configs count as trials but are handled through points_to_evaluate
         if warm_start_configs is not None:
-            adj_n_trials = n_trials - len(warm_start_configs)
+            adj_n_trials = n_trials  # - len(warm_start_configs)
         else:
             adj_n_trials = n_trials
     else:

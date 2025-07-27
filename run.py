@@ -5,7 +5,6 @@ from hpobench.config.config import (
     ARCHITECTURE_VARIATION_CONFIGURATIONS,
     SAMPLER_VARIATION_CONFIGURATIONS,
     COVERAGE_ANALYSIS_CONFIGURATIONS,
-    N_REPETITIONS_PER_TUNER_CONFIG,
     N_TRIALS,
     N_WARM_STARTS,
     TIMEOUT,
@@ -37,10 +36,13 @@ run_sections = {
 
 CACHE_PATH = "cache/"
 run_start_str, logger = setup_environment(cache_path=CACHE_PATH)
-DEFAULT_MAX_N_INSTANCES = 1
+DEFAULT_MAX_N_INSTANCES = 30
 STATIC_DATA_SIZES = [15, 50, 100]
-TUNING_ITERATIONS = [0, 10]
+TUNING_ITERATIONS = [0, 15]
 N_COVERAGE_TRIALS = 100
+SMALL_N_REPETITIONS_PER_TUNER_CONFIG = 5
+MEDIUM_N_REPETITIONS_PER_TUNER_CONFIG = 10
+LARGE_N_REPETITIONS_PER_TUNER_CONFIG = 30
 
 if __name__ == "__main__":
     # Coverage Analysis
@@ -56,6 +58,7 @@ if __name__ == "__main__":
             run_start_str=run_start_str,
             analysis_type="01_coverage_analysis",
             max_n_instances_per_benchmark=DEFAULT_MAX_N_INSTANCES,
+            n_repetitions=LARGE_N_REPETITIONS_PER_TUNER_CONFIG,
             starting_coverage_trial=32,
             analysis_components=["coverage"],
             datasets_per_benchmark=[["cifar10"]],
@@ -74,6 +77,7 @@ if __name__ == "__main__":
             run_start_str=run_start_str,
             analysis_type="02_sampler_variation",
             max_n_instances_per_benchmark=DEFAULT_MAX_N_INSTANCES,
+            n_repetitions=LARGE_N_REPETITIONS_PER_TUNER_CONFIG,
             analysis_components=["rank_analysis"],
         )
 
@@ -90,6 +94,7 @@ if __name__ == "__main__":
             run_start_str=run_start_str,
             analysis_type="03_architecture_variation",
             max_n_instances_per_benchmark=DEFAULT_MAX_N_INSTANCES,
+            n_repetitions=LARGE_N_REPETITIONS_PER_TUNER_CONFIG,
             analysis_components=[
                 "architecture_comparison",
                 "rank_analysis",
@@ -100,7 +105,11 @@ if __name__ == "__main__":
     # External Tuning Analysis
     if run_sections["run_external_tuning_analysis"]:
         raw_benchmark_data = run_and_analyze_main_benchmark(
-            benchmarks=["jahs201"],  # , "rbv2_xgboost", "lcbench", "rbv2_xgboost"
+            benchmarks=[
+                "jahs201",
+                "lcbench",
+                "rbv2_xgboost",
+            ],  # , "rbv2_xgboost", "lcbench", "rbv2_xgboost"
             tuning_configurations=LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS
             + EXTERNAL_TUNING_CONFIGURATIONS,
             n_warm_starts=N_WARM_STARTS,
@@ -111,6 +120,7 @@ if __name__ == "__main__":
             run_start_str=run_start_str,
             analysis_type="04_external_tuning",
             max_n_instances_per_benchmark=DEFAULT_MAX_N_INSTANCES,
+            n_repetitions=SMALL_N_REPETITIONS_PER_TUNER_CONFIG,
             analysis_components=[
                 "friedman",
                 "nemenyi",
@@ -133,6 +143,7 @@ if __name__ == "__main__":
             run_start_str=run_start_str,
             analysis_type="05_preconformal_comparison",
             max_n_instances_per_benchmark=DEFAULT_MAX_N_INSTANCES,
+            n_repetitions=LARGE_N_REPETITIONS_PER_TUNER_CONFIG,
             analysis_components=[
                 "friedman",
                 "nemenyi",
@@ -146,10 +157,10 @@ if __name__ == "__main__":
         logger.info("Starting Estimator Error Analysis (STATIC configs)...")
 
         static_results = run_static_benchmark(
-            benchmarks=["lcbench"],
+            benchmarks=["lcbench", "jahs201"],
             data_size_range=STATIC_DATA_SIZES,
             estimator_architectures=STATIC_ANALYSIS_ESTIMATOR_ARCHITECTURES,
-            n_repetitions_per_estimator=N_REPETITIONS_PER_TUNER_CONFIG,
+            n_repetitions_per_estimator=LARGE_N_REPETITIONS_PER_TUNER_CONFIG,
             tuning_iterations_range=TUNING_ITERATIONS,
             calibration_split=0.2,
             alpha=0.1,

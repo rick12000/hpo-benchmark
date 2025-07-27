@@ -257,11 +257,11 @@ def get_external_tuning_configurations() -> List[TunerConfig]:
         List of external tuning configuration objects (e.g., for skopt, optuna).
     """
     return [
-        # TunerConfig(
-        #     tuner="skopt",
-        #     searcher="gp",
-        #     config_identifier="GP",
-        # ),
+        TunerConfig(
+            tuner="skopt",
+            searcher="gp",
+            config_identifier="GP",
+        ),
         # TunerConfig(
         #     tuner="optuna",
         #     searcher="tpe",

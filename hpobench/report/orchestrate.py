@@ -16,9 +16,6 @@ from hpobench.config.types import (
 )
 from hpobench.tune import setup_confopt_params
 from hpobench.report.utils import generate_configs_per_repetition
-from hpobench.config.config import (
-    N_REPETITIONS_PER_TUNER_CONFIG,
-)
 from hpobench.utils import (
     generate_hyperparameter_combinations,
     add_runtime,
@@ -317,7 +314,7 @@ def run_and_analyze_main_benchmark(
     ],
     max_n_instances_per_benchmark: int = 10,
     starting_coverage_trial: Optional[int] = None,
-    n_repetitions: int = N_REPETITIONS_PER_TUNER_CONFIG,
+    n_repetitions: int = 10,
     datasets_per_benchmark: Optional[list[list[str]]] = None,
 ) -> pd.DataFrame:
     """
