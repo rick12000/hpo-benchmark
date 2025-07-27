@@ -177,7 +177,11 @@ def accumulate_breaches(
     )
     sorted_experiment_log["chunked_target_coverage_deviation"] = (
         sorted_experiment_log.groupby(aggregators)
-        .apply(_calculate_chunked_target_coverage_deviation)
+        .apply(
+            lambda group: _calculate_chunked_target_coverage_deviation(
+                group, breach_column
+            )
+        )
         .reset_index(level=aggregators, drop=True)
     )
     return sorted_experiment_log
