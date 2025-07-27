@@ -40,7 +40,7 @@ run_start_str, logger = setup_environment(cache_path=CACHE_PATH)
 DEFAULT_MAX_N_INSTANCES = 2
 STATIC_DATA_SIZES = [15, 50, 100]
 TUNING_ITERATIONS = [0, 10]
-N_COVERAGE_TRIALS = 200
+N_COVERAGE_TRIALS = 100
 
 if __name__ == "__main__":
     # Coverage Analysis

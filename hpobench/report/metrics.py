@@ -374,6 +374,46 @@ def _compute_likelihood_ratio_statistic(
 
     return 2 * (ll_full - ll_null)
 
+def _calculate_chunked_target_coverage_deviation(
+    group: pd.DataFrame, breach_column: str
+) -> pd.Series:
+    """
+    Computes absolute deviation between observed breach rate and target confidence level for each chunk within a group.
+
+    Splits the group into n_chunks, calculates breach rate and confidence level for each chunk, and stores the deviation at the start index of each chunk. Used for analyzing calibration of constraint coverage over budget progression.
+
+    Args:
+        group: DataFrame containing experiment records for a single group.
+        breach_column: Column name indicating constraint breaches.
+        n_chunks: Number of chunks to split the group into.
+
+    Returns:
+        pd.Series with chunked target coverage deviation values (NaN for non-chunk start indices).
+    """
+    n_obs = len(group)
+    chunk_size = 10
+    n_chunks = n_obs // chunk_size
+    chunked_deviations = pd.Series([np.nan] * n_obs, index=group.index)
+    if n_chunks > 3:
+        for chunk_idx in range(n_chunks):
+            start_idx = chunk_idx * chunk_size
+            end_idx = start_idx + chunk_size
+            if start_idx >= n_obs:
+                break
+            chunk_data = group.iloc[start_idx:end_idx]
+            chunk_breach_rate = chunk_data[breach_column].mean()
+            confidence_level = float(chunk_data["confidence_level"].iloc[0])
+            if pd.isna(confidence_level) or confidence_level is None or confidence_level == "None"  or confidence_level == "":
+                break
+            if pd.notna(chunk_breach_rate):
+                target_coverage_deviation = abs(chunk_breach_rate - confidence_level)
+            else:
+                target_coverage_deviation = np.nan
+            chunked_deviations.iloc[start_idx] = target_coverage_deviation
+            
+    return chunked_deviations
+
+
 
 def _bootstrap_calibration_group(
     group_data: pd.DataFrame,
@@ -418,6 +458,7 @@ def calculate_calibration_statistics(
     aggregators: List[str],
     repetition_column: str,
     breach_column: str,
+    budget_unit: str,
     n_bootstraps: int = 1000,
     random_state: Optional[int] = None,
 ) -> pd.DataFrame:
@@ -434,6 +475,21 @@ def calculate_calibration_statistics(
     Returns:
         DataFrame with averaged scores and confidence intervals per group.
     """
+    sorted_experiment_log = raw_benchmark_data.sort_values(
+        by=aggregators + [budget_unit],
+        ascending=True,
+    ).reset_index(drop=True)
+
+    sorted_experiment_log["chunked_target_coverage_deviation"] = (
+        sorted_experiment_log.groupby(aggregators, as_index=False)
+        .apply(
+            lambda group: _calculate_chunked_target_coverage_deviation(
+                group, breach_column
+            )
+        )
+        .reset_index(drop=True)
+    )
+
     # Compute simple statistics:
     score_columns = [
         "winkler_score",
@@ -442,16 +498,16 @@ def calculate_calibration_statistics(
         "chunked_target_coverage_deviation",
     ]
     avg_scores_per_repetition = (
-        raw_benchmark_data.groupby(aggregators)[score_columns].mean().reset_index()
+        sorted_experiment_log.groupby(aggregators)[score_columns].mean().reset_index()
     )
 
     # Compute likelihood ratio statistic:
     tabularized_features = np.vstack(
-        raw_benchmark_data["tabularized_configuration"].values
+        sorted_experiment_log["tabularized_configuration"].values
     )
-    llr_series = raw_benchmark_data.groupby(aggregators).apply(
+    llr_series = sorted_experiment_log.groupby(aggregators).apply(
         lambda grp: _compute_likelihood_ratio_statistic(
-            tabularized_features, grp[breach_column], random_state
+            tabularized_features[grp.index], grp[breach_column], random_state
         )
     )
     llr_df = llr_series.reset_index(name="llr_statistic")
@@ -472,3 +528,4 @@ def calculate_calibration_statistics(
     )
 
     return summary_statistics
+

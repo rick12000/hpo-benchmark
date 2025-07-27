@@ -259,6 +259,7 @@ def analyze_main_benchmark(
             aggregators=grouping_cols,
             repetition_column=rep_col,
             breach_column="breach_status",
+            budget_unit=iter_unit,
             cache_path=cache_path,
             run_start_str=run_start_str,
             filename="calibration_statistics.csv",

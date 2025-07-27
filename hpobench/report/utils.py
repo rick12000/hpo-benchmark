@@ -253,6 +253,7 @@ def run_and_save_calibration_statistics(
     aggregators: List[str],
     repetition_column: str,
     breach_column: str,
+    budget_unit: str,
     cache_path: str,
     run_start_str: str,
     filename: str,
@@ -288,6 +289,7 @@ def run_and_save_calibration_statistics(
         aggregators=aggregators,
         repetition_column=repetition_column,
         breach_column=breach_column,
+        budget_unit=budget_unit,
         random_state=random_state,
     )
 

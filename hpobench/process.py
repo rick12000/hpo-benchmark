@@ -95,44 +95,6 @@ def collapse_per_budget(
     return processed_benchmark_data
 
 
-def _calculate_chunked_target_coverage_deviation(
-    group: pd.DataFrame, breach_column: str, n_chunks: int = 10
-) -> pd.Series:
-    """
-    Computes absolute deviation between observed breach rate and target confidence level for each chunk within a group.
-
-    Splits the group into n_chunks, calculates breach rate and confidence level for each chunk, and stores the deviation at the start index of each chunk. Used for analyzing calibration of constraint coverage over budget progression.
-
-    Args:
-        group: DataFrame containing experiment records for a single group.
-        breach_column: Column name indicating constraint breaches.
-        n_chunks: Number of chunks to split the group into.
-
-    Returns:
-        pd.Series with chunked target coverage deviation values (NaN for non-chunk start indices).
-    """
-    n_obs = len(group)
-    chunk_size = n_obs // n_chunks
-    chunked_deviations = pd.Series([np.nan] * n_obs, index=group.index)
-    if chunk_size > 0:
-        for chunk_idx in range(n_chunks):
-            start_idx = chunk_idx * chunk_size
-            end_idx = start_idx + chunk_size
-            if start_idx >= n_obs:
-                break
-            chunk_data = group.iloc[start_idx:end_idx]
-            chunk_breach_rate = chunk_data[breach_column].mean()
-            confidence_level = chunk_data["confidence_level"].iloc[0]
-            if pd.isna(confidence_level) or confidence_level is None:
-                break
-            if pd.notna(chunk_breach_rate):
-                target_coverage_deviation = abs(chunk_breach_rate - confidence_level)
-            else:
-                target_coverage_deviation = np.nan
-            chunked_deviations.iloc[start_idx] = target_coverage_deviation
-    return chunked_deviations
-
-
 def accumulate_breaches(
     data: pd.DataFrame,
     aggregators: List[str],
@@ -175,15 +137,7 @@ def accumulate_breaches(
         .mean()
         .reset_index(level=aggregators, drop=True)
     )
-    sorted_experiment_log["chunked_target_coverage_deviation"] = (
-        sorted_experiment_log.groupby(aggregators)
-        .apply(
-            lambda group: _calculate_chunked_target_coverage_deviation(
-                group, breach_column
-            )
-        )
-        .reset_index(level=aggregators, drop=True)
-    )
+
     return sorted_experiment_log
 
 
@@ -685,7 +639,6 @@ def process_performance_records(
                 "best_performance",
                 "cumulative_breach_rate",
                 "rolling_breach_rate",
-                "chunked_target_coverage_deviation",
             ]
         else:
             metrics = ["rank", "best_performance"]
