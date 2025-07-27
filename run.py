@@ -27,17 +27,17 @@ BASE_RANDOM_STATE = 42
 
 # Granular run section control
 run_sections = {
-    "run_coverage_analysis": True,
+    "run_coverage_analysis": False,
     "run_sampler_variation_analysis": False,
     "run_architecture_variation_analysis": False,
-    "run_external_tuning_analysis": False,
+    "run_external_tuning_analysis": True,
     "run_preconformal_comparison_analysis": False,
     "run_static_analysis": False,
 }
 
 CACHE_PATH = "cache/"
 run_start_str, logger = setup_environment(cache_path=CACHE_PATH)
-DEFAULT_MAX_N_INSTANCES = 2
+DEFAULT_MAX_N_INSTANCES = 1
 STATIC_DATA_SIZES = [15, 50, 100]
 TUNING_ITERATIONS = [0, 10]
 N_COVERAGE_TRIALS = 100

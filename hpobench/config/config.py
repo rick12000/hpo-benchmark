@@ -20,8 +20,8 @@ from hpobench.config.types import (
 )
 
 # Environment variables used in the main code:
-N_REPETITIONS_PER_TUNER_CONFIG = 1
-N_TRIALS = 100
+N_REPETITIONS_PER_TUNER_CONFIG = 3
+N_TRIALS = 50
 TIMEOUT = None
 N_WARM_STARTS = 15
 
@@ -175,9 +175,14 @@ LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_con
         # "qens4",
     ],
     samplers=[
-        ExpectedImprovementSampler(
+        # ExpectedImprovementSampler(
+        #     n_quantiles=LIMITED_ARCHITECTURE_N_QUANTILES,
+        #     num_ei_samples=1000,
+        #     adapter=LIMITED_ARCHITECTURE_ADAPTER,
+        # ),
+        ThompsonSampler(
             n_quantiles=LIMITED_ARCHITECTURE_N_QUANTILES,
-            num_ei_samples=1000,
+            enable_optimistic_sampling=False,
             adapter=LIMITED_ARCHITECTURE_ADAPTER,
         ),
     ],
