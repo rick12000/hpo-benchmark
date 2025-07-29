@@ -1,6 +1,8 @@
 import numpy as np
 from typing import Union, Dict, Any
 
+from ConfigSpace import Configuration
+
 from jahs_bench import Benchmark
 from abc import ABC, abstractmethod
 
@@ -207,31 +209,11 @@ class YahpoGenerator(ObjectiveMetricGenerator):
         self.config_space = config_space
         self.fidelity_space = fidelity_space
 
-    def is_parameter_active(self, configuration: dict, param_name: str) -> bool:
-        """Check if a parameter is active in the configuration based on conditional dependencies.
-
-        Args:
-            configuration: Dictionary mapping parameter names to their values.
-            param_name: Name of the parameter to check.
-
-        Returns:
-            True if the parameter is active, False otherwise.
-        """
-        conditions = self.config_space.get_conditions()
-        param_conditions = [c for c in conditions if c.child.name == param_name]
-
-        for condition in param_conditions:
-            parent_name = condition.parent.name
-            if parent_name not in configuration:
-                return False
-            parent_value = configuration[parent_name]
-            if not condition.evaluate({parent_name: parent_value}):
-                return False
-
-        return True
-
     def _get_filtered_configuration(self, configuration: dict) -> dict:
         """Filter the configuration to include only active and fidelity parameters.
+
+        Uses ConfigSpace's built-in get_active_hyperparameters method for robust
+        conditional dependency handling, aligned with Syne Tune's approach.
 
         Args:
             configuration: Dictionary mapping parameter names to their values.
@@ -239,20 +221,36 @@ class YahpoGenerator(ObjectiveMetricGenerator):
         Returns:
             Filtered configuration dictionary including only active and fidelity parameters.
         """
-        filtered_configuration = {}
-        for param_name, param_value in configuration.items():
-            if self.is_parameter_active(configuration, param_name):
-                filtered_configuration[param_name] = param_value
+        config_dict = configuration.copy()
 
-        # Add fidelity parameters if they exist:
+        # Add fidelity parameters to the configuration for evaluation
         if self.fidelity_space:
-            for (
-                fidelity_param_name,
-                fidelity_param_value,
-            ) in self.fidelity_space.items():
-                filtered_configuration[fidelity_param_name] = fidelity_param_value
+            config_dict.update(self.fidelity_space)
 
-        filtered_configuration[self.instance_name] = self.generator.instance
+        # Add instance parameter for evaluation
+        config_dict[self.instance_name] = self.generator.instance
+
+        # Use ConfigSpace's built-in method to get active hyperparameters
+        try:
+            cs_config = Configuration(
+                self.config_space,
+                values=config_dict,
+                allow_inactive_with_values=True,
+            )
+            active_hyperparameters = self.config_space.get_active_hyperparameters(
+                cs_config
+            )
+
+            # Filter configuration to only include active parameters
+            filtered_configuration = {
+                k: v
+                for k, v in config_dict.items()
+                if k in active_hyperparameters or k == self.instance_name
+            }
+
+        except Exception as e:
+            raise ValueError(f"ConfigSpace evaluation failed: {e}")
+
         return filtered_configuration
 
     def predict(self, configuration: dict[str, Union[str, int, float, bool]]) -> float:
@@ -268,10 +266,16 @@ class YahpoGenerator(ObjectiveMetricGenerator):
 
         # Call the objective function
         results = self.generator.objective_function(filtered_configuration)[0]
-        if "auc" in results:
-            return -results["acc"]
-        else:
+        if "val_accuracy" in results:
             return -results["val_accuracy"]
+        elif "acc" in results:
+            return -results["acc"]
+        elif "auc" in results:
+            return -results["auc"]
+        else:
+            raise ValueError(
+                f"No suitable metric found in results: {list(results.keys())}"
+            )
 
     def predict_runtime(
         self, configuration: dict[str, Union[str, int, float, bool]]

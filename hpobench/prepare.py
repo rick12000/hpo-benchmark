@@ -46,12 +46,16 @@ def setup_yahpo_instance_configs(
     """
     experiment_configs = []
     if benchmark in ["lcbench_large", "lcbench_heteroscedastic"]:
-        benchmark_set = BenchmarkSet(benchmark)
         benchmark_override = "lcbench"
+        benchmark_set = BenchmarkSet(
+            benchmark_override, active_session=False, check=False
+        )
         instances = YAHPO_SUBSETS[benchmark]
     else:
-        benchmark_set = BenchmarkSet(benchmark)
         benchmark_override = benchmark
+        benchmark_set = BenchmarkSet(
+            benchmark_override, active_session=False, check=False
+        )
         instances = benchmark_set.instances
 
     primary_metric = "val_accuracy"
@@ -75,7 +79,10 @@ def setup_yahpo_instance_configs(
             f"Setting up YAHPO benchmark '{benchmark}' with instance '{instance_value}'..."
         )
         instance_benchmark_set = BenchmarkSet(
-            scenario=benchmark_override, instance=instance_value
+            scenario=benchmark_override,
+            instance=instance_value,
+            active_session=False,
+            check=False,
         )
 
         # Get configuration space:
