@@ -268,11 +268,11 @@ def get_external_tuning_configurations() -> List[TunerConfig]:
         #     config_identifier="TPE",
         # ),
         # Syne-Tune CQR configurations using string searchers
-        TunerConfig(
-            tuner="syne_tune_cqr",
-            searcher="cqr_thompson",
-            config_identifier="CQR-THOMPSON",
-        ),
+        # TunerConfig(
+        #     tuner="syne_tune_cqr",
+        #     searcher="cqr_thompson",
+        #     config_identifier="CQR-THOMPSON",
+        # ),
         # TunerConfig(
         #     tuner="optuna",
         #     searcher="random",

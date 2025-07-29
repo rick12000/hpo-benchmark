@@ -165,11 +165,11 @@ ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurati
 )
 
 LIMITED_ARCHITECTURE_ADAPTER = None
-LIMITED_ARCHITECTURE_N_QUANTILES = 10
+LIMITED_ARCHITECTURE_N_QUANTILES = 4
 LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurations(
     architectures=[
         # "qgp",
-        "qrf",
+        # "qrf",
         "qgbm",
         # "qens3",
         # "qens4",

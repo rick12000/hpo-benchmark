@@ -36,11 +36,11 @@ run_sections = {
 
 CACHE_PATH = "cache/"
 run_start_str, logger = setup_environment(cache_path=CACHE_PATH)
-DEFAULT_MAX_N_INSTANCES = 30
+DEFAULT_MAX_N_INSTANCES = 10
 STATIC_DATA_SIZES = [15, 50, 100]
 TUNING_ITERATIONS = [0, 15]
 N_COVERAGE_TRIALS = 100
-SMALL_N_REPETITIONS_PER_TUNER_CONFIG = 5
+SMALL_N_REPETITIONS_PER_TUNER_CONFIG = 3
 MEDIUM_N_REPETITIONS_PER_TUNER_CONFIG = 10
 LARGE_N_REPETITIONS_PER_TUNER_CONFIG = 30
 
@@ -105,11 +105,7 @@ if __name__ == "__main__":
     # External Tuning Analysis
     if run_sections["run_external_tuning_analysis"]:
         raw_benchmark_data = run_and_analyze_main_benchmark(
-            benchmarks=[
-                "jahs201",
-                "lcbench",
-                "rbv2_xgboost",
-            ],  # , "rbv2_xgboost", "lcbench", "rbv2_xgboost"
+            benchmarks=["lcbench_large", "lcbench_heteroscedastic"],
             tuning_configurations=LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS
             + EXTERNAL_TUNING_CONFIGURATIONS,
             n_warm_starts=N_WARM_STARTS,

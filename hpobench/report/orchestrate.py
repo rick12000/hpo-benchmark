@@ -32,7 +32,15 @@ os.environ["SYNETUNE_FOLDER"] = "cache/syne-tune"
 
 
 def load_benchmark_configs(
-    benchmarks: list[Literal["jahs201", "lcbench", "rbv2_xgboost"]],
+    benchmarks: list[
+        Literal[
+            "jahs201",
+            "lcbench",
+            "rbv2_xgboost",
+            "lcbench_large",
+            "lcbench_heteroscedastic",
+        ]
+    ],
     tuning_configurations: list[TunerConfig],
     n_warm_starts: int,
     n_trials: int,
@@ -76,7 +84,12 @@ def load_benchmark_configs(
 
     experiment_configs = []
     for i, benchmark in enumerate(benchmarks):
-        if benchmark in ["rbv2_xgboost", "lcbench"]:
+        if benchmark in [
+            "rbv2_xgboost",
+            "lcbench",
+            "lcbench_large",
+            "lcbench_heteroscedastic",
+        ]:
             configs = setup_yahpo_instance_configs(
                 benchmark=benchmark,
                 tuning_configurations=tuning_configurations,

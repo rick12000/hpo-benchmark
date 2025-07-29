@@ -19,6 +19,26 @@ JAHS201_SEARCH_SPACE = {
 }
 
 
+LCBENCH_LARGE_IDS: list[str] = [
+    "7593",
+    "189354",
+    "189873",
+    "168335",
+    "167200",
+    "168330",
+]
+LCBENCH_HETEROSCEDASTIC_IDS: list[str] = [
+    "146212",
+    "189908",
+    "126026",
+    "167181",
+    "189873",
+]
+YAHPO_SUBSETS: dict[str, list[str]] = {
+    "lcbench_large": LCBENCH_LARGE_IDS,
+    "lcbench_heteroscedastic": LCBENCH_HETEROSCEDASTIC_IDS,
+}
+
 n_synthetic_params = 10
 BLACK_BOX_SEARCH_SPACE = {}
 for n in range(n_synthetic_params):

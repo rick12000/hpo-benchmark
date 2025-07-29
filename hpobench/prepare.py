@@ -11,7 +11,11 @@ from hpobench.config.types import (
     FloatRange,
     CategoricalRange,
 )
-from hpobench.config.benchmark_data import JAHS201_SEARCH_SPACE, BLACK_BOX_SEARCH_SPACE
+from hpobench.config.benchmark_data import (
+    JAHS201_SEARCH_SPACE,
+    BLACK_BOX_SEARCH_SPACE,
+    YAHPO_SUBSETS,
+)
 from yahpo_gym import BenchmarkSet
 import ConfigSpace as CS
 from typing import Optional
@@ -41,8 +45,14 @@ def setup_yahpo_instance_configs(
         List of ExperimentConfig objects, one per instance in the benchmark.
     """
     experiment_configs = []
-    benchmark_set = BenchmarkSet(benchmark)
-    instances = benchmark_set.instances
+    if benchmark in ["lcbench_large", "lcbench_heteroscedastic"]:
+        benchmark_set = BenchmarkSet(benchmark)
+        benchmark_override = "lcbench"
+        instances = YAHPO_SUBSETS[benchmark]
+    else:
+        benchmark_set = BenchmarkSet(benchmark)
+        benchmark_override = benchmark
+        instances = benchmark_set.instances
 
     primary_metric = "val_accuracy"
     if hasattr(benchmark_set.config, "y_names") and benchmark_set.config.y_names:
@@ -65,7 +75,7 @@ def setup_yahpo_instance_configs(
             f"Setting up YAHPO benchmark '{benchmark}' with instance '{instance_value}'..."
         )
         instance_benchmark_set = BenchmarkSet(
-            scenario=benchmark, instance=instance_value
+            scenario=benchmark_override, instance=instance_value
         )
 
         # Get configuration space:
@@ -102,7 +112,7 @@ def setup_yahpo_instance_configs(
                     )
 
         experiment_generator = YahpoGenerator(
-            dataset=benchmark,
+            dataset=benchmark_override,
             instance_value=instance_value,
             instance_name=instance_names,
             fidelity_space=fidelity_space,
