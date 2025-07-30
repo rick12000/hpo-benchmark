@@ -28,16 +28,15 @@ DEFAULT_INTERVAL_WIDTH = 0.9
 
 # 1. Create configurations feeding the static tuning charts and tables:
 STATIC_ANALYSIS_ESTIMATOR_ARCHITECTURES = [
-    "qknn",
     "qgp",
     "ql",
     "qrf",
     "qgbm",
-    "qens1",
-    "qens2",
+    # "qens1",
+    # "qens2",
     "qens3",
     "qens4",
-    "qens5",
+    # "qens5",
 ]
 
 # 2. Create configurations feeding the coverage charts:
@@ -170,9 +169,10 @@ LIMITED_ARCHITECTURE_ADAPTER = None
 LIMITED_ARCHITECTURE_N_QUANTILES = 10
 LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurations(
     architectures=[
-        "qrf",
+        "qgp",
         "qgbm",
         "qens3",
+        "qens4",
     ],
     samplers=[
         ExpectedImprovementSampler(
@@ -190,29 +190,29 @@ LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_con
     searcher_tuning_framework=None,
 )
 
-LIMITED_ARCHITECTURE_N_QUANTILES = 50
-LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS.extend(
-    build_architecture_variation_configurations(
-        architectures=[
-            "qgp",
-            "qens4",
-        ],
-        samplers=[
-            ExpectedImprovementSampler(
-                n_quantiles=LIMITED_ARCHITECTURE_N_QUANTILES,
-                num_ei_samples=1000,
-                adapter=LIMITED_ARCHITECTURE_ADAPTER,
-            ),
-            # ThompsonSampler(
-            #     n_quantiles=4,
-            #     enable_optimistic_sampling=False,
-            #     adapter=LIMITED_ARCHITECTURE_ADAPTER,
-            # ),
-        ],
-        n_pre_conformal_trials=10000,
-        searcher_tuning_framework=None,
-    )
-)
+# LIMITED_ARCHITECTURE_N_QUANTILES = 50
+# LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS.extend(
+#     build_architecture_variation_configurations(
+#         architectures=[
+#             "qgp",
+#             "qens4",
+#         ],
+#         samplers=[
+#             ExpectedImprovementSampler(
+#                 n_quantiles=LIMITED_ARCHITECTURE_N_QUANTILES,
+#                 num_ei_samples=1000,
+#                 adapter=LIMITED_ARCHITECTURE_ADAPTER,
+#             ),
+#             # ThompsonSampler(
+#             #     n_quantiles=4,
+#             #     enable_optimistic_sampling=False,
+#             #     adapter=LIMITED_ARCHITECTURE_ADAPTER,
+#             # ),
+#         ],
+#         n_pre_conformal_trials=10000,
+#         searcher_tuning_framework=None,
+#     )
+# )
 
 
 PRECONFORMAL_ADAPTER = None
@@ -222,8 +222,6 @@ for architecture in [
     "qgp",
     "qgbm",
     "qrf",
-    "qens3",
-    "qens4",
 ]:
     # Simulate normal pre-conformal cutoff vs. unreachable one:
     for pre_conformal_trials in [32, 10000]:

@@ -37,12 +37,12 @@ run_sections = {
 CACHE_PATH = "cache/"
 run_start_str, logger = setup_environment(cache_path=CACHE_PATH)
 DEFAULT_MAX_N_INSTANCES = 10
-STATIC_DATA_SIZES = [15, 50, 100]
+STATIC_DATA_SIZES = [50, 100, 250]
 TUNING_ITERATIONS = [0, 15]
-N_COVERAGE_TRIALS = 100
-SMALL_N_REPETITIONS_PER_TUNER_CONFIG = 3
-MEDIUM_N_REPETITIONS_PER_TUNER_CONFIG = 3
-LARGE_N_REPETITIONS_PER_TUNER_CONFIG = 3
+N_COVERAGE_TRIALS = 200
+SMALL_N_REPETITIONS_PER_TUNER_CONFIG = 5
+MEDIUM_N_REPETITIONS_PER_TUNER_CONFIG = 5
+LARGE_N_REPETITIONS_PER_TUNER_CONFIG = 5
 
 if __name__ == "__main__":
     # Coverage Analysis
@@ -158,8 +158,8 @@ if __name__ == "__main__":
             estimator_architectures=STATIC_ANALYSIS_ESTIMATOR_ARCHITECTURES,
             n_repetitions_per_estimator=LARGE_N_REPETITIONS_PER_TUNER_CONFIG,
             tuning_iterations_range=TUNING_ITERATIONS,
-            calibration_split=0.2,
-            alpha=0.1,
+            calibration_split=0.1,
+            alpha=0.2,
             n_pre_conformal_trials=min(TUNING_ITERATIONS) - 1,
             max_n_instances=DEFAULT_MAX_N_INSTANCES,
             base_random_state=BASE_RANDOM_STATE,

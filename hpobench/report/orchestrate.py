@@ -550,7 +550,7 @@ def run_static_benchmark(
                 )
                 holdout_configs_per_repetition = generate_configs_per_repetition(
                     search_space=experiment_config.search_space,
-                    n_configs=data_size,
+                    n_configs=5000,
                     n_repetitions=n_repetitions_per_estimator,
                     base_seed=base_random_state,
                     objective_function=experiment_config.objective_function,
