@@ -421,7 +421,7 @@ def run_and_analyze_main_benchmark(
 
 
 def run_static_benchmark(
-    benchmarks: list[Literal["jahs201", "lcbench"]],
+    benchmarks: list[Literal["jahs201", "lcbench_large"]],
     data_size_range: list[int],
     estimator_architectures: list[str],
     n_repetitions_per_estimator: int,
@@ -496,12 +496,12 @@ def run_static_benchmark(
     for benchmark in benchmarks:
         logger.info(f"Processing benchmark: {benchmark}")
         experiment_configs = []
-        if benchmark == "lcbench":
+        if benchmark == "lcbench_large":
             # Below we use setup function as shortcut, but we are only interested in
             # the yahpo generator and param space generation, the other inputs are
             # just placeholders:
             yahpo_configs = setup_yahpo_instance_configs(
-                benchmark="lcbench",  # hard coded, leave as is
+                benchmark="lcbench_large",  # hard coded, leave as is
                 tuning_configurations=[],  # placeholder
                 n_warm_starts=1,  # placeholder
                 n_trials=0,  # placeholder

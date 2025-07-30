@@ -3,7 +3,6 @@ from typing import List, Union
 import warnings
 import time
 import threading
-import argparse
 
 from yahpo_gym import BenchmarkSet, local_config
 from sklearn.datasets import fetch_openml
@@ -50,8 +49,8 @@ def run_with_timeout(func, args, timeout_seconds):
     return result[0]
 
 
-def get_lcbench_task_ids() -> List[str]:
-    benchmark_set = BenchmarkSet("lcbench")
+def get_benchmark_task_ids(benchmark_name: str) -> List[str]:
+    benchmark_set = BenchmarkSet(benchmark_name)
     return benchmark_set.instances
 
 
@@ -156,35 +155,30 @@ def save_stratification(task_ids: List[str], output_file: str = None):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Create LC Bench size stratification")
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--top-count", type=int, help="Number of top datasets to select")
-    group.add_argument(
-        "--top-percent", type=float, help="Percentage of top datasets to select"
-    )
-    parser.add_argument(
-        "--output",
-        type=str,
-        help="Output file name",
-        default="top_largest_datasets.json",
-    )
+    # Configuration - define parameters directly
+    top_count = 5
+    top_percent = None
+    benchmarks = ["lcbench", "rbv2_xgboost"]
 
-    args = parser.parse_args()
+    for benchmark in benchmarks:
+        print(f"\nCreating {benchmark} size stratification...")
 
-    print("Creating LC Bench size stratification...")
+        try:
+            task_ids = get_benchmark_task_ids(benchmark)
+            top_largest = create_size_stratification(
+                task_ids, top_count=top_count, top_percent=top_percent
+            )
 
-    task_ids = get_lcbench_task_ids()
-    top_largest = create_size_stratification(
-        task_ids, top_count=args.top_count, top_percent=args.top_percent
-    )
-
-    if top_largest:
-        save_stratification(top_largest, args.output)
-        print(f"Completed: {len(top_largest)} datasets selected")
-    else:
-        print(
-            "No datasets were successfully processed. Check your network connection and try again."
-        )
+            if top_largest:
+                output_file = f"top_largest_datasets_{benchmark}.json"
+                save_stratification(top_largest, output_file)
+                print(f"Completed {benchmark}: {len(top_largest)} datasets selected")
+            else:
+                print(
+                    f"No datasets were successfully processed for {benchmark}. Check your network connection and try again."
+                )
+        except Exception as e:
+            print(f"Error processing {benchmark}: {str(e)}")
 
 
 if __name__ == "__main__":

@@ -2,7 +2,6 @@ import json
 import numpy as np
 from typing import Dict, List, Tuple, Union
 import warnings
-import argparse
 
 from yahpo_gym import BenchmarkSet, local_config
 from sklearn.ensemble import RandomForestRegressor
@@ -20,8 +19,8 @@ local_config.init_config()
 local_config.set_data_path("yahpo_bench_data")
 
 
-def get_lcbench_task_ids() -> List[str]:
-    benchmark_set = BenchmarkSet("lcbench")
+def get_benchmark_task_ids(benchmark_name: str) -> List[str]:
+    benchmark_set = BenchmarkSet(benchmark_name)
     return benchmark_set.instances
 
 
@@ -74,10 +73,10 @@ def preprocess_configurations(configs: List[Dict]) -> np.ndarray:
 
 
 def sample_surrogate_data(
-    task_id: str, n_samples: int = 1000
+    benchmark_name: str, task_id: str, n_samples: int = 1000
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Sample surrogate data from YAHPO Gym benchmark."""
-    benchmark_set = BenchmarkSet(scenario="lcbench", instance=task_id)
+    benchmark_set = BenchmarkSet(scenario=benchmark_name, instance=task_id)
     config_space = benchmark_set.get_opt_space(drop_fidelity_params=False, seed=42)
     configurations = config_space.sample_configuration(n_samples)
 
@@ -223,6 +222,7 @@ def calculate_heteroscedasticity_robust(X: np.ndarray, y: np.ndarray) -> float:
 
 
 def create_stratification(
+    benchmark_name: str,
     task_ids: List[str],
     top_count: Union[int, None] = None,
     top_percent: Union[float, None] = None,
@@ -231,6 +231,7 @@ def create_stratification(
     Create stratification based on either top N datasets or top X percent.
 
     Args:
+        benchmark_name: Name of the benchmark
         task_ids: List of task IDs to process
         top_count: Number of top datasets to select (mutually exclusive with top_percent)
         top_percent: Percentage of top datasets to select (mutually exclusive with top_count)
@@ -245,7 +246,7 @@ def create_stratification(
     for i, task_id in enumerate(task_ids, 1):
         print(f"Processing {i}/{len(task_ids)}: Task {task_id}")
 
-        X, y = sample_surrogate_data(task_id)
+        X, y = sample_surrogate_data(benchmark_name, task_id)
 
         if X is not None and y is not None:
             score = calculate_heteroscedasticity_robust(X, y)
@@ -293,35 +294,30 @@ def save_stratification(task_ids: List[str], output_file: str = None):
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Create LC Bench heteroscedasticity stratification"
-    )
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--top-count", type=int, help="Number of top datasets to select")
-    group.add_argument(
-        "--top-percent", type=float, help="Percentage of top datasets to select"
-    )
-    parser.add_argument(
-        "--output",
-        type=str,
-        help="Output file name",
-        default="top_heteroscedastic_datasets.json",
-    )
+    # Configuration - define parameters directly
+    top_count = 5
+    top_percent = None
+    benchmarks = ["lcbench", "rbv2_xgboost"]
 
-    args = parser.parse_args()
+    for benchmark in benchmarks:
+        print(f"\nCreating {benchmark} surrogate heteroscedasticity stratification...")
 
-    print("Creating LC Bench surrogate heteroscedasticity stratification...")
+        try:
+            task_ids = get_benchmark_task_ids(benchmark)
+            top_heteroscedastic = create_stratification(
+                benchmark, task_ids, top_count=top_count, top_percent=top_percent
+            )
 
-    task_ids = get_lcbench_task_ids()
-    top_heteroscedastic = create_stratification(
-        task_ids, top_count=args.top_count, top_percent=args.top_percent
-    )
-
-    if top_heteroscedastic:
-        save_stratification(top_heteroscedastic, args.output)
-        print(f"Completed: {len(top_heteroscedastic)} datasets selected")
-    else:
-        print("No suitable datasets found.")
+            if top_heteroscedastic:
+                output_file = f"top_heteroscedastic_datasets_{benchmark}.json"
+                save_stratification(top_heteroscedastic, output_file)
+                print(
+                    f"Completed {benchmark}: {len(top_heteroscedastic)} datasets selected"
+                )
+            else:
+                print(f"No suitable datasets found for {benchmark}.")
+        except Exception as e:
+            print(f"Error processing {benchmark}: {str(e)}")
 
 
 if __name__ == "__main__":

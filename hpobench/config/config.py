@@ -19,8 +19,6 @@ from hpobench.config.types import (
     TunerConfig,
 )
 
-# Environment variables used in the main code:
-DEFAULT_N_REPETITIONS_PER_TUNER_CONFIG = 10
 N_TRIALS = 100
 TIMEOUT = None
 N_WARM_STARTS = 15
@@ -30,12 +28,16 @@ DEFAULT_INTERVAL_WIDTH = 0.9
 
 # 1. Create configurations feeding the static tuning charts and tables:
 STATIC_ANALYSIS_ESTIMATOR_ARCHITECTURES = [
+    "qknn",
     "qgp",
     "ql",
     "qrf",
     "qgbm",
+    "qens1",
+    "qens2",
     "qens3",
     "qens4",
+    "qens5",
 ]
 
 # 2. Create configurations feeding the coverage charts:
@@ -165,14 +167,12 @@ ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurati
 )
 
 LIMITED_ARCHITECTURE_ADAPTER = None
-LIMITED_ARCHITECTURE_N_QUANTILES = 4
+LIMITED_ARCHITECTURE_N_QUANTILES = 10
 LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurations(
     architectures=[
-        # "qgp",
-        # "qrf",
+        "qrf",
         "qgbm",
-        # "qens3",
-        # "qens4",
+        "qens3",
     ],
     samplers=[
         ExpectedImprovementSampler(
@@ -190,23 +190,29 @@ LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_con
     searcher_tuning_framework=None,
 )
 
-# TODO: TEMP
-# LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS.extend(build_architecture_variation_configurations(
-#     architectures=[
-#         # "qrf",
-#         # "qgbm",
-#     "qgp",
-#         # "qens4",
-#     ],
-#     samplers=[
-#         ExpectedImprovementSampler(n_quantiles=50, num_ei_samples=1000, adapter=None),
-#         # ThompsonSampler(
-#         #     n_quantiles=20, enable_optimistic_sampling=False, adapter=None
-#         # ),
-#     ],
-#     # TODO: TEMP:
-#     n_pre_conformal_trials=10000,  # Simulate no pre-conformal trials
-# ))
+LIMITED_ARCHITECTURE_N_QUANTILES = 50
+LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS.extend(
+    build_architecture_variation_configurations(
+        architectures=[
+            "qgp",
+            "qens4",
+        ],
+        samplers=[
+            ExpectedImprovementSampler(
+                n_quantiles=LIMITED_ARCHITECTURE_N_QUANTILES,
+                num_ei_samples=1000,
+                adapter=LIMITED_ARCHITECTURE_ADAPTER,
+            ),
+            # ThompsonSampler(
+            #     n_quantiles=4,
+            #     enable_optimistic_sampling=False,
+            #     adapter=LIMITED_ARCHITECTURE_ADAPTER,
+            # ),
+        ],
+        n_pre_conformal_trials=10000,
+        searcher_tuning_framework=None,
+    )
+)
 
 
 PRECONFORMAL_ADAPTER = None

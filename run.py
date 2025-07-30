@@ -41,8 +41,8 @@ STATIC_DATA_SIZES = [15, 50, 100]
 TUNING_ITERATIONS = [0, 15]
 N_COVERAGE_TRIALS = 100
 SMALL_N_REPETITIONS_PER_TUNER_CONFIG = 3
-MEDIUM_N_REPETITIONS_PER_TUNER_CONFIG = 10
-LARGE_N_REPETITIONS_PER_TUNER_CONFIG = 30
+MEDIUM_N_REPETITIONS_PER_TUNER_CONFIG = 3
+LARGE_N_REPETITIONS_PER_TUNER_CONFIG = 3
 
 if __name__ == "__main__":
     # Coverage Analysis
@@ -105,7 +105,7 @@ if __name__ == "__main__":
     # External Tuning Analysis
     if run_sections["run_external_tuning_analysis"]:
         raw_benchmark_data = run_and_analyze_main_benchmark(
-            benchmarks=["lcbench_large", "lcbench_heteroscedastic"],
+            benchmarks=["jahs201", "lcbench_large", "lcbench_heteroscedastic"],
             tuning_configurations=LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS
             + EXTERNAL_TUNING_CONFIGURATIONS,
             n_warm_starts=N_WARM_STARTS,
@@ -153,7 +153,7 @@ if __name__ == "__main__":
         logger.info("Starting Estimator Error Analysis (STATIC configs)...")
 
         static_results = run_static_benchmark(
-            benchmarks=["lcbench", "jahs201"],
+            benchmarks=["lcbench_large", "jahs201"],
             data_size_range=STATIC_DATA_SIZES,
             estimator_architectures=STATIC_ANALYSIS_ESTIMATOR_ARCHITECTURES,
             n_repetitions_per_estimator=LARGE_N_REPETITIONS_PER_TUNER_CONFIG,
