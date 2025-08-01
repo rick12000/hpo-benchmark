@@ -229,9 +229,7 @@ def optuna_tune(
     """
     # NOTE: 0 start up trials because this benchmark repository uses warm-starting:
     if sampler == "tpe":
-        initialized_sampler = TPESampler(
-            seed=random_state, n_startup_trials=0, n_ei_candidates=N_CANDIDATES
-        )
+        initialized_sampler = TPESampler(seed=random_state, n_startup_trials=0)
     elif sampler == "random":
         initialized_sampler = RandomSampler(seed=random_state)
     elif sampler == "cmaes":
@@ -371,7 +369,7 @@ def confopt_tune(
 
     if n_trials is not None:
         if warm_start_configs is not None:
-            adj_n_trials = n_trials  # - len(warm_start_configs)
+            adj_n_trials = n_trials - len(warm_start_configs)
         else:
             adj_n_trials = n_trials
     else:
@@ -507,7 +505,6 @@ def skopt_tune(
         DataFrame with tuning history.
     """
     # TODO: Here until timeout implemented:
-    n_trials_placeholder = 100
 
     skopt_params, param_names = setup_skopt_params(raw_params)
     if warm_start_configs is not None:
@@ -519,7 +516,7 @@ def skopt_tune(
         x0 = []
         y0 = []
 
-    n_calls = n_trials or n_trials_placeholder
+    n_calls = (n_trials - len(warm_start_configs)) if warm_start_configs else n_trials
 
     runtimes: list[datetime] = []
     objective_fn = partial(

@@ -28,9 +28,9 @@ DEFAULT_INTERVAL_WIDTH = 0.9
 
 # 1. Create configurations feeding the static tuning charts and tables:
 STATIC_ANALYSIS_ESTIMATOR_ARCHITECTURES = [
-    "qgp",
+    # "qgp",
     "ql",
-    "qrf",
+    # "qrf",
     "qgbm",
     # "qens1",
     # "qens2",

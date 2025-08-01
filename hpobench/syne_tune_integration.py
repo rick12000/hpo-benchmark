@@ -366,7 +366,7 @@ def syne_tune_cqr_tune(
         # Follow the same pattern as other tuners: subtract warm start configs from total
         # since warm start configs count as trials but are handled through points_to_evaluate
         if warm_start_configs is not None:
-            adj_n_trials = n_trials  # - len(warm_start_configs)
+            adj_n_trials = n_trials - len(warm_start_configs)
         else:
             adj_n_trials = n_trials
     else:

@@ -153,7 +153,7 @@ if __name__ == "__main__":
         logger.info("Starting Estimator Error Analysis (STATIC configs)...")
 
         static_results = run_static_benchmark(
-            benchmarks=["lcbench_large", "jahs201"],
+            benchmarks=["lcbench_heteroscedastic", "lcbench_large"],
             data_size_range=STATIC_DATA_SIZES,
             estimator_architectures=STATIC_ANALYSIS_ESTIMATOR_ARCHITECTURES,
             n_repetitions_per_estimator=LARGE_N_REPETITIONS_PER_TUNER_CONFIG,

@@ -510,6 +510,17 @@ def run_static_benchmark(
             )
             experiment_configs.extend(yahpo_configs)
 
+        elif benchmark == "lcbench_heteroscedastic":
+            yahpo_configs = setup_yahpo_instance_configs(
+                benchmark="lcbench_heteroscedastic",  # hard coded, leave as is
+                tuning_configurations=[],  # placeholder
+                n_warm_starts=1,  # placeholder
+                n_trials=0,  # placeholder
+                timeout=100000,  # placeholder
+                max_n_instances=max_n_instances,
+            )
+            experiment_configs.extend(yahpo_configs)
+
         elif benchmark == "jahs201":
             # Use setup function as shortcut, but we are only interested in
             # the objective function and search space generation, the other inputs are
