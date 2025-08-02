@@ -8,7 +8,7 @@ from sklearn.preprocessing import StandardScaler
 
 from hpobench.utils import save_analysis_results
 from hpobench.utils import get_group_dict
-from hpobench.process import bootstrap_aggregate
+from hpobench.process import bootstrap_aggregate, calculate_ranks
 from scipy.stats import friedmanchisquare
 
 
@@ -402,11 +402,11 @@ def _calculate_chunked_target_coverage_deviation(
                 break
             chunk_data = group.iloc[start_idx:end_idx]
             chunk_breach_rate = chunk_data[breach_column].mean()
-            confidence_level = float(chunk_data["confidence_level"].iloc[0])
-            if pd.isna(confidence_level) or confidence_level is None or confidence_level == "None"  or confidence_level == "":
+            miscoverage_level = 1 - float(chunk_data["confidence_level"].iloc[0])
+            if pd.isna(miscoverage_level) or miscoverage_level is None or miscoverage_level == "None"  or miscoverage_level == "":
                 break
             if pd.notna(chunk_breach_rate):
-                target_coverage_deviation = abs(chunk_breach_rate - confidence_level)
+                target_coverage_deviation = abs(chunk_breach_rate - miscoverage_level)
             else:
                 target_coverage_deviation = np.nan
             chunked_deviations.iloc[start_idx] = target_coverage_deviation
@@ -458,9 +458,12 @@ def calculate_calibration_statistics(
     aggregators: List[str],
     repetition_column: str,
     breach_column: str,
+    entity_column: str,
+    metric_columns: List[str],
     budget_unit: str,
     n_bootstraps: int = 1000,
     random_state: Optional[int] = None,
+    rank_metrics: bool = False,
 ) -> pd.DataFrame:
     """Calculate calibration statistics for conformal prediction methods.
 
@@ -491,36 +494,44 @@ def calculate_calibration_statistics(
     )
 
     # Compute simple statistics:
-    score_columns = [
-        "winkler_score",
-        "width",
-        "miscoverage_penalty",
-        "chunked_target_coverage_deviation",
-    ]
+    score_columns = [col for col in metric_columns if col != "llr_statistic"]
+
     avg_scores_per_repetition = (
         sorted_experiment_log.groupby(aggregators)[score_columns].mean().reset_index()
     )
 
-    # Compute likelihood ratio statistic:
-    tabularized_features = np.vstack(
-        sorted_experiment_log["tabularized_configuration"].values
-    )
-    llr_series = sorted_experiment_log.groupby(aggregators).apply(
-        lambda grp: _compute_likelihood_ratio_statistic(
-            tabularized_features[grp.index], grp[breach_column], random_state
+    if "llr_statistic" in metric_columns:
+        # Compute likelihood ratio statistic:
+        tabularized_features = np.vstack(
+            sorted_experiment_log["tabularized_configuration"].values
         )
-    )
-    llr_df = llr_series.reset_index(name="llr_statistic")
-    avg_scores_per_repetition = avg_scores_per_repetition.merge(
-        llr_df, on=aggregators, how="left"
-    )
+        llr_series = sorted_experiment_log.groupby(aggregators).apply(
+            lambda grp: _compute_likelihood_ratio_statistic(
+                tabularized_features[grp.index], grp[breach_column], random_state
+            )
+        )
+        llr_df = llr_series.reset_index(name="llr_statistic")
+        avg_scores_per_repetition = avg_scores_per_repetition.merge(
+            llr_df, on=aggregators, how="left"
+        )
+
+        score_columns.append("llr_statistic")
+    
+    # NOTE: Rank is computed after raw scores are averaged across iterations (differes from search results)
+    if rank_metrics:
+        for metric_column in score_columns:
+            rank_ascending = True
+            rank_groupers = [col for col in aggregators if col != entity_column]
+            avg_scores_per_repetition[metric_column] = avg_scores_per_repetition.groupby(rank_groupers)[metric_column].rank(
+                method="average", ascending=rank_ascending
+            )
 
     bootstrap_aggregators = [col for col in aggregators if col != repetition_column]
     summary_statistics = (
         avg_scores_per_repetition.groupby(bootstrap_aggregators)
         .apply(
             _bootstrap_calibration_group,
-            score_columns=score_columns + ["llr_statistic"],
+            score_columns=score_columns,
             n_bootstraps=n_bootstraps,
             random_state=random_state,
         )

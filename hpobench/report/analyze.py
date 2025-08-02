@@ -203,8 +203,7 @@ def analyze_main_benchmark(
 
     # Coverage analysis plots:
     if (
-        absolute_iteration_results[data_col].nunique() == 1
-        and "coverage" in analysis_components
+        "coverage" in analysis_components
     ):
         if starting_coverage_trial is not None:
             raw_benchmark_data_adj = raw_benchmark_data[
@@ -259,6 +258,9 @@ def analyze_main_benchmark(
             aggregators=grouping_cols,
             repetition_column=rep_col,
             breach_column="breach_status",
+            dataset_column= data_col,
+            entity_column= tuner_col,
+            confidence_column=confidence_level_col,
             budget_unit=iter_unit,
             cache_path=cache_path,
             run_start_str=run_start_str,
@@ -267,11 +269,6 @@ def analyze_main_benchmark(
             subfolder="coverage",
             latex_layout_breakout_col=None,  # Can be modified to include estimator_architecture if needed
             random_state=42,
-        )
-
-    else:
-        logger.warning(
-            "Coverage analysis is only supported for single dataset benchmarks, skipping."
         )
 
     # Dataset level analysis:
@@ -462,8 +459,8 @@ def analyze_main_benchmark(
             x_col=norm_runtime_unit,
             y_cols=["rank"],
             entity_col=tuner_col,
-            col_measure=estimator_architecture_col,
-            row_measure=bench_col,
+            col_measure=bench_col,
+            row_measure=estimator_architecture_col,
             cache_path=cache_path,
             run_start_str=run_start_str,
             filename_prefix="perf_vs_runtime_n_pre_conformal_trials",

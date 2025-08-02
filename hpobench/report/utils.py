@@ -18,6 +18,7 @@ from hpobench.report.latex import (
     format_win_percentage_to_latex,
     format_calibration_statistics_to_latex,
 )
+from hpobench.plot import plot_and_save_calibration_boxplots
 
 
 def _save_text_content(
@@ -253,6 +254,9 @@ def run_and_save_calibration_statistics(
     aggregators: List[str],
     repetition_column: str,
     breach_column: str,
+    dataset_column: str,
+    entity_column: str,
+    confidence_column: str,
     budget_unit: str,
     cache_path: str,
     run_start_str: str,
@@ -282,44 +286,106 @@ def run_and_save_calibration_statistics(
     """
     from hpobench.report.metrics import calculate_calibration_statistics
 
+    metric_columns = [
+        "winkler_score",
+        "width",
+        "miscoverage_penalty",
+        "chunked_target_coverage_deviation",
+        "llr_statistic"
+    ]
+
     logger = logging.getLogger(__name__)
 
-    calibration_stats = calculate_calibration_statistics(
-        raw_benchmark_data=raw_benchmark_data,
-        aggregators=aggregators,
-        repetition_column=repetition_column,
-        breach_column=breach_column,
-        budget_unit=budget_unit,
-        random_state=random_state,
-    )
+    if raw_benchmark_data[dataset_column].nunique() > 1:
 
-    save_analysis_results(
-        df=calibration_stats,
-        cache_path=cache_path,
-        run_start_str=run_start_str,
-        filename=filename,
-        analysis_type=analysis_type,
-        subfolder=subfolder,
-    )
-
-    # Generate LaTeX table for calibration statistics
-    latex_str = format_calibration_statistics_to_latex(
-        calibration_stats,
-        layout_breakout_col=latex_layout_breakout_col,
-    )
-
-    if latex_str:
-        latex_filename = f"{filename.replace('.csv', '')}_latex.tex"
-        _save_text_content(
-            latex_str,
-            cache_path,
-            run_start_str,
-            latex_filename,
-            analysis_type,
-            "latex_outputs",
+        calibration_stats = calculate_calibration_statistics(
+            raw_benchmark_data=raw_benchmark_data,
+            aggregators=aggregators,
+            repetition_column=repetition_column,
+            breach_column=breach_column,
+            entity_column=entity_column,
+            metric_columns=metric_columns,
+            budget_unit=budget_unit,
+            random_state=random_state,
+            rank_metrics=True
         )
-        logger.info("Generated LaTeX table for calibration statistics")
+            
+        # Multiple datasets - save data and create box plots
+        save_analysis_results(
+            df=calibration_stats,
+            cache_path=cache_path,
+            run_start_str=run_start_str,
+            filename=filename,
+            analysis_type=analysis_type,
+            subfolder=subfolder,
+        )
+
+        collapsing_aggregators = [
+            col for col in aggregators if col not in [repetition_column, confidence_column]
+        ]
+        quantile_collapsed_calibration_stats = calibration_stats.groupby(
+            collapsing_aggregators
+        ).mean().reset_index()
+        aggregated_metric_columns = [f"{col}_mean" for col in metric_columns if f"{col}_mean" in calibration_stats.columns]
+
+        plot_and_save_calibration_boxplots(
+            data=quantile_collapsed_calibration_stats,
+            metric_columns=aggregated_metric_columns,
+            entity_col=entity_column,
+            cache_path=cache_path,
+            run_start_str=run_start_str,
+            filename_prefix="calibration_statistics_boxplots",
+            analysis_type=analysis_type,
+            subfolder="calibration_plots",
+            col_measure_label="Calibration Statistics by Metric Type",
+        )
+        logger.info("Generated box plots for calibration statistics across multiple datasets")
+
+    elif raw_benchmark_data[dataset_column].nunique() == 1:
+
+        calibration_stats = calculate_calibration_statistics(
+            raw_benchmark_data=raw_benchmark_data,
+            aggregators=aggregators,
+            repetition_column=repetition_column,
+            breach_column=breach_column,
+            entity_column=entity_column,
+            metric_columns=metric_columns,
+            budget_unit=budget_unit,
+            random_state=random_state,
+            rank_metrics=False
+        )
+
+        save_analysis_results(
+            df=calibration_stats,
+            cache_path=cache_path,
+            run_start_str=run_start_str,
+            filename=filename,
+            analysis_type=analysis_type,
+            subfolder=subfolder,
+        )
+
+        # Generate LaTeX table for calibration statistics
+        latex_str = format_calibration_statistics_to_latex(
+            calibration_stats,
+            layout_breakout_col=latex_layout_breakout_col,
+        )
+
+        if latex_str:
+            latex_filename = f"{filename.replace('.csv', '')}_latex.tex"
+            _save_text_content(
+                latex_str,
+                cache_path,
+                run_start_str,
+                latex_filename,
+                analysis_type,
+                "latex_outputs",
+            )
+            logger.info("Generated LaTeX table for calibration statistics")
+        else:
+            logger.warning("Failed to generate LaTeX for calibration statistics")
+
     else:
-        logger.warning("Failed to generate LaTeX for calibration statistics")
+        raise ValueError()
+
 
     return calibration_stats

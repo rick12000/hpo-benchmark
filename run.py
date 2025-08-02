@@ -40,15 +40,15 @@ DEFAULT_MAX_N_INSTANCES = 10
 STATIC_DATA_SIZES = [50, 100]
 TUNING_ITERATIONS = [0, 10]
 N_COVERAGE_TRIALS = 200
-SMALL_N_REPETITIONS_PER_TUNER_CONFIG = 3
-MEDIUM_N_REPETITIONS_PER_TUNER_CONFIG = 5
-LARGE_N_REPETITIONS_PER_TUNER_CONFIG = 20
+SMALL_N_REPETITIONS_PER_TUNER_CONFIG = 1
+MEDIUM_N_REPETITIONS_PER_TUNER_CONFIG = 1
+LARGE_N_REPETITIONS_PER_TUNER_CONFIG = 1
 
 if __name__ == "__main__":
     # Coverage Analysis
     if run_sections["run_coverage_analysis"]:
         raw_benchmark_data = run_and_analyze_main_benchmark(
-            benchmarks=["jahs201"],
+            benchmarks=["lcbench_large"],
             tuning_configurations=COVERAGE_ANALYSIS_CONFIGURATIONS,
             n_warm_starts=N_WARM_STARTS,
             n_trials=N_COVERAGE_TRIALS,
@@ -57,11 +57,11 @@ if __name__ == "__main__":
             cache_path=CACHE_PATH,
             run_start_str=run_start_str,
             analysis_type="01_coverage_analysis",
-            max_n_instances_per_benchmark=DEFAULT_MAX_N_INSTANCES,
+            max_n_instances_per_benchmark=6,
             n_repetitions=LARGE_N_REPETITIONS_PER_TUNER_CONFIG,
             starting_coverage_trial=32,
             analysis_components=["coverage"],
-            datasets_per_benchmark=[["cifar10"]],
+            # datasets_per_benchmark=[["cifar10"]],
         )
 
     # Sampler Variation Analysis
@@ -133,7 +133,7 @@ if __name__ == "__main__":
     # Preconformal Comparison Analysis
     if run_sections["run_preconformal_comparison_analysis"]:
         raw_benchmark_data = run_and_analyze_main_benchmark(
-            benchmarks=["lcbench_large"],
+            benchmarks=["lcbench_heteroscedastic", "lcbench_large", "jahs201"],
             tuning_configurations=PRECONFORMAL_COMPARISON_CONFIGURATIONS,
             n_warm_starts=N_WARM_STARTS,
             n_trials=N_TRIALS,

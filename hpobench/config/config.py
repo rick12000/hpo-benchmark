@@ -38,7 +38,7 @@ STATIC_ANALYSIS_ESTIMATOR_ARCHITECTURES = [
 
 # 2. Create configurations feeding the coverage charts:
 COVERAGE_ANALYSIS_CONFIGURATIONS = []
-COVERAGE_INTERVAL_WIDTHS = [0.2, 0.4, 0.6, 0.8]  # , 0.9]
+COVERAGE_INTERVAL_WIDTHS = [0.2, 0.4]  # 0.25, 0.5, 0.75
 ADAPTERS = ["ACI", "DtACI", None]
 
 for interval_width in COVERAGE_INTERVAL_WIDTHS:
@@ -187,37 +187,34 @@ LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_con
 )
 
 # LIMITED_ARCHITECTURE_N_QUANTILES = 10
-# LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS.extend(
-#     build_architecture_variation_configurations(
-#         architectures=[
-#             "qrf",
-#             # "qens4",
-#         ],
-#         samplers=[
-#             ExpectedImprovementSampler(
-#                 n_quantiles=LIMITED_ARCHITECTURE_N_QUANTILES,
-#                 num_ei_samples=10000,
-#                 adapter=LIMITED_ARCHITECTURE_ADAPTER,
-#             ),
-#             # ThompsonSampler(
-#             #     n_quantiles=4,
-#             #     enable_optimistic_sampling=False,
-#             #     adapter=LIMITED_ARCHITECTURE_ADAPTER,
-#             # ),
-#         ],
-#         n_pre_conformal_trials=32,
-#         searcher_tuning_framework=None,
-#     )
-# )
+LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS.extend(
+    build_architecture_variation_configurations(
+        architectures=[
+            "qgbm",
+            # "qens4",
+        ],
+        samplers=[
+        MaxValueEntropySearchSampler(
+            n_quantiles=LIMITED_ARCHITECTURE_N_QUANTILES,
+            adapter=LIMITED_ARCHITECTURE_ADAPTER,
+            n_paths=1000,
+            n_y_candidates_per_x=100,  # Should be 1000, but too slow
+            entropy_method="distance",
+        ),
+        ],
+        n_pre_conformal_trials=32,
+        searcher_tuning_framework=None,
+    )
+)
 
 
 PRECONFORMAL_ADAPTER = None
 PRECONFORMAL_N_QUANTILES = 4
 PRECONFORMAL_COMPARISON_CONFIGURATIONS = []
 for architecture in [
-    "qgp",
+    # "qgp",
     "qgbm",
-    "qrf",
+    # "qrf",
 ]:
     # Simulate normal pre-conformal cutoff vs. unreachable one:
     for pre_conformal_trials in [32, 10000]:
@@ -229,13 +226,11 @@ for architecture in [
             build_architecture_variation_configurations(
                 architectures=[architecture],
                 samplers=[
-                    MaxValueEntropySearchSampler(
-                        n_quantiles=PRECONFORMAL_N_QUANTILES,
-                        adapter=adapter,
-                        n_paths=1000,
-                        n_y_candidates_per_x=100,  # Should be 1000, but too slow
-                        entropy_method="distance",
-                    ),
+        ThompsonSampler(
+            n_quantiles=ARCHITECTURE_VARIATION_N_QUANTILES,
+            enable_optimistic_sampling=False,
+            adapter=ARCHITECTURE_VARIATION_ADAPTER,
+        ),
                 ],
                 n_pre_conformal_trials=pre_conformal_trials,
             )

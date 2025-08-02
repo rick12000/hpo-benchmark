@@ -366,3 +366,193 @@ def plot_and_save(
         except Exception as e:
             logger.error(f"Error plotting {y_col}: {e}")
     logger.debug(f"Plots saved in {output_path} with prefix {filename_prefix}")
+
+
+def plot_calibration_boxplots(
+    data: pd.DataFrame,
+    plot_path: str,
+    metric_columns: list,
+    entity_col: str,
+    col_measure_label: Optional[str] = None,
+) -> None:
+    """
+    Creates box plots for calibration statistics with subplots by metric type.
+    
+    Args:
+        data: DataFrame containing calibration statistics in original format
+        plot_path: The base path to save the plot
+        metric_columns: List of metric column names to plot (e.g., ['winkler_score', 'width'])
+        entity_col: Column containing entity identifiers
+        col_measure_label: Custom label for the column measure
+    """
+    plt.clf()
+    
+    # Filter metric columns to only those that have _mean columns in the data
+    available_metrics = [metric for metric in metric_columns if metric in data.columns]
+
+    if not available_metrics:
+        logger.warning("No available metric columns found in data")
+        return
+
+    n_metrics = len(available_metrics)
+
+    # Set figure size based on number of metrics
+    base_width = 4.0
+    base_height = 3.5
+    fig_width = base_width * min(n_metrics, 3)  # Max 3 columns
+    n_rows = (n_metrics + 2) // 3  # Ceiling division for rows
+    fig_height = base_height * n_rows
+
+    fig, axes = plt.subplots(
+        nrows=n_rows,
+        ncols=min(n_metrics, 3),
+        figsize=(fig_width, fig_height),
+        constrained_layout=True,
+    )
+
+    # Ensure axes is always 2D for easier iteration
+    if n_metrics == 1:
+        axes = [[axes]]
+    elif n_rows == 1:
+        axes = [axes] if n_metrics > 1 else [[axes]]
+    elif min(n_metrics, 3) == 1:
+        axes = [[ax] for ax in axes]
+
+    # Create box plots for each metric
+    for idx, metric in enumerate(available_metrics):
+        row_idx = idx // 3
+        col_idx = idx % 3
+
+        # Handle case where we have fewer subplots than grid positions
+        if row_idx >= len(axes) or col_idx >= len(axes[row_idx]):
+            continue
+
+        ax = axes[row_idx][col_idx]
+
+        # Get unique entities
+        entities = sorted(data[entity_col].unique())
+
+        # Prepare data for box plot
+        box_data = []
+        entity_labels = []
+        entity_means = []
+
+        for entity in entities:
+            entity_data = data[data[entity_col] == entity]
+            values = entity_data[metric].dropna()
+            if len(values) > 0:
+                box_data.append(values)
+                entity_labels.append(entity)
+                entity_means.append(values.mean())
+
+        if box_data:
+            # Create box plot
+            bp = ax.boxplot(
+                box_data,
+                labels=entity_labels,
+                patch_artist=True,
+                notch=False,
+                showmeans=False,
+            )
+
+            # Color the boxes
+            for patch, color_idx in zip(bp['boxes'], range(len(box_data))):
+                patch.set_facecolor(DEFAULT_COLOR_PALETTE[color_idx % len(DEFAULT_COLOR_PALETTE)])
+                patch.set_alpha(0.7)
+
+            # Add mean values as text annotations
+            for i, (entity, mean_val) in enumerate(zip(entity_labels, entity_means)):
+                ax.text(
+                    i + 1, 
+                    mean_val, 
+                    f'{mean_val:.3f}',
+                    ha='center',
+                    va='bottom',
+                    fontweight='bold',
+                    fontsize=10,
+                    bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8)
+                )
+
+        # Set subplot title and labels
+        metric_title = metric.replace('_', ' ').title()
+        ax.set_title(metric_title, fontsize=13)
+        ax.set_xlabel('Entity', fontsize=11)
+        ax.set_ylabel('Value', fontsize=11)
+
+        # Rotate x-axis labels for better readability
+        ax.tick_params(axis='x', rotation=45, labelsize=10)
+        ax.tick_params(axis='y', labelsize=10)
+
+        # Add grid
+        ax.grid(True, which="both", linestyle="--", linewidth=0.5, alpha=0.7)
+
+        # Style axis spines
+        ax.spines["top"].set_linewidth(1.2)
+        ax.spines["right"].set_linewidth(1.2)
+        ax.spines["bottom"].set_linewidth(1.2)
+        ax.spines["left"].set_linewidth(1.2)
+
+    # Hide empty subplots if any
+    total_subplots = n_rows * min(n_metrics, 3)
+    for idx in range(n_metrics, total_subplots):
+        row_idx = idx // 3
+        col_idx = idx % 3
+        if row_idx < len(axes) and col_idx < len(axes[row_idx]):
+            axes[row_idx][col_idx].set_visible(False)
+
+    # Add overall title
+    title = col_measure_label if col_measure_label else "Calibration Statistics Box Plots"
+    fig.suptitle(title, fontsize=16, y=0.98)
+
+    # Adjust layout
+    fig.subplots_adjust(
+        wspace=0.25, 
+        hspace=0.35, 
+        bottom=0.15, 
+        top=0.90, 
+        left=0.08, 
+        right=0.98
+    )
+
+    # Save the plot
+    for file_format in PLOT_FORMATS:
+        fig.savefig(
+            f"{plot_path}-{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.{file_format}",
+            dpi=PLOT_DPI,
+            format=file_format,
+            bbox_inches="tight",
+            transparent=False,
+        )
+
+    plt.close(fig)
+
+
+def plot_and_save_calibration_boxplots(
+    data: pd.DataFrame,
+    metric_columns: list,
+    entity_col: str,
+    cache_path: str,
+    run_start_str: str,
+    filename_prefix: str,
+    analysis_type: str,
+    subfolder: str,
+    col_measure_label: Optional[str] = None,
+):
+    """Generates and saves box plots for calibration statistics."""
+    
+    path_manager = AnalysisPathManager(cache_path, run_start_str)
+    output_path = path_manager.get_analysis_path(analysis_type, "plots", subfolder)
+    plot_path = os.path.join(output_path, filename_prefix)
+    
+    try:
+        plot_calibration_boxplots(
+            data=data,
+            plot_path=plot_path,
+            metric_columns=metric_columns,
+            entity_col=entity_col,
+            col_measure_label=col_measure_label,
+        )
+        logger.info(f"Calibration box plots saved in {output_path} with prefix {filename_prefix}")
+    except Exception as e:
+        logger.error(f"Error creating calibration box plots: {e}")
+        raise
