@@ -352,8 +352,12 @@ def _compute_likelihood_ratio_statistic(
         random_state: Random seed for reproducible results.
 
     Returns:
-        Likelihood ratio test statistic.
+        Likelihood ratio test statistic, or nan if data contains only one class.
     """
+    # Check if y contains only one class
+    if len(y.unique()) < 2:
+        return np.nan
+    
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
 

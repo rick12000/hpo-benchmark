@@ -4,6 +4,7 @@ from hpobench.generation.generate import (
     Jahs201Generator,
     BlackBoxGenerator,
     YahpoGenerator,
+    NAS301Generator,
 )
 from hpobench.config.types import (
     ExperimentConfig,
@@ -15,6 +16,7 @@ from hpobench.config.benchmark_data import (
     JAHS201_SEARCH_SPACE,
     BLACK_BOX_SEARCH_SPACE,
     YAHPO_SUBSETS,
+    NAS301_SEARCH_SPACE,
 )
 from yahpo_gym import BenchmarkSet
 import ConfigSpace as CS
@@ -47,6 +49,12 @@ def setup_yahpo_instance_configs(
     experiment_configs = []
     if benchmark in ["lcbench_large", "lcbench_heteroscedastic"]:
         benchmark_override = "lcbench"
+        benchmark_set = BenchmarkSet(
+            benchmark_override, active_session=False, check=False
+        )
+        instances = YAHPO_SUBSETS[benchmark]
+    elif benchmark in ["rbv2_xgboost_large", "rbv2_xgboost_heteroscedastic"]:
+        benchmark_override = "rbv2_xgboost"
         benchmark_set = BenchmarkSet(
             benchmark_override, active_session=False, check=False
         )
@@ -94,13 +102,14 @@ def setup_yahpo_instance_configs(
         fidelity_param_names = instance_benchmark_set.config.fidelity_params
         instance_names = instance_benchmark_set.config.instance_names
 
-        # Create search space for non-fidelity parameters:
+        # Create search space for non-fidelity parameters and extract MAXIMUM fidelity values:
         filtered_op_space_dict = {}
         fidelity_space = {}
         for hyperparameter in yahpo_config_space.get_hyperparameters():
             if hyperparameter.name in fidelity_param_names:
+                # Always use MAXIMUM fidelity for best performance evaluation
                 if hasattr(hyperparameter, "upper"):
-                    fidelity_space[hyperparameter.name] = hyperparameter.upper
+                    fidelity_space[hyperparameter.name] = hyperparameter.upper  # Maximum fidelity
                 else:
                     fidelity_space[hyperparameter.name] = hyperparameter.default_value
 
@@ -215,4 +224,61 @@ def setup_blackbox_configs(
             )
         )
 
+    return experiment_configs
+
+
+def setup_nas301_configs(
+    datasets: list[str],
+    tuning_configurations: list[TunerConfig],
+    n_warm_starts: int,
+    n_trials: int,
+    timeout: int,
+) -> list[ExperimentConfig]:
+    """Create experiment configurations for NAS-301 benchmark.
+    
+    Args:
+        datasets: List of dataset names (typically ["CIFAR10"] for NAS-301).
+        tuning_configurations: List of tuner configurations to use for each dataset.
+        n_warm_starts: Number of warm-start configurations for each experiment.
+        n_trials: Number of trials to run for each experiment.
+        timeout: Maximum runtime for each experiment.
+        
+    Returns:
+        List of ExperimentConfig objects, one per dataset.
+    """
+    experiment_configs = []
+    
+    # Create ConfigSpace for NAS-301 with full parameter names
+    # This will be used for parameter validation and active hyperparameter detection
+    benchmark_set = BenchmarkSet("nb301", active_session=False, check=False)
+    full_config_space = benchmark_set.get_opt_space(drop_fidelity_params=True)
+    fidelity_space = benchmark_set.get_fidelity_space()
+    
+    # For NAS-301, we don't pass fidelity values since the generator 
+    # automatically uses maximum fidelity (like JAHS-201 generator)
+    fidelity_dict = {}
+    
+    # NAS-301 doesn't use instance parameters in the configuration space
+    # The instance is set at the BenchmarkSet level
+    instance_name = None  # Not used for NAS-301
+    
+    for dataset in datasets:
+        experiment_configs.append(
+            ExperimentConfig(
+                search_space=NAS301_SEARCH_SPACE,
+                objective_function=NAS301Generator(
+                    instance_value=dataset,
+                    instance_name=instance_name,
+                    fidelity_space=fidelity_dict,
+                    config_space=full_config_space,
+                ),
+                tuning_configurations=tuning_configurations,
+                n_warm_starts=n_warm_starts,
+                n_trials=n_trials,
+                timeout=timeout,
+                benchmark_identifier="nas301",
+                dataset_identifier=dataset,
+            )
+        )
+    
     return experiment_configs

@@ -192,8 +192,11 @@ def build_sampler_variation_configurations(
             quantile_estimator_architecture=quantile_arch,
             sampler=sampler_copy,
             n_pre_conformal_trials=n_pre_conformal_trials,
+            n_calibration_folds=3,
+            calibration_split_strategy="cv_plus",
+            symmetric_adjustment=True,
         )
-        config_id = create_sampler_config_id(searcher)
+        config_id = create_sampler_config_id(searcher) + (f" stf={searcher_tuning_framework}" if searcher_tuning_framework else "")
         configs.append(
             TunerConfig(
                 tuner="confopt",
@@ -237,8 +240,11 @@ def build_architecture_variation_configurations(
                 quantile_estimator_architecture=arch,
                 sampler=sampler_copy,
                 n_pre_conformal_trials=n_pre_conformal_trials,
+                n_calibration_folds=3,
+                calibration_split_strategy="cv_plus",
+                symmetric_adjustment=True,
             )
-            config_id = create_sampler_config_id(searcher)
+            config_id = create_sampler_config_id(searcher) + (f" stf={searcher_tuning_framework}" if searcher_tuning_framework else "")
             configs.append(
                 TunerConfig(
                     tuner="confopt",

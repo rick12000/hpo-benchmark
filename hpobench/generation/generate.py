@@ -185,12 +185,13 @@ class YahpoGenerator(ObjectiveMetricGenerator):
     """Objective metric generator for YAHPO Gym surrogate benchmarks.
 
     Handles instance-specific and fidelity-aware configuration evaluation.
+    Automatically uses maximum fidelity values for all fidelity parameters.
 
     Args:
         dataset: Name of the YAHPO benchmark scenario.
         instance_value: Value of the instance for this experiment.
         instance_name: Name of the instance parameter in the configuration space.
-        fidelity_space: Dictionary of fidelity parameter names and their values.
+        fidelity_space: Dictionary of fidelity parameter names and their MAXIMUM values.
         config_space: Configuration space object.
     """
 
@@ -207,13 +208,14 @@ class YahpoGenerator(ObjectiveMetricGenerator):
         self.generator = BenchmarkSet(dataset, instance=instance_value)
 
         self.config_space = config_space
+        # Store maximum fidelity values (passed from setup functions)
         self.fidelity_space = fidelity_space
 
     def _get_filtered_configuration(self, configuration: dict) -> dict:
         """Filter the configuration to include only active and fidelity parameters.
 
         Uses ConfigSpace's built-in get_active_hyperparameters method for robust
-        conditional dependency handling, aligned with Syne Tune's approach.
+        conditional dependency handling.
 
         Args:
             configuration: Dictionary mapping parameter names to their values.
@@ -297,3 +299,136 @@ class YahpoGenerator(ObjectiveMetricGenerator):
             return results["runtime"]
         else:
             return results["timetrain"] + results["timepredict"]
+
+
+class NAS301Generator(YahpoGenerator):
+    """Specialized objective metric generator for NAS-301 benchmark.
+    
+    Extends YahpoGenerator to handle NAS-301 specific parameter name mapping.
+    
+    Args:
+        instance_value: Value of the instance for this experiment.
+        instance_name: Name of the instance parameter in the configuration space.
+        fidelity_space: Dictionary of fidelity parameter names and their values.
+        config_space: Configuration space object.
+    """
+    
+    NB301_ATTRIBUTE_NAME_PREFIX = "NetworkSelectorDatasetInfo_COLON_darts_COLON_"
+    
+    def __init__(
+        self,
+        instance_value: Any,
+        instance_name: str,
+        fidelity_space: Dict,
+        config_space,
+    ):
+        # Initialize with nb301 dataset
+        super().__init__(
+            dataset="nb301",
+            instance_value=instance_value,
+            instance_name=instance_name,
+            fidelity_space=fidelity_space,
+            config_space=config_space,
+        )
+        
+        # Set default maximum fidelity for NAS-301 (like JAHS-201 generator)
+        # NAS-301 uses epoch as fidelity parameter with maximum value of 98
+        self.default_fidelities = {
+            "epoch": 98,  # Maximum fidelity for NAS-301
+        }
+        
+        # Initialize parameter name mapping for NAS-301
+        self._shortened_keys = set()
+        self._initialize_nas301_specifics()
+    
+    def _initialize_nas301_specifics(self):
+        """Initialize NAS-301 specific parameter name handling."""
+        # Create mapping from shortened keys to full YAHPO parameter names
+        len_prefix = len(self.NB301_ATTRIBUTE_NAME_PREFIX)
+        
+        # Get all parameter names from the YAHPO config space
+        yahpo_config_space = self.generator.get_opt_space(drop_fidelity_params=True)
+        
+        for param_name in yahpo_config_space.get_hyperparameter_names():
+            if param_name.startswith(self.NB301_ATTRIBUTE_NAME_PREFIX):
+                shortened_key = param_name[len_prefix:]
+                self._shortened_keys.add(shortened_key)
+    
+    def _map_configuration_to_yahpo(self, configuration: dict) -> dict:
+        """Map shortened parameter names back to full YAHPO parameter names.
+        
+        Args:
+            configuration: Dictionary with shortened parameter names.
+            
+        Returns:
+            Dictionary with full YAHPO parameter names.
+        """
+        mapped_config = {}
+        
+        for key, value in configuration.items():
+            if key in self._shortened_keys:
+                # Map shortened key back to full YAHPO parameter name
+                full_key = self.NB301_ATTRIBUTE_NAME_PREFIX + key
+                mapped_config[full_key] = value
+            else:
+                # Keep non-NAS parameters as-is
+                mapped_config[key] = value
+        
+        return mapped_config
+    
+    def _merge_with_fidelities(
+        self, configuration: dict[str, Union[str, int, float, bool]]
+    ) -> dict[str, Union[str, int, float, bool]]:
+        """Merge configuration with default maximum fidelities.
+        
+        Args:
+            configuration: Dictionary mapping parameter names to their values.
+            
+        Returns:
+            Configuration merged with default maximum fidelity values.
+        """
+        merged = configuration.copy()
+        merged.update(self.default_fidelities)
+        return merged
+    
+    def _get_filtered_configuration(self, configuration: dict) -> dict:
+        """Override to handle NAS-301 parameter name mapping.
+        
+        Args:
+            configuration: Dictionary mapping parameter names to their values.
+            
+        Returns:
+            Filtered configuration dictionary with full YAHPO parameter names.
+        """
+        # First merge with default maximum fidelities
+        merged_config = self._merge_with_fidelities(configuration)
+        
+        # Then map the shortened parameter names to full YAHPO names
+        mapped_config = self._map_configuration_to_yahpo(merged_config)
+        
+        # NOTE: NAS-301 doesn't use an instance parameter in the configuration space
+        # The instance is handled at the BenchmarkSet level, not as a hyperparameter
+        
+        # Use ConfigSpace's built-in method to get active hyperparameters
+        try:
+            # Create a temporary config space with the full parameter names for validation
+            yahpo_config_space = self.generator.get_opt_space(drop_fidelity_params=False)
+            
+            cs_config = Configuration(
+                yahpo_config_space,
+                values=mapped_config,
+                allow_inactive_with_values=True,
+            )
+            active_hyperparameters = yahpo_config_space.get_active_hyperparameters(cs_config)
+            
+            # Filter configuration to only include active parameters
+            filtered_configuration = {
+                k: v
+                for k, v in mapped_config.items()
+                if k in active_hyperparameters
+            }
+            
+        except Exception as e:
+            raise ValueError(f"ConfigSpace evaluation failed for NAS-301: {e}")
+        
+        return filtered_configuration

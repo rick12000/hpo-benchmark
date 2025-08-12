@@ -28,17 +28,17 @@ DEFAULT_INTERVAL_WIDTH = 0.9
 
 # 1. Create configurations feeding the static tuning charts and tables:
 STATIC_ANALYSIS_ESTIMATOR_ARCHITECTURES = [
-    "qgp",
+    # "qgp",
     "ql",
     "qrf",
     "qgbm",
     "qens3",
-    "qens4",
+    # "qens4",
 ]
 
 # 2. Create configurations feeding the coverage charts:
 COVERAGE_ANALYSIS_CONFIGURATIONS = []
-COVERAGE_INTERVAL_WIDTHS = [0.2, 0.4]  # 0.25, 0.5, 0.75
+COVERAGE_INTERVAL_WIDTHS = [ 0.25, 0.5, 0.75]  # 0.25, 0.5, 0.75
 ADAPTERS = ["ACI", "DtACI", None]
 
 for interval_width in COVERAGE_INTERVAL_WIDTHS:
@@ -51,6 +51,9 @@ for interval_width in COVERAGE_INTERVAL_WIDTHS:
         SEARCHER = QuantileConformalSearcher(
             quantile_estimator_architecture="qgbm",
             sampler=SAMPLER,
+            n_calibration_folds=3,
+            calibration_split_strategy="cv_plus",
+            symmetric_adjustment=True,
         )
         if adapter is None:
             config_identifier = "Conformalized"
@@ -78,6 +81,9 @@ for interval_width in COVERAGE_INTERVAL_WIDTHS:
                     c=0,
                 ),
                 n_pre_conformal_trials=10000,
+                n_calibration_folds=3,
+                calibration_split_strategy="cv_plus",
+                symmetric_adjustment=True,
             ),
             config_identifier="Unconformalized",
             searcher_tuning_framework=None,
@@ -89,13 +95,13 @@ SAMPLER_VARIATION_N_DEFAULT_QUANTILES = 4
 SAMPLER_VARIATION_DEFAULT_ADAPTER = None
 SAMPLER_VARIATION_CONFIGURATIONS = build_sampler_variation_configurations(
     samplers=[
-        MaxValueEntropySearchSampler(
-            n_quantiles=SAMPLER_VARIATION_N_DEFAULT_QUANTILES,
-            adapter=SAMPLER_VARIATION_DEFAULT_ADAPTER,
-            n_paths=1000,
-            n_y_candidates_per_x=100,  # Should be 1000, but too slow
-            entropy_method="distance",
-        ),
+        # MaxValueEntropySearchSampler(
+        #     n_quantiles=SAMPLER_VARIATION_N_DEFAULT_QUANTILES,
+        #     adapter=SAMPLER_VARIATION_DEFAULT_ADAPTER,
+        #     n_paths=1000,
+        #     n_y_candidates_per_x=100,  # Should be 1000, but too slow
+        #     entropy_method="distance",
+        # ),
         LowerBoundSampler(
             interval_width=DEFAULT_INTERVAL_WIDTH,
             adapter=SAMPLER_VARIATION_DEFAULT_ADAPTER,
@@ -135,34 +141,34 @@ ARCHITECTURE_VARIATION_ADAPTER = None
 ARCHITECTURE_VARIATION_N_QUANTILES = 4
 ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurations(
     architectures=[
-        "qgp",
+        # "qgp",
         "ql",
         "qrf",
         "qgbm",
         "qens3",
-        "qens4",
+        # "qens4",
     ],
     samplers=[
-        ExpectedImprovementSampler(
-            n_quantiles=ARCHITECTURE_VARIATION_N_QUANTILES,
-            num_ei_samples=1000,
-            adapter=ARCHITECTURE_VARIATION_ADAPTER,
-        ),
+        # ExpectedImprovementSampler(
+        #     n_quantiles=ARCHITECTURE_VARIATION_N_QUANTILES,
+        #     num_ei_samples=1000,
+        #     adapter=ARCHITECTURE_VARIATION_ADAPTER,
+        # ),
         ThompsonSampler(
             n_quantiles=ARCHITECTURE_VARIATION_N_QUANTILES,
             enable_optimistic_sampling=False,
             adapter=ARCHITECTURE_VARIATION_ADAPTER,
         ),
-        MaxValueEntropySearchSampler(
-            n_quantiles=ARCHITECTURE_VARIATION_N_QUANTILES,
-            adapter=ARCHITECTURE_VARIATION_ADAPTER,
-            n_paths=1000,
-            n_y_candidates_per_x=100,  # Should be 1000, but too slow
-            entropy_method="distance",
-        ),
+        # MaxValueEntropySearchSampler(
+        #     n_quantiles=ARCHITECTURE_VARIATION_N_QUANTILES,
+        #     adapter=ARCHITECTURE_VARIATION_ADAPTER,
+        #     n_paths=1000,
+        #     n_y_candidates_per_x=100,  # Should be 1000, but too slow
+        #     entropy_method="distance",
+        # ),
     ],
 )
-
+    
 LIMITED_ARCHITECTURE_ADAPTER = None
 LIMITED_ARCHITECTURE_N_QUANTILES = 4
 LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurations(
@@ -174,36 +180,32 @@ LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_con
         # "qens4",
     ],
     samplers=[
-        MaxValueEntropySearchSampler(
-            n_quantiles=LIMITED_ARCHITECTURE_N_QUANTILES,
-            adapter=LIMITED_ARCHITECTURE_ADAPTER,
-            n_paths=1000,
-            n_y_candidates_per_x=100,  # Should be 1000, but too slow
-            entropy_method="distance",
-        ),
+        ThompsonSampler(
+            n_quantiles=SAMPLER_VARIATION_N_DEFAULT_QUANTILES,
+            enable_optimistic_sampling=True,
+            adapter=SAMPLER_VARIATION_DEFAULT_ADAPTER,
+        )
     ],
     n_pre_conformal_trials=32,
     searcher_tuning_framework=None,
 )
 
-# LIMITED_ARCHITECTURE_N_QUANTILES = 10
+LIMITED_ARCHITECTURE_N_QUANTILES = 10
 LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS.extend(
     build_architecture_variation_configurations(
         architectures=[
-            "qgbm",
+            # "qrf",
             # "qens4",
         ],
         samplers=[
-        MaxValueEntropySearchSampler(
-            n_quantiles=LIMITED_ARCHITECTURE_N_QUANTILES,
-            adapter=LIMITED_ARCHITECTURE_ADAPTER,
-            n_paths=1000,
-            n_y_candidates_per_x=100,  # Should be 1000, but too slow
-            entropy_method="distance",
-        ),
+        ThompsonSampler(
+            n_quantiles=SAMPLER_VARIATION_N_DEFAULT_QUANTILES,
+            enable_optimistic_sampling=True,
+            adapter=SAMPLER_VARIATION_DEFAULT_ADAPTER,
+        )
         ],
         n_pre_conformal_trials=32,
-        searcher_tuning_framework=None,
+        searcher_tuning_framework="fixed",
     )
 )
 
@@ -213,8 +215,9 @@ PRECONFORMAL_N_QUANTILES = 4
 PRECONFORMAL_COMPARISON_CONFIGURATIONS = []
 for architecture in [
     # "qgp",
+    # "ql",
     "qgbm",
-    # "qrf",
+    "qrf",
 ]:
     # Simulate normal pre-conformal cutoff vs. unreachable one:
     for pre_conformal_trials in [32, 10000]:
@@ -226,10 +229,22 @@ for architecture in [
             build_architecture_variation_configurations(
                 architectures=[architecture],
                 samplers=[
+        ExpectedImprovementSampler(
+            n_quantiles=PRECONFORMAL_N_QUANTILES,
+            num_ei_samples=1000,
+            adapter=PRECONFORMAL_ADAPTER,
+        ),
+        MaxValueEntropySearchSampler(
+            n_quantiles=PRECONFORMAL_N_QUANTILES,
+            adapter=PRECONFORMAL_ADAPTER,
+            n_paths=1000,
+            n_y_candidates_per_x=100,
+            entropy_method="distance",
+        ),
         ThompsonSampler(
-            n_quantiles=ARCHITECTURE_VARIATION_N_QUANTILES,
+            n_quantiles=PRECONFORMAL_N_QUANTILES,
             enable_optimistic_sampling=False,
-            adapter=ARCHITECTURE_VARIATION_ADAPTER,
+            adapter=PRECONFORMAL_ADAPTER,
         ),
                 ],
                 n_pre_conformal_trials=pre_conformal_trials,

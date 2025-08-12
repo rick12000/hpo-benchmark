@@ -17,8 +17,9 @@ from hpobench.report.latex import (
     format_nemenyi_results_to_latex,
     format_win_percentage_to_latex,
     format_calibration_statistics_to_latex,
+    format_calibration_metrics_to_latex,
 )
-from hpobench.plot import plot_and_save_calibration_boxplots
+
 
 
 def _save_text_content(
@@ -326,20 +327,26 @@ def run_and_save_calibration_statistics(
         quantile_collapsed_calibration_stats = calibration_stats.groupby(
             collapsing_aggregators
         ).mean().reset_index()
-        aggregated_metric_columns = [f"{col}_mean" for col in metric_columns if f"{col}_mean" in calibration_stats.columns]
 
-        plot_and_save_calibration_boxplots(
-            data=quantile_collapsed_calibration_stats,
-            metric_columns=aggregated_metric_columns,
-            entity_col=entity_column,
-            cache_path=cache_path,
-            run_start_str=run_start_str,
-            filename_prefix="calibration_statistics_boxplots",
-            analysis_type=analysis_type,
-            subfolder="calibration_plots",
-            col_measure_label="Calibration Statistics by Metric Type",
+
+
+        # Generate LaTeX table for calibration metrics
+        latex_metrics_str = format_calibration_metrics_to_latex(
+            quantile_collapsed_calibration_stats,
+            layout_breakout_col=latex_layout_breakout_col,
         )
-        logger.info("Generated box plots for calibration statistics across multiple datasets")
+
+        if latex_metrics_str:
+            latex_metrics_filename = f"{filename.replace('.csv', '')}_metrics_latex.tex"
+            _save_text_content(
+                latex_metrics_str,
+                cache_path,
+                run_start_str,
+                latex_metrics_filename,
+                analysis_type,
+                "latex_outputs",
+            )
+            logger.info("Generated LaTeX table for calibration metrics by entity")
 
     elif raw_benchmark_data[dataset_column].nunique() == 1:
 

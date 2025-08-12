@@ -124,7 +124,7 @@ def dummy_experiment_data():
             50.3,
             50.8,
         ],
-        "benchmark_identifier": ["lcbench"] * 19 + ["nahs201"] * 8,
+        "benchmark_identifier": ["lcbench"] * 19 + ["jahs201"] * 8,
         "dataset": [3945] * 19 + ["cifar10"] * 8,
         "tuner": ["GBRT"] * 10 + ["TPE"] * 9 + ["GBRT"] * 4 + ["TPE"] * 4,
         "repetition": [1] * 6
@@ -336,6 +336,13 @@ def dummy_jahs201_generator():
 def dummy_yahpo_generator():
     return {
         "dataset": "167168",
+    }
+
+
+@pytest.fixture
+def dummy_nas301_generator():
+    return {
+        "instance_value": "CIFAR10",
     }
 
 

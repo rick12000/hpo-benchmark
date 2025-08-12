@@ -108,15 +108,23 @@ def sample_surrogate_data(
             performance = result.get("val_accuracy")
             if performance is None:
                 for key, value in result.items():
-                    if isinstance(value, (int, float)):
+                    try:
+                        float(value)  # Test if it can be converted to float
                         performance = value
                         break
+                    except (ValueError, TypeError):
+                        continue
         else:
             performance = result
 
         if performance is not None:
-            config_dicts.append(config_dict)
-            performances.append(float(performance))
+            try:
+                perf_float = float(performance)
+                if not np.isnan(perf_float) and np.isfinite(perf_float):
+                    config_dicts.append(config_dict)
+                    performances.append(perf_float)
+            except (ValueError, TypeError):
+                continue
 
     if len(performances) < 100:
         return None, None
@@ -297,7 +305,7 @@ def main():
     # Configuration - define parameters directly
     top_count = 5
     top_percent = None
-    benchmarks = ["lcbench", "rbv2_xgboost"]
+    benchmarks = ["rbv2_xgboost", "lcbench"]
 
     for benchmark in benchmarks:
         print(f"\nCreating {benchmark} surrogate heteroscedasticity stratification...")

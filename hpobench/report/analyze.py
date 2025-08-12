@@ -414,44 +414,49 @@ def analyze_main_benchmark(
         for estimator_architecture in raw_benchmark_data[
             estimator_architecture_col
         ].unique():
-            estimator_slice_data = raw_benchmark_data[
-                raw_benchmark_data[estimator_architecture_col] == estimator_architecture
-            ].copy()
+            for sampler in raw_benchmark_data[
+                sampler_col
+            ].unique():
+                estimator_slice_data = raw_benchmark_data[
+                    (raw_benchmark_data[estimator_architecture_col] == estimator_architecture)
+                    & (raw_benchmark_data[sampler_col] == sampler)
+                ].copy()
 
-            estimator_slice_relativized_runtime_results = process_performance_records(
-                raw_benchmark_data=estimator_slice_data,
-                aggregators=grouping_cols,
-                performance_column=perf_col,
-                budget_unit=runtime_unit,
-                repetition_column=rep_col,
-                tuner_column=tuner_col,
-                relativize_budget=True,
-                sampler_column=sampler_col,
-                confidence_level_column=confidence_level_col,
-                estimator_architecture_column=estimator_architecture_col,
-            )
+                estimator_slice_relativized_runtime_results = process_performance_records(
+                    raw_benchmark_data=estimator_slice_data,
+                    aggregators=grouping_cols,
+                    performance_column=perf_col,
+                    budget_unit=runtime_unit,
+                    repetition_column=rep_col,
+                    tuner_column=tuner_col,
+                    relativize_budget=True,
+                    sampler_column=sampler_col,
+                    confidence_level_column=confidence_level_col,
+                    estimator_architecture_column=estimator_architecture_col,
+                )
 
-            estimator_slice_aggregated_runtime_results = aggregate_and_save(
-                data=estimator_slice_relativized_runtime_results,
-                grouping_cols=[
-                    bench_col,
-                    norm_runtime_unit,
-                    tuner_col,
-                    estimator_architecture_col,
-                ],
-                metrics=["rank"],
-                cache_path=cache_path,
-                run_start_str=run_start_str,
-                filename="placeholder.csv",
-                analysis_type=analysis_type,
-            )
+                estimator_slice_aggregated_runtime_results = aggregate_and_save(
+                    data=estimator_slice_relativized_runtime_results,
+                    grouping_cols=[
+                        bench_col,
+                        norm_runtime_unit,
+                        tuner_col,
+                        estimator_architecture_col,
+                        sampler_col,
+                    ],
+                    metrics=["rank"],
+                    cache_path=cache_path,
+                    run_start_str=run_start_str,
+                    filename="placeholder.csv",
+                    analysis_type=analysis_type,
+                )
 
-            conformalized_vs_nonconformalized_results = pd.concat(
-                [
-                    conformalized_vs_nonconformalized_results,
-                    estimator_slice_aggregated_runtime_results,
-                ]
-            )
+                conformalized_vs_nonconformalized_results = pd.concat(
+                    [
+                        conformalized_vs_nonconformalized_results,
+                        estimator_slice_aggregated_runtime_results,
+                    ]
+                )
 
         # Architecture partitioned plots (each ranking conf vs. unconf):
         plot_and_save(
@@ -459,7 +464,7 @@ def analyze_main_benchmark(
             x_col=norm_runtime_unit,
             y_cols=["rank"],
             entity_col=tuner_col,
-            col_measure=bench_col,
+            col_measure=sampler_col,
             row_measure=estimator_architecture_col,
             cache_path=cache_path,
             run_start_str=run_start_str,

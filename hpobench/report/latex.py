@@ -639,3 +639,101 @@ def format_calibration_statistics_to_latex(
         blocks.append(_build_calibration_table_block(results_df, caption))
 
     return "\n\n".join(blocks)
+
+
+def _get_calibration_metrics_caption() -> str:
+    return "Calibration Metrics by Entity"
+
+
+def _build_calibration_metrics_table_block(df_block: pd.DataFrame, caption: str) -> str:
+    target_metrics = [
+        "chunked_target_coverage_deviation",
+        "llr_statistic", 
+        "width"
+    ]
+    
+    available_metrics = []
+    for metric in target_metrics:
+        mean_col = f"{metric}_mean"
+        lower_col = f"{metric}_lower"
+        upper_col = f"{metric}_upper"
+        if all(col in df_block.columns for col in [mean_col, lower_col, upper_col]):
+            available_metrics.append(metric)
+    
+    if not available_metrics:
+        return ""
+    
+    lines: List[str] = [
+        "\\begin{table}[htbp]",
+        "\\centering",
+        f"\\caption{{{caption}}}",
+        "\\vspace{1em}",
+        "\\resizebox{\\textwidth}{!}{%",
+        f"\\begin{{tabular}}{{@{{}}l*{{{len(available_metrics)}}}{{>{{\\centering\\arraybackslash}}p{{3cm}}}}@{{}}}}",
+        "\\toprule",
+    ]
+    
+    # Build header row
+    header_parts = ["\\textbf{Entity}"]
+    for metric in available_metrics:
+        metric_title = metric.replace('_', ' ').title()
+        header_parts.append(f"\\textbf{{{metric_title}}}")
+    
+    lines.append(" & ".join(header_parts) + " \\\\")
+    lines.append("\\midrule")
+    
+    # Get unique entities
+    entities = sorted(df_block["tuner"].unique())
+    
+    for entity in entities:
+        entity_data = df_block[df_block["tuner"] == entity]
+        if entity_data.empty:
+            continue
+            
+        row_parts = [_escape_latex_text(entity)]
+        row_data = entity_data.iloc[0]
+        
+        for metric in available_metrics:
+            mean_col = f"{metric}_mean"
+            lower_col = f"{metric}_lower"
+            upper_col = f"{metric}_upper"
+            
+            if all(col in row_data.index for col in [mean_col, lower_col, upper_col]):
+                mean_val = row_data[mean_col]
+                lower_val = row_data[lower_col]
+                upper_val = row_data[upper_col]
+                
+                formatted_metric = _format_score_with_interval(mean_val, lower_val, upper_val, False)
+                row_parts.append(f"\\begin{{minipage}}{{3cm}}\\centering {formatted_metric} \\end{{minipage}}")
+            else:
+                row_parts.append("--")
+        
+        lines.append(" & ".join(row_parts) + " \\\\")
+    
+    lines.extend([
+        "\\bottomrule",
+        "\\end{tabular}%",
+        "}",
+        "\\label{tab:calibration_metrics_by_entity}",
+        "\\end{table}",
+    ])
+    
+    return "\n".join(lines)
+
+
+def format_calibration_metrics_to_latex(
+    results_df: pd.DataFrame,
+    layout_breakout_col: Optional[str] = None,
+) -> str:
+    blocks: List[str] = []
+    caption = _get_calibration_metrics_caption()
+
+    if layout_breakout_col and layout_breakout_col in results_df.columns:
+        for l_val in sorted(results_df[layout_breakout_col].unique()):
+            df_l = results_df[results_df[layout_breakout_col] == l_val]
+            table_caption = f"{caption} - {_escape_latex_text(str(l_val))}"
+            blocks.append(_build_calibration_metrics_table_block(df_l, table_caption))
+    else:
+        blocks.append(_build_calibration_metrics_table_block(results_df, caption))
+
+    return "\n\n".join(blocks)
