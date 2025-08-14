@@ -12,7 +12,7 @@ from confopt.selection.sampling.expected_improvement_samplers import (
 )
 from confopt.selection.sampling.thompson_samplers import ThompsonSampler
 from confopt.selection.acquisition import QuantileEstimatorArchitecture
-from hpobench.config.types import TunerConfig
+from hpobench.config.config_types import TunerConfig
 
 
 def create_sampler_config_id(
@@ -192,11 +192,13 @@ def build_sampler_variation_configurations(
             quantile_estimator_architecture=quantile_arch,
             sampler=sampler_copy,
             n_pre_conformal_trials=n_pre_conformal_trials,
-            n_calibration_folds=3,
-            calibration_split_strategy="cv_plus",
+            n_calibration_folds=5,
+            calibration_split_strategy="adaptive",
             symmetric_adjustment=True,
         )
-        config_id = create_sampler_config_id(searcher) + (f" stf={searcher_tuning_framework}" if searcher_tuning_framework else "")
+        config_id = create_sampler_config_id(searcher) + (
+            f" stf={searcher_tuning_framework}" if searcher_tuning_framework else ""
+        )
         configs.append(
             TunerConfig(
                 tuner="confopt",
@@ -240,11 +242,13 @@ def build_architecture_variation_configurations(
                 quantile_estimator_architecture=arch,
                 sampler=sampler_copy,
                 n_pre_conformal_trials=n_pre_conformal_trials,
-                n_calibration_folds=3,
-                calibration_split_strategy="cv_plus",
+                n_calibration_folds=5,
+                calibration_split_strategy="adaptive",
                 symmetric_adjustment=True,
             )
-            config_id = create_sampler_config_id(searcher) + (f" stf={searcher_tuning_framework}" if searcher_tuning_framework else "")
+            config_id = create_sampler_config_id(searcher) + (
+                f" stf={searcher_tuning_framework}" if searcher_tuning_framework else ""
+            )
             configs.append(
                 TunerConfig(
                     tuner="confopt",
@@ -263,15 +267,20 @@ def get_external_tuning_configurations() -> List[TunerConfig]:
         List of external tuning configuration objects (e.g., for skopt, optuna).
     """
     return [
-        TunerConfig(
-            tuner="skopt",
-            searcher="gp",
-            config_identifier="GP",
-        ),
+        # TunerConfig(
+        #     tuner="skopt",
+        #     searcher="gp",
+        #     config_identifier="GP1",
+        # ),
         # TunerConfig(
         #     tuner="optuna",
         #     searcher="tpe",
         #     config_identifier="TPE",
+        # ),
+        # TunerConfig(
+        #     tuner="optuna",
+        #     searcher="gp",
+        #     config_identifier="GP2",
         # ),
         # Syne-Tune CQR configurations using string searchers
         # TunerConfig(
@@ -288,5 +297,10 @@ def get_external_tuning_configurations() -> List[TunerConfig]:
         #     tuner="skopt",
         #     searcher="gbrt",
         #     config_identifier="GBRT",
+        # ),
+        # TunerConfig(
+        #     tuner="optuna",
+        #     searcher="confopt_gp_log_expected_improvement",
+        #     config_identifier="TEST",
         # ),
     ]

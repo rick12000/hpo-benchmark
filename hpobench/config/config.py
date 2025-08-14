@@ -15,7 +15,7 @@ from hpobench.config.utils import (
     build_sampler_variation_configurations,
     build_architecture_variation_configurations,
 )
-from hpobench.config.types import (
+from hpobench.config.config_types import (
     TunerConfig,
 )
 
@@ -38,7 +38,7 @@ STATIC_ANALYSIS_ESTIMATOR_ARCHITECTURES = [
 
 # 2. Create configurations feeding the coverage charts:
 COVERAGE_ANALYSIS_CONFIGURATIONS = []
-COVERAGE_INTERVAL_WIDTHS = [ 0.25, 0.5, 0.75]  # 0.25, 0.5, 0.75
+COVERAGE_INTERVAL_WIDTHS = [0.25, 0.5, 0.75]  # 0.25, 0.5, 0.75
 ADAPTERS = ["ACI", "DtACI", None]
 
 for interval_width in COVERAGE_INTERVAL_WIDTHS:
@@ -52,7 +52,7 @@ for interval_width in COVERAGE_INTERVAL_WIDTHS:
             quantile_estimator_architecture="qgbm",
             sampler=SAMPLER,
             n_calibration_folds=3,
-            calibration_split_strategy="cv_plus",
+            calibration_split_strategy="train_test_split",
             symmetric_adjustment=True,
         )
         if adapter is None:
@@ -69,6 +69,29 @@ for interval_width in COVERAGE_INTERVAL_WIDTHS:
                 searcher_tuning_framework=None,
             )
         )
+
+        SEARCHER = QuantileConformalSearcher(
+            quantile_estimator_architecture="qgbm",
+            sampler=SAMPLER,
+            n_calibration_folds=5,
+            calibration_split_strategy="cv",
+            symmetric_adjustment=True,
+        )
+        if adapter is None:
+            config_identifier = "Cross Validated"
+        elif adapter in ["ACI", "DtACI"]:
+            config_identifier = f"Cross Validated + {adapter}"
+        else:
+            raise ValueError(f"Unknown adapter: {adapter}")
+        COVERAGE_ANALYSIS_CONFIGURATIONS.append(
+            TunerConfig(
+                tuner="confopt",
+                searcher=SEARCHER,
+                config_identifier=config_identifier,
+                searcher_tuning_framework=None,
+            )
+        )
+
     # Manually add the unconformalized configuration for each interval width:
     COVERAGE_ANALYSIS_CONFIGURATIONS.append(
         TunerConfig(
@@ -82,7 +105,7 @@ for interval_width in COVERAGE_INTERVAL_WIDTHS:
                 ),
                 n_pre_conformal_trials=10000,
                 n_calibration_folds=3,
-                calibration_split_strategy="cv_plus",
+                calibration_split_strategy="train_test_split",
                 symmetric_adjustment=True,
             ),
             config_identifier="Unconformalized",
@@ -95,13 +118,13 @@ SAMPLER_VARIATION_N_DEFAULT_QUANTILES = 4
 SAMPLER_VARIATION_DEFAULT_ADAPTER = None
 SAMPLER_VARIATION_CONFIGURATIONS = build_sampler_variation_configurations(
     samplers=[
-        # MaxValueEntropySearchSampler(
-        #     n_quantiles=SAMPLER_VARIATION_N_DEFAULT_QUANTILES,
-        #     adapter=SAMPLER_VARIATION_DEFAULT_ADAPTER,
-        #     n_paths=1000,
-        #     n_y_candidates_per_x=100,  # Should be 1000, but too slow
-        #     entropy_method="distance",
-        # ),
+        MaxValueEntropySearchSampler(
+            n_quantiles=SAMPLER_VARIATION_N_DEFAULT_QUANTILES,
+            adapter=SAMPLER_VARIATION_DEFAULT_ADAPTER,
+            n_paths=1000,
+            n_y_candidates_per_x=100,  # Should be 1000, but too slow
+            entropy_method="distance",
+        ),
         LowerBoundSampler(
             interval_width=DEFAULT_INTERVAL_WIDTH,
             adapter=SAMPLER_VARIATION_DEFAULT_ADAPTER,
@@ -168,12 +191,12 @@ ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurati
         # ),
     ],
 )
-    
+
 LIMITED_ARCHITECTURE_ADAPTER = None
 LIMITED_ARCHITECTURE_N_QUANTILES = 4
 LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurations(
     architectures=[
-        # "qrf",
+        "qrf",
         # "qgp",
         "qgbm",
         # "qens3",
@@ -198,11 +221,11 @@ LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS.extend(
             # "qens4",
         ],
         samplers=[
-        ThompsonSampler(
-            n_quantiles=SAMPLER_VARIATION_N_DEFAULT_QUANTILES,
-            enable_optimistic_sampling=True,
-            adapter=SAMPLER_VARIATION_DEFAULT_ADAPTER,
-        )
+            ThompsonSampler(
+                n_quantiles=SAMPLER_VARIATION_N_DEFAULT_QUANTILES,
+                enable_optimistic_sampling=True,
+                adapter=SAMPLER_VARIATION_DEFAULT_ADAPTER,
+            )
         ],
         n_pre_conformal_trials=32,
         searcher_tuning_framework="fixed",
@@ -229,27 +252,91 @@ for architecture in [
             build_architecture_variation_configurations(
                 architectures=[architecture],
                 samplers=[
-        ExpectedImprovementSampler(
-            n_quantiles=PRECONFORMAL_N_QUANTILES,
-            num_ei_samples=1000,
-            adapter=PRECONFORMAL_ADAPTER,
-        ),
-        MaxValueEntropySearchSampler(
-            n_quantiles=PRECONFORMAL_N_QUANTILES,
-            adapter=PRECONFORMAL_ADAPTER,
-            n_paths=1000,
-            n_y_candidates_per_x=100,
-            entropy_method="distance",
-        ),
-        ThompsonSampler(
-            n_quantiles=PRECONFORMAL_N_QUANTILES,
-            enable_optimistic_sampling=False,
-            adapter=PRECONFORMAL_ADAPTER,
-        ),
+                    ExpectedImprovementSampler(
+                        n_quantiles=PRECONFORMAL_N_QUANTILES,
+                        num_ei_samples=1000,
+                        adapter=PRECONFORMAL_ADAPTER,
+                    ),
+                    MaxValueEntropySearchSampler(
+                        n_quantiles=PRECONFORMAL_N_QUANTILES,
+                        adapter=PRECONFORMAL_ADAPTER,
+                        n_paths=1000,
+                        n_y_candidates_per_x=100,
+                        entropy_method="distance",
+                    ),
+                    ThompsonSampler(
+                        n_quantiles=PRECONFORMAL_N_QUANTILES,
+                        enable_optimistic_sampling=False,
+                        adapter=PRECONFORMAL_ADAPTER,
+                    ),
                 ],
                 n_pre_conformal_trials=pre_conformal_trials,
             )
         )
+
+
+# 4. Create configurations feeding the quantile count variation plots:
+QUANTILE_COUNT_VARIATION_ADAPTER = None
+QUANTILE_COUNT_VARIATION_CONFIGURATIONS = []
+QUANTILE_COUNT_VALUES = [4, 10]
+
+for n_quantiles in QUANTILE_COUNT_VALUES:
+    QUANTILE_COUNT_VARIATION_CONFIGURATIONS.extend(
+        build_architecture_variation_configurations(
+            architectures=[
+                "qrf",  # Use single architecture
+            ],
+            samplers=[
+                ThompsonSampler(
+                    n_quantiles=n_quantiles,
+                    enable_optimistic_sampling=True,
+                    adapter=QUANTILE_COUNT_VARIATION_ADAPTER,
+                ),
+                ExpectedImprovementSampler(
+                    n_quantiles=n_quantiles,
+                    num_ei_samples=1000,
+                    adapter=QUANTILE_COUNT_VARIATION_ADAPTER,
+                ),
+                MaxValueEntropySearchSampler(
+                    n_quantiles=n_quantiles,
+                    adapter=QUANTILE_COUNT_VARIATION_ADAPTER,
+                    n_paths=1000,
+                    n_y_candidates_per_x=100,
+                    entropy_method="distance",
+                ),
+            ],
+            n_pre_conformal_trials=32,
+            searcher_tuning_framework=None,
+        )
+    )
+
+
+# 5. Create configurations feeding the search tuning effect plots:
+SEARCH_TUNING_EFFECT_ADAPTER = None
+SEARCH_TUNING_EFFECT_N_QUANTILES = 4
+SEARCH_TUNING_EFFECT_CONFIGURATIONS = []
+
+# Use multiple architectures and vary searcher_tuning_framework (None vs "fixed")
+for searcher_tuning_framework in [None, "fixed"]:
+    SEARCH_TUNING_EFFECT_CONFIGURATIONS.extend(
+        build_architecture_variation_configurations(
+            architectures=[
+                "ql",
+                "qrf",
+                "qgbm",
+                "qens3",
+            ],
+            samplers=[
+                ThompsonSampler(
+                    n_quantiles=SEARCH_TUNING_EFFECT_N_QUANTILES,
+                    enable_optimistic_sampling=True,
+                    adapter=SEARCH_TUNING_EFFECT_ADAPTER,
+                )
+            ],
+            n_pre_conformal_trials=32,
+            searcher_tuning_framework=searcher_tuning_framework,
+        )
+    )
 
 
 EXTERNAL_TUNING_CONFIGURATIONS = get_external_tuning_configurations()

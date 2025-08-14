@@ -1,11 +1,14 @@
 import pandas as pd
 import optuna
 from datetime import datetime
-from hpobench.config.types import TunerConfig
-from hpobench.config.types import IntRange, FloatRange, CategoricalRange
+from hpobench.config.config_types import TunerConfig
+from hpobench.config.config_types import IntRange, FloatRange, CategoricalRange
 from typing import Union, Optional, Literal, Any
 from optuna.samplers import TPESampler, RandomSampler, CmaEsSampler, GPSampler
-from hpobench.samplers.confopt_gp_sampler import CONFOPTGPSampler, CONFOPTAcquisitionFunction
+from hpobench.samplers.confopt_gp_sampler import (
+    CONFOPTGPSampler,
+    CONFOPTAcquisitionFunction,
+)
 from skopt import forest_minimize, gbrt_minimize, gp_minimize
 from skopt.space import Real, Integer as SKInteger, Categorical as SKCategorical
 from confopt.tuning import ConformalTuner
@@ -27,7 +30,7 @@ from hpobench.syne_tune_integration import syne_tune_cqr_tune
 SKOPT_GP_ACQ_FUNC = "EI"
 SKOPT_GP_ACQ_OPTIMIZER = "sampling"
 CONFOPT_USE_DYNAMIC_SAMPLING = True
-CONFOPT_RETRAINING_FREQUENCY = 10
+CONFOPT_RETRAINING_FREQUENCY = 1
 N_CANDIDATES = 2000  # 10000
 
 
@@ -230,7 +233,9 @@ def optuna_tune(
     """
     # NOTE: 0 start up trials because this benchmark repository uses warm-starting:
     if sampler == "tpe":
-        initialized_sampler = TPESampler(seed=random_state, n_startup_trials=0, n_ei_candidates=N_CANDIDATES)
+        initialized_sampler = TPESampler(
+            seed=random_state, n_startup_trials=0, n_ei_candidates=N_CANDIDATES
+        )
     elif sampler == "random":
         initialized_sampler = RandomSampler(seed=random_state)
     elif sampler == "cmaes":
@@ -244,7 +249,7 @@ def optuna_tune(
             acq_func = CONFOPTAcquisitionFunction(acq_func_name)
         except ValueError:
             raise ValueError(f"Unknown CONFOPT acquisition function: {acq_func_name}")
-        
+
         # Note: HPO Bench typically deals with minimization problems
         # If you need maximization, this should be configured based on the study direction
         initialized_sampler = CONFOPTGPSampler(
@@ -252,7 +257,7 @@ def optuna_tune(
             n_candidates=N_CANDIDATES,
             seed=random_state,
             n_startup_trials=0,
-            maximize=False  # Default to minimize for HPO Bench
+            maximize=False,  # Default to minimize for HPO Bench
         )
     else:
         raise ValueError(f"Unknown optuna sampler: {sampler}")

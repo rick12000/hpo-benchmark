@@ -40,6 +40,8 @@ def analyze_main_benchmark(
             "sampler_comparison",
             "architecture_comparison",
             "conformalization_effect",
+            "quantile_count_comparison",
+            "search_tuning_effect_comparison",
         ]
     ],
     alpha: float = 0.05,
@@ -85,6 +87,8 @@ def analyze_main_benchmark(
             - "sampler_comparison": Performance comparison partitioned by sampler
             - "architecture_comparison": Performance comparison by estimator architecture
             - "conformalization_effect": Conformal vs non-conformal method comparison
+            - "quantile_count_comparison": Performance comparison across different quantile counts by sampler
+            - "search_tuning_effect_comparison": Performance comparison of searcher tuning framework effects by architecture
 
     Side Effects:
         - Generates and saves statistical test results as CSV files
@@ -202,9 +206,7 @@ def analyze_main_benchmark(
             )
 
     # Coverage analysis plots:
-    if (
-        "coverage" in analysis_components
-    ):
+    if "coverage" in analysis_components:
         if starting_coverage_trial is not None:
             raw_benchmark_data_adj = raw_benchmark_data[
                 raw_benchmark_data[iter_unit] >= starting_coverage_trial
@@ -258,8 +260,8 @@ def analyze_main_benchmark(
             aggregators=grouping_cols,
             repetition_column=rep_col,
             breach_column="breach_status",
-            dataset_column= data_col,
-            entity_column= tuner_col,
+            dataset_column=data_col,
+            entity_column=tuner_col,
             confidence_column=confidence_level_col,
             budget_unit=iter_unit,
             cache_path=cache_path,
@@ -414,25 +416,28 @@ def analyze_main_benchmark(
         for estimator_architecture in raw_benchmark_data[
             estimator_architecture_col
         ].unique():
-            for sampler in raw_benchmark_data[
-                sampler_col
-            ].unique():
+            for sampler in raw_benchmark_data[sampler_col].unique():
                 estimator_slice_data = raw_benchmark_data[
-                    (raw_benchmark_data[estimator_architecture_col] == estimator_architecture)
+                    (
+                        raw_benchmark_data[estimator_architecture_col]
+                        == estimator_architecture
+                    )
                     & (raw_benchmark_data[sampler_col] == sampler)
                 ].copy()
 
-                estimator_slice_relativized_runtime_results = process_performance_records(
-                    raw_benchmark_data=estimator_slice_data,
-                    aggregators=grouping_cols,
-                    performance_column=perf_col,
-                    budget_unit=runtime_unit,
-                    repetition_column=rep_col,
-                    tuner_column=tuner_col,
-                    relativize_budget=True,
-                    sampler_column=sampler_col,
-                    confidence_level_column=confidence_level_col,
-                    estimator_architecture_column=estimator_architecture_col,
+                estimator_slice_relativized_runtime_results = (
+                    process_performance_records(
+                        raw_benchmark_data=estimator_slice_data,
+                        aggregators=grouping_cols,
+                        performance_column=perf_col,
+                        budget_unit=runtime_unit,
+                        repetition_column=rep_col,
+                        tuner_column=tuner_col,
+                        relativize_budget=True,
+                        sampler_column=sampler_col,
+                        confidence_level_column=confidence_level_col,
+                        estimator_architecture_column=estimator_architecture_col,
+                    )
                 )
 
                 estimator_slice_aggregated_runtime_results = aggregate_and_save(
@@ -471,6 +476,145 @@ def analyze_main_benchmark(
             filename_prefix="perf_vs_runtime_n_pre_conformal_trials",
             analysis_type=analysis_type,
             subfolder="conformalization_effect",
+            y_cols_lower=["rank_q10"],
+            y_cols_upper=["rank_q90"],
+            share_y_axis=False,
+        )
+
+    # Quantile count comparison analysis:
+    if "quantile_count_comparison" in analysis_components:
+        quantile_count_comparison_results = pd.DataFrame()
+        if len(raw_benchmark_data[estimator_architecture_col].unique()) > 1:
+            raise ValueError(
+                "Quantile count comparison analysis requires only one architecture."
+            )
+
+        for sampler in raw_benchmark_data[sampler_col].unique():
+            sampler_slice_data = raw_benchmark_data[
+                (raw_benchmark_data[sampler_col] == sampler)
+            ].copy()
+
+            sampler_slice_relativized_runtime_results = process_performance_records(
+                raw_benchmark_data=sampler_slice_data,
+                aggregators=grouping_cols,
+                performance_column=perf_col,
+                budget_unit=runtime_unit,
+                repetition_column=rep_col,
+                tuner_column=tuner_col,
+                relativize_budget=True,
+                sampler_column=sampler_col,
+                confidence_level_column=confidence_level_col,
+                estimator_architecture_column=estimator_architecture_col,
+            )
+
+            sampler_slice_aggregated_runtime_results = aggregate_and_save(
+                data=sampler_slice_relativized_runtime_results,
+                grouping_cols=[
+                    bench_col,
+                    norm_runtime_unit,
+                    tuner_col,
+                    estimator_architecture_col,
+                    sampler_col,
+                ],
+                metrics=["rank"],
+                cache_path=cache_path,
+                run_start_str=run_start_str,
+                filename="quantile_count_comparison_results.csv",
+                analysis_type=analysis_type,
+            )
+
+            quantile_count_comparison_results = pd.concat(
+                [
+                    quantile_count_comparison_results,
+                    sampler_slice_aggregated_runtime_results,
+                ]
+            )
+
+        # Sampler partitioned plots (each column showing different samplers with quantile variations):
+        plot_and_save(
+            data=quantile_count_comparison_results,
+            x_col=norm_runtime_unit,
+            y_cols=["rank"],
+            entity_col=tuner_col,
+            col_measure=sampler_col,
+            row_measure=bench_col,
+            cache_path=cache_path,
+            run_start_str=run_start_str,
+            filename_prefix="perf_vs_runtime_quantile_count_variation",
+            analysis_type=analysis_type,
+            subfolder="quantile_count_comparison",
+            y_cols_lower=["rank_q10"],
+            y_cols_upper=["rank_q90"],
+            share_y_axis=False,
+        )
+
+    # Search tuning effect comparison analysis:
+    if "search_tuning_effect_comparison" in analysis_components:
+        search_tuning_effect_comparison_results = pd.DataFrame()
+        # Enforce only one sampler type for this analysis
+        if len(raw_benchmark_data[sampler_col].unique()) > 1:
+            raise ValueError(
+                "Search tuning effect comparison analysis requires only one sampler."
+            )
+
+        for estimator_architecture in raw_benchmark_data[
+            estimator_architecture_col
+        ].unique():
+            architecture_slice_data = raw_benchmark_data[
+                raw_benchmark_data[estimator_architecture_col] == estimator_architecture
+            ].copy()
+
+            architecture_slice_relativized_runtime_results = (
+                process_performance_records(
+                    raw_benchmark_data=architecture_slice_data,
+                    aggregators=grouping_cols,
+                    performance_column=perf_col,
+                    budget_unit=runtime_unit,
+                    repetition_column=rep_col,
+                    tuner_column=tuner_col,
+                    relativize_budget=True,
+                    sampler_column=sampler_col,
+                    confidence_level_column=confidence_level_col,
+                    estimator_architecture_column=estimator_architecture_col,
+                )
+            )
+
+            architecture_slice_aggregated_runtime_results = aggregate_and_save(
+                data=architecture_slice_relativized_runtime_results,
+                grouping_cols=[
+                    bench_col,
+                    norm_runtime_unit,
+                    tuner_col,
+                    estimator_architecture_col,
+                    sampler_col,
+                ],
+                metrics=["rank"],
+                cache_path=cache_path,
+                run_start_str=run_start_str,
+                filename="search_tuning_effect_comparison_results.csv",
+                analysis_type=analysis_type,
+            )
+
+            search_tuning_effect_comparison_results = pd.concat(
+                [
+                    search_tuning_effect_comparison_results,
+                    architecture_slice_aggregated_runtime_results,
+                ]
+            )
+
+        # Architecture partitioned plots (each column showing different architectures with tuning framework variations):
+        plot_and_save(
+            data=search_tuning_effect_comparison_results,
+            x_col=norm_runtime_unit,
+            y_cols=["rank"],
+            entity_col=tuner_col,
+            col_measure=estimator_architecture_col,
+            row_measure=bench_col,
+            cache_path=cache_path,
+            run_start_str=run_start_str,
+            filename_prefix="perf_vs_runtime_search_tuning_effect",
+            analysis_type=analysis_type,
+            subfolder="search_tuning_effect_comparison",
             y_cols_lower=["rank_q10"],
             y_cols_upper=["rank_q90"],
             share_y_axis=False,

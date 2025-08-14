@@ -16,7 +16,7 @@ from syne_tune.optimizer.schedulers.searchers.conformal.conformal_quantile_regre
     ConformalQuantileRegression,
 )
 
-from hpobench.config.types import IntRange, FloatRange, CategoricalRange
+from hpobench.config.config_types import IntRange, FloatRange, CategoricalRange
 from hpobench.generation.generate import ObjectiveMetricGenerator
 
 logger = logging.getLogger(__name__)

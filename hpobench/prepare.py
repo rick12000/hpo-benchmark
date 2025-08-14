@@ -1,12 +1,12 @@
 import logging
-from hpobench.config.types import TunerConfig
+from hpobench.config.config_types import TunerConfig
 from hpobench.generation.generate import (
     Jahs201Generator,
     BlackBoxGenerator,
     YahpoGenerator,
     NAS301Generator,
 )
-from hpobench.config.types import (
+from hpobench.config.config_types import (
     ExperimentConfig,
     IntRange,
     FloatRange,
@@ -109,7 +109,9 @@ def setup_yahpo_instance_configs(
             if hyperparameter.name in fidelity_param_names:
                 # Always use MAXIMUM fidelity for best performance evaluation
                 if hasattr(hyperparameter, "upper"):
-                    fidelity_space[hyperparameter.name] = hyperparameter.upper  # Maximum fidelity
+                    fidelity_space[
+                        hyperparameter.name
+                    ] = hyperparameter.upper  # Maximum fidelity
                 else:
                     fidelity_space[hyperparameter.name] = hyperparameter.default_value
 
@@ -235,33 +237,33 @@ def setup_nas301_configs(
     timeout: int,
 ) -> list[ExperimentConfig]:
     """Create experiment configurations for NAS-301 benchmark.
-    
+
     Args:
         datasets: List of dataset names (typically ["CIFAR10"] for NAS-301).
         tuning_configurations: List of tuner configurations to use for each dataset.
         n_warm_starts: Number of warm-start configurations for each experiment.
         n_trials: Number of trials to run for each experiment.
         timeout: Maximum runtime for each experiment.
-        
+
     Returns:
         List of ExperimentConfig objects, one per dataset.
     """
     experiment_configs = []
-    
+
     # Create ConfigSpace for NAS-301 with full parameter names
     # This will be used for parameter validation and active hyperparameter detection
     benchmark_set = BenchmarkSet("nb301", active_session=False, check=False)
     full_config_space = benchmark_set.get_opt_space(drop_fidelity_params=True)
-    fidelity_space = benchmark_set.get_fidelity_space()
-    
-    # For NAS-301, we don't pass fidelity values since the generator 
+    benchmark_set.get_fidelity_space()
+
+    # For NAS-301, we don't pass fidelity values since the generator
     # automatically uses maximum fidelity (like JAHS-201 generator)
     fidelity_dict = {}
-    
+
     # NAS-301 doesn't use instance parameters in the configuration space
     # The instance is set at the BenchmarkSet level
     instance_name = None  # Not used for NAS-301
-    
+
     for dataset in datasets:
         experiment_configs.append(
             ExperimentConfig(
@@ -280,5 +282,5 @@ def setup_nas301_configs(
                 dataset_identifier=dataset,
             )
         )
-    
+
     return experiment_configs

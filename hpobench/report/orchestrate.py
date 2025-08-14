@@ -10,7 +10,7 @@ from sklearn.preprocessing import StandardScaler
 from confopt.selection.conformalization import QuantileConformalEstimator
 from confopt.utils.configurations.encoding import ConfigurationEncoder
 from confopt.utils.preprocessing import train_val_split
-from hpobench.config.types import (
+from hpobench.config.config_types import (
     ExperimentConfig,
     TunerConfig,
 )
@@ -335,7 +335,17 @@ def run_main_benchmark(
 
 
 def run_and_analyze_main_benchmark(
-    benchmarks: list[Literal["jahs201", "lcbench", "rbv2_xgboost", "lcbench_large", "lcbench_heteroscedastic", "rbv2_xgboost_large", "rbv2_xgboost_heteroscedastic"]],
+    benchmarks: list[
+        Literal[
+            "jahs201",
+            "lcbench",
+            "rbv2_xgboost",
+            "lcbench_large",
+            "lcbench_heteroscedastic",
+            "rbv2_xgboost_large",
+            "rbv2_xgboost_heteroscedastic",
+        ]
+    ],
     tuning_configurations: list[TunerConfig],
     n_warm_starts: int,
     n_trials: int,
@@ -457,8 +467,14 @@ def run_and_analyze_main_benchmark(
 
 
 def run_static_benchmark(
-    benchmarks: list[Literal["jahs201", "lcbench_large", "rbv2_xgboost_large", "rbv2_xgboost_heteroscedastic"]],
-
+    benchmarks: list[
+        Literal[
+            "jahs201",
+            "lcbench_large",
+            "rbv2_xgboost_large",
+            "rbv2_xgboost_heteroscedastic",
+        ]
+    ],
     data_size_range: list[int],
     estimator_architectures: list[str],
     n_repetitions_per_estimator: int,
@@ -489,7 +505,7 @@ def run_static_benchmark(
     Args:
         benchmarks: List of benchmark names to evaluate. Supported benchmarks are:
             - "lcbench_large": LCBench subset with largest datasets
-            - "lcbench_heteroscedastic": LCBench subset with most heteroscedastic datasets  
+            - "lcbench_heteroscedastic": LCBench subset with most heteroscedastic datasets
             - "rbv2_xgboost_large": RBV2 XGBoost subset with largest datasets
             - "rbv2_xgboost_heteroscedastic": RBV2 XGBoost subset with most heteroscedastic datasets
             - "jahs201": JAHS-Bench-201 neural architecture search benchmark
