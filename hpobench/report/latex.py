@@ -257,7 +257,12 @@ def format_win_percentage_to_latex(
 
 
 def _get_calibration_stats_caption() -> str:
-    return "Calibration Statistics by Benchmark and Dataset"
+    return (
+        "Calibration performance rank by calibration metric. "
+        "Metrics are computed for intervals at 25\\%, 50\\% and 75\\% confidence on all LCbench datasets, "
+        "then ranked across frameworks within each interval confidence and dataset. "
+        "Individual ranks are then averaged by framework to demonstrate cross-confidence and cross-dataset performance."
+    )
 
 
 def _format_score_with_interval(

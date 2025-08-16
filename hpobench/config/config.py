@@ -198,7 +198,7 @@ LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_con
     architectures=[
         "qrf",
         # "qgp",
-        "qgbm",
+        # "qgbm",
         # "qens3",
         # "qens4",
     ],

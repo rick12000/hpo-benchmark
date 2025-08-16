@@ -657,7 +657,7 @@ def setup_smac_configspace(
             hp = CSCategorical(name, param.choices)
         else:
             raise ValueError(f"Unknown parameter type: {type(param)}")
-        cs.add(hp)
+        cs.add_hyperparameter(hp)
 
     return cs
 
@@ -792,7 +792,7 @@ def smac_tune(
     history = []
     for idx, (trial_key, trial_value) in enumerate(smac.runhistory.items()):
         config = smac.runhistory.get_config(trial_key.config_id)
-        config_dict = dict(config)
+        config_dict = config.get_dictionary()  # Use proper ConfigSpace method
 
         # Use runtime from our tracking if available, otherwise use a placeholder
         end_time = runtimes[idx] if idx < len(runtimes) else datetime.now()

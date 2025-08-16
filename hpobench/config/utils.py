@@ -303,4 +303,9 @@ def get_external_tuning_configurations() -> List[TunerConfig]:
         #     searcher="confopt_gp_log_expected_improvement",
         #     config_identifier="TEST",
         # ),
+        TunerConfig(
+            tuner="smac",
+            searcher="smac_rf_ei",
+            config_identifier="RF-EI",
+        )
     ]
