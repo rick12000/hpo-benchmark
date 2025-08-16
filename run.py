@@ -26,23 +26,23 @@ BASE_RANDOM_STATE = 42
 
 # Granular run section control
 run_sections = {
-    "run_coverage_analysis": False,
+    "run_coverage_analysis": True,
     "run_sampler_variation_analysis": False,
     "run_architecture_variation_analysis": False,
-    "run_external_tuning_analysis": True,
+    "run_external_tuning_analysis": False,
     "run_preconformal_comparison_analysis": False,
     "run_static_analysis": False,
 }
 
 CACHE_PATH = "cache/"
 run_start_str, logger = setup_environment(cache_path=CACHE_PATH)
-DEFAULT_MAX_N_INSTANCES = 20
+DEFAULT_MAX_N_INSTANCES = 2
 STATIC_DATA_SIZES = [50, 100]
 TUNING_ITERATIONS = [0]
-N_COVERAGE_TRIALS = 100
-SMALL_N_REPETITIONS_PER_TUNER_CONFIG = 10
-MEDIUM_N_REPETITIONS_PER_TUNER_CONFIG = 10
-LARGE_N_REPETITIONS_PER_TUNER_CONFIG = 10
+N_COVERAGE_TRIALS = 60
+SMALL_N_REPETITIONS_PER_TUNER_CONFIG = 2
+MEDIUM_N_REPETITIONS_PER_TUNER_CONFIG = 2
+LARGE_N_REPETITIONS_PER_TUNER_CONFIG = 2
 
 if __name__ == "__main__":
     # Coverage Analysis

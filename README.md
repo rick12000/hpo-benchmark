@@ -174,17 +174,25 @@ The framework supports multiple HPO algorithms:
    cd hpo-benchmark
    ```
 
-2. Install dependencies:
+2. **Install SWIG (Required for SMAC)**:
+   SWIG is required to build the `pyrfr` dependency for SMAC. Install it using conda:
+   ```bash
+   conda install swig
+   ```
+
+   Note: SWIG must be installed in the same environment where you're installing the package dependencies.
+
+3. Install dependencies:
    ```bash
    pip install -r requirements.txt
    ```
 
-3. Install the package:
+4. Install the package:
    ```bash
    pip install -e .
    ```
 
-4. Set up benchmark data (see Benchmark Suites section above)
+5. Set up benchmark data (see Benchmark Suites section above)
 
 ## Results and Analysis
 

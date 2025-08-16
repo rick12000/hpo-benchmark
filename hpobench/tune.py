@@ -5,7 +5,7 @@ from hpobench.config.config_types import TunerConfig
 from hpobench.config.config_types import IntRange, FloatRange, CategoricalRange
 from typing import Union, Optional, Literal, Any
 from optuna.samplers import TPESampler, RandomSampler, CmaEsSampler, GPSampler
-from hpobench.samplers.confopt_gp_sampler import (
+from hpobench.optuna_gp_integration import (
     CONFOPTGPSampler,
     CONFOPTAcquisitionFunction,
 )
@@ -25,6 +25,21 @@ from confopt import wrapping as ranges
 from copy import deepcopy
 from functools import partial
 from hpobench.syne_tune_integration import syne_tune_cqr_tune
+from ConfigSpace import (
+    ConfigurationSpace,
+    Float,
+    Integer as CSInteger,
+    Categorical as CSCategorical,
+    Configuration,
+)
+from smac.facade.hyperparameter_optimization_facade import (
+    HyperparameterOptimizationFacade,
+)
+from smac.acquisition.function.expected_improvement import EI
+from smac.acquisition.function.thompson import TS
+from smac.acquisition.maximizer.random_search import RandomSearch
+from smac.scenario import Scenario
+from smac.runhistory.dataclasses import TrialInfo, TrialValue
 
 # Constants:
 SKOPT_GP_ACQ_FUNC = "EI"
@@ -32,6 +47,17 @@ SKOPT_GP_ACQ_OPTIMIZER = "sampling"
 CONFOPT_USE_DYNAMIC_SAMPLING = True
 CONFOPT_RETRAINING_FREQUENCY = 1
 N_CANDIDATES = 2000  # 10000
+
+# SMAC3 Sampler Variants (Vanilla Configuration):
+# - "smac_rf_ei": Random Forest surrogate with Expected Improvement acquisition
+# - "smac_rf_ts": Random Forest surrogate with Thompson Sampling acquisition
+#
+# Vanilla settings ensure fair comparison with other tuners:
+# - No racing (max_config_calls=1)
+# - No random interleaving (probability=0.0)
+# - No parallelization (n_workers=1)
+# - Single incumbent tracking (max_incumbents=1)
+# - Deterministic scenario
 
 
 def calculate_breach_status(
@@ -390,13 +416,7 @@ def confopt_tune(
         dynamic_sampling=CONFOPT_USE_DYNAMIC_SAMPLING,
     )
 
-    if n_trials is not None:
-        if warm_start_configs is not None:
-            adj_n_trials = n_trials - len(warm_start_configs)
-        else:
-            adj_n_trials = n_trials
-    else:
-        adj_n_trials = n_trials
+    adj_n_trials = n_trials
 
     sampler_copy = deepcopy(sampler)
     if isinstance(sampler.sampler, (LowerBoundSampler, PessimisticLowerBoundSampler)):
@@ -613,6 +633,189 @@ def skopt_tune(
     return pd.DataFrame(history)
 
 
+def setup_smac_configspace(
+    raw_params: dict[str, Union[IntRange, FloatRange, CategoricalRange]],
+    random_state: Optional[int] = None,
+) -> ConfigurationSpace:
+    """Creates SMAC ConfigurationSpace from parameter definitions.
+
+    Args:
+        raw_params: Dictionary mapping parameter names to IntRange, FloatRange, or CategoricalRange.
+        random_state: Optional random seed.
+
+    Returns:
+        SMAC ConfigurationSpace object.
+    """
+    cs = ConfigurationSpace(seed=random_state)
+
+    for name, param in raw_params.items():
+        if isinstance(param, IntRange):
+            hp = CSInteger(name, (param.lower, param.upper))
+        elif isinstance(param, FloatRange):
+            hp = Float(name, (param.lower, param.upper))
+        elif isinstance(param, CategoricalRange):
+            hp = CSCategorical(name, param.choices)
+        else:
+            raise ValueError(f"Unknown parameter type: {type(param)}")
+        cs.add(hp)
+
+    return cs
+
+
+def smac_objective_function(
+    config: Configuration,
+    performance_generator: ObjectiveMetricGenerator,
+    runtimes: list[datetime],
+    seed: int = 0,
+) -> float:
+    """Objective function for SMAC using a synthetic performance generator.
+
+    Args:
+        config: SMAC Configuration object.
+        performance_generator: ObjectiveMetricGenerator instance.
+        runtimes: List to append runtime timestamps.
+        seed: Random seed (required by SMAC interface).
+
+    Returns:
+        Predicted performance as float.
+    """
+    # Convert Configuration to dict for the performance generator
+    config_dict = dict(config)
+    result = performance_generator.predict(configuration=config_dict)
+    runtimes.append(datetime.now())
+    return result
+
+
+def smac_tune(
+    raw_params: dict[str, Union[IntRange, FloatRange, CategoricalRange]],
+    performance_generator: ObjectiveMetricGenerator,
+    sampler: str,
+    warm_start_configs: Optional[list[tuple[dict, float]]] = None,
+    random_state: Optional[int] = None,
+    n_trials: Optional[int] = None,
+    timeout: Optional[float] = None,
+) -> pd.DataFrame:
+    """Runs vanilla SMAC tuning with Random Forest surrogate and specified acquisition function.
+
+    Uses vanilla SMAC configuration for fair comparison with other tuners:
+    - Each configuration evaluated exactly once (no racing)
+    - No random interleaving (always uses acquisition function)
+    - No parallelization
+    - Single incumbent tracking
+    - Deterministic scenario
+
+    Args:
+        raw_params: Dictionary mapping parameter names to IntRange, FloatRange, or CategoricalRange.
+        performance_generator: ObjectiveMetricGenerator instance.
+        sampler: Sampler name for SMAC (e.g., "smac_rf_ei", "smac_rf_ts").
+        warm_start_configs: Optional list of (config, loss) tuples for warm start.
+        random_state: Optional random seed.
+        n_trials: Optional number of trials.
+        timeout: Optional time budget in seconds.
+
+    Returns:
+        DataFrame with tuning history.
+    """
+    # Create configuration space
+    configspace = setup_smac_configspace(raw_params, random_state)
+
+    # Create scenario with vanilla settings
+    scenario = Scenario(
+        configspace=configspace,
+        deterministic=True,  # Set to deterministic for fair comparison
+        n_trials=n_trials if n_trials is not None else 100,
+        walltime_limit=timeout,
+        seed=random_state,
+        # Disable multi-fidelity and other advanced features
+        n_workers=1,  # No parallelization
+    )
+
+    # Configure acquisition function and maximizer based on sampler
+    if sampler == "smac_rf_ei":
+        acquisition_function = EI(xi=0.0, log=True)
+        acquisition_maximizer = (
+            HyperparameterOptimizationFacade.get_acquisition_maximizer(
+                scenario, challengers=N_CANDIDATES
+            )
+        )
+    elif sampler == "smac_rf_ts":
+        acquisition_function = TS(xi=0.0)  # xi not used for TS but kept for consistency
+        acquisition_maximizer = RandomSearch(
+            configspace=configspace,
+            challengers=N_CANDIDATES,
+            seed=random_state,
+        )
+    else:
+        raise ValueError(f"Unknown SMAC sampler: {sampler}")
+
+    # Setup runtime tracking
+    runtimes: list[datetime] = []
+    objective_fn = partial(
+        smac_objective_function,
+        performance_generator=performance_generator,
+        runtimes=runtimes,
+    )
+
+    # Create SMAC facade with vanilla settings (no racing, no random interleaving)
+    smac = HyperparameterOptimizationFacade(
+        scenario=scenario,
+        target_function=objective_fn,
+        model=HyperparameterOptimizationFacade.get_model(scenario),
+        acquisition_function=acquisition_function,
+        acquisition_maximizer=acquisition_maximizer,
+        # Disable racing: each configuration evaluated only once
+        intensifier=HyperparameterOptimizationFacade.get_intensifier(
+            scenario, max_config_calls=1, max_incumbents=1
+        ),
+        # Disable random interleaving: always use acquisition function
+        random_design=HyperparameterOptimizationFacade.get_random_design(
+            scenario, probability=0.0
+        ),
+        initial_design=HyperparameterOptimizationFacade.get_initial_design(
+            scenario, n_configs=0 if warm_start_configs else None
+        ),
+        overwrite=True,
+    )
+
+    # Handle warm start configurations
+    if warm_start_configs:
+        for config_dict, cost in warm_start_configs:
+            config = Configuration(configspace, config_dict)
+            trial_info = TrialInfo(config=config, seed=random_state or 0)
+            trial_value = TrialValue(cost=cost)
+            smac.tell(trial_info, trial_value)
+
+    # Run optimization
+    smac.optimize()
+
+    # Build history from runhistory
+    history = []
+    for idx, (trial_key, trial_value) in enumerate(smac.runhistory.items()):
+        config = smac.runhistory.get_config(trial_key.config_id)
+        config_dict = dict(config)
+
+        # Use runtime from our tracking if available, otherwise use a placeholder
+        end_time = runtimes[idx] if idx < len(runtimes) else datetime.now()
+
+        history.append(
+            build_history_entry(
+                end_time=end_time,
+                performance=trial_value.cost,
+                configurations=config_dict,
+                iteration=idx + 1,
+                estimator_error=None,
+                searcher_training_time=None,
+                breach_status=None,
+                winkler_score=None,
+                width=None,
+                miscoverage_penalty=None,
+                tabularized_configuration=None,
+            )
+        )
+
+    return pd.DataFrame(history)
+
+
 def tune(
     performance_generator: ObjectiveMetricGenerator,
     tuner_config: TunerConfig,
@@ -675,6 +878,13 @@ def tune(
         if not isinstance(tuner_config.searcher, str):
             raise ValueError("Syne-Tune CQR tuner requires a string searcher.")
         history = syne_tune_cqr_tune(
+            sampler=tuner_config.searcher,
+            **shared_kwargs,
+        )
+    elif tuner_config.tuner == "smac":
+        if not isinstance(tuner_config.searcher, str):
+            raise ValueError("SMAC tuner requires a string searcher.")
+        history = smac_tune(
             sampler=tuner_config.searcher,
             **shared_kwargs,
         )

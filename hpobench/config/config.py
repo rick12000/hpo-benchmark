@@ -70,27 +70,27 @@ for interval_width in COVERAGE_INTERVAL_WIDTHS:
             )
         )
 
-        SEARCHER = QuantileConformalSearcher(
-            quantile_estimator_architecture="qgbm",
-            sampler=SAMPLER,
-            n_calibration_folds=5,
-            calibration_split_strategy="cv",
-            symmetric_adjustment=True,
-        )
-        if adapter is None:
-            config_identifier = "Cross Validated"
-        elif adapter in ["ACI", "DtACI"]:
-            config_identifier = f"Cross Validated + {adapter}"
-        else:
-            raise ValueError(f"Unknown adapter: {adapter}")
-        COVERAGE_ANALYSIS_CONFIGURATIONS.append(
-            TunerConfig(
-                tuner="confopt",
-                searcher=SEARCHER,
-                config_identifier=config_identifier,
-                searcher_tuning_framework=None,
-            )
-        )
+        # SEARCHER = QuantileConformalSearcher(
+        #     quantile_estimator_architecture="qgbm",
+        #     sampler=SAMPLER,
+        #     n_calibration_folds=5,
+        #     calibration_split_strategy="cv",
+        #     symmetric_adjustment=True,
+        # )
+        # if adapter is None:
+        #     config_identifier = "Cross Validated"
+        # elif adapter in ["ACI", "DtACI"]:
+        #     config_identifier = f"Cross Validated + {adapter}"
+        # else:
+        #     raise ValueError(f"Unknown adapter: {adapter}")
+        # COVERAGE_ANALYSIS_CONFIGURATIONS.append(
+        #     TunerConfig(
+        #         tuner="confopt",
+        #         searcher=SEARCHER,
+        #         config_identifier=config_identifier,
+        #         searcher_tuning_framework=None,
+        #     )
+        # )
 
     # Manually add the unconformalized configuration for each interval width:
     COVERAGE_ANALYSIS_CONFIGURATIONS.append(

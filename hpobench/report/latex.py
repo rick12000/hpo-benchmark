@@ -34,8 +34,10 @@ def _get_nemenyi_cell(df: pd.DataFrame, e1: str, e2: str) -> str:
     d_str = f"{delta:.2f}"
     p_str = f"{p:.3f}"
     if row["significant"]:
-        return f"\\textbf{{{d_str}}} \\\\ \\textbf{{({p_str})}}"
-    return f"{d_str} \\\\ ({p_str})"
+        return (
+            f"\\normalsize{{\\textbf{{{d_str}}}}} \\\\ \\small{{\\textbf{{({p_str})}}}}"
+        )
+    return f"\\normalsize{{{d_str}}} \\\\ \\small{{({p_str})}}"
 
 
 def _build_nemenyi_table_block(
@@ -57,10 +59,12 @@ def _build_nemenyi_table_block(
 
         lines.extend(
             [
-                "\\resizebox{\\textwidth}{!}{%",
                 f"\\begin{{tabular}}{{@{{}}l*{{{len(ents)}}}{{>{{\\centering\\arraybackslash}}p{{1.8cm}}}}@{{}}}}",
                 "\\toprule",
-                " & ".join([""] + [f"\\textbf{{{ent.upper()}}}" for ent in ents])
+                " & ".join(
+                    [""]
+                    + [f"\\normalsize{{\\textbf{{{ent.upper()}}}}}" for ent in ents]
+                )
                 + " \\\\",
                 "\\midrule",
             ]
@@ -75,7 +79,7 @@ def _build_nemenyi_table_block(
                     cell_content = f"\\begin{{minipage}}{{1.8cm}}\\centering {cell_content} \\end{{minipage}}"
                 row_cells.append(cell_content if cell_content else "--")
             lines.append(
-                " & ".join([f"\\textbf{{{e1.upper()}}}"])
+                " & ".join([f"\\normalsize{{\\textbf{{{e1.upper()}}}}}"])
                 + " & "
                 + " & ".join(row_cells)
                 + " \\\\"
@@ -84,15 +88,13 @@ def _build_nemenyi_table_block(
         lines.extend(
             [
                 "\\bottomrule",
-                "\\end{tabular}%",
-                "}",
+                "\\end{tabular}",
             ]
         )
     else:
         # Multiple groups - use side-by-side structure with improved formatting
         lines.extend(
             [
-                "\\resizebox{\\textwidth}{!}{%",
                 f"\\begin{{tabular}}{{@{{}}{' c ' * len(vertical_values)}@{{}}}}",
             ]
         )
@@ -115,7 +117,10 @@ def _build_nemenyi_table_block(
                 "{\\footnotesize",
                 f"\\begin{{tabular}}{{@{{}}l*{{{len(ents)}}}{{c}}@{{}}}}",
                 "\\toprule",
-                " & ".join([""] + [f"\\textbf{{{ent.upper()}}}" for ent in ents])
+                " & ".join(
+                    [""]
+                    + [f"\\normalsize{{\\textbf{{{ent.upper()}}}}}" for ent in ents]
+                )
                 + " \\\\",
                 "\\midrule",
             ]
@@ -125,7 +130,7 @@ def _build_nemenyi_table_block(
                 # Replace empty cells with proper dash
                 row_cells = [cell if cell else "--" for cell in row_cells]
                 subtable_lines.append(
-                    " & ".join([f"\\textbf{{{e1.upper()}}}"])
+                    " & ".join([f"\\normalsize{{\\textbf{{{e1.upper()}}}}}"])
                     + " & "
                     + " & ".join(row_cells)
                     + " \\\\"
@@ -145,8 +150,7 @@ def _build_nemenyi_table_block(
         lines.append(" & ".join(subtables) + " \\\\")
         lines.extend(
             [
-                "\\end{tabular}%",
-                "}",
+                "\\end{tabular}",
             ]
         )
 
@@ -197,7 +201,6 @@ def _build_win_percentage_table(
         "\\centering",
         f"\\caption{{{_get_win_percentage_caption()}}}",
         "\\vspace{1em}",
-        "\\resizebox{\\textwidth}{!}{%",
         "\\begin{tabular}{@{}p{4cm}p{6cm}>{\\centering\\arraybackslash}p{2cm}@{}}",
         "\\toprule",
         f"\\textbf{{{_escape_latex_text(vertical_separator.title())}}} & \\textbf{{{_escape_latex_text(comparison_column.title())}}} & \\textbf{{Win \\%}} \\\\",
@@ -220,12 +223,12 @@ def _build_win_percentage_table(
 
                 if first_row:
                     lines.append(
-                        f"{_escape_latex_text(str(v_val))} & {_escape_latex_text(str(comp_val))} & {win_pct:.1f} \\\\"
+                        f"\\normalsize{{{_escape_latex_text(str(v_val))}}} & \\normalsize{{{_escape_latex_text(str(comp_val))}}} & \\normalsize{{{win_pct:.1f}}} \\\\"
                     )
                     first_row = False
                 else:
                     lines.append(
-                        f" & {_escape_latex_text(str(comp_val))} & {win_pct:.1f} \\\\"
+                        f" & \\normalsize{{{_escape_latex_text(str(comp_val))}}} & \\normalsize{{{win_pct:.1f}}} \\\\"
                     )
 
         # Add midrule between benchmarks (except after last one)
@@ -235,8 +238,7 @@ def _build_win_percentage_table(
     lines.extend(
         [
             "\\bottomrule",
-            "\\end{tabular}%",
-            "}",  # End resizebox
+            "\\end{tabular}",
             "\\label{tab:tuner_win_percentage}",
             "\\end{table}",
         ]
@@ -265,8 +267,8 @@ def _format_score_with_interval(
     interval_str = f"\\small{{[{lower_val:.3f}, {upper_val:.3f}]}}"
 
     if is_best:
-        return f"\\textbf{{{mean_str}}} \\\\ {interval_str}"
-    return f"{mean_str} \\\\ {interval_str}"
+        return f"\\normalsize{{\\textbf{{{mean_str}}}}} \\\\ {interval_str}"
+    return f"\\normalsize{{{mean_str}}} \\\\ {interval_str}"
 
 
 def _identify_best_scores(group_df: pd.DataFrame) -> pd.DataFrame:
@@ -319,7 +321,6 @@ def _build_calibration_table_block(df_block: pd.DataFrame, caption: str) -> str:
         "\\centering",
         f"\\caption{{{caption}}}",
         "\\vspace{1em}",
-        "\\resizebox{\\textwidth}{!}{%",
         f"\\begin{{tabular}}{{@{{}}*{{{visible_cols}}}{{>{{\\centering\\arraybackslash}}p{{2.2cm}}}}@{{}}}}",
         "\\toprule",
     ]
@@ -364,12 +365,13 @@ def _build_calibration_table_block(df_block: pd.DataFrame, caption: str) -> str:
             )
         )
     else:
-        grouped = df_block.groupby(group_cols)
+        # Calculate best scores across the entire df_block before grouping
+        processed_df_all = _identify_best_scores(df_block)
+        grouped = processed_df_all.groupby(group_cols)
 
         for group_idx, (group_keys, group_df) in enumerate(grouped):
-            processed_df = _identify_best_scores(group_df)
             group_lines = _format_calibration_rows_simple(
-                processed_df,
+                group_df,
                 group_keys if len(group_cols) > 1 else (group_keys,),
                 show_benchmark,
                 show_dataset,
@@ -384,8 +386,7 @@ def _build_calibration_table_block(df_block: pd.DataFrame, caption: str) -> str:
     lines.extend(
         [
             "\\bottomrule",
-            "\\end{tabular}%",
-            "}",  # End resizebox
+            "\\end{tabular}",
             "\\label{tab:calibration_statistics}",
             "\\end{table}",
         ]
@@ -423,14 +424,14 @@ def _format_calibration_rows_simple(
                         str(group_values[0]) if group_values[0] is not None else ""
                     )
                     row_parts.append(
-                        f"\\multirow{{{num_rows}}}{{*}}{{{_escape_latex_text(bench_val)}}}"
+                        f"\\multirow{{{num_rows}}}{{*}}{{\\normalsize{{{_escape_latex_text(bench_val)}}}}}"
                     )
                 if show_dataset:
                     dataset_val = (
                         str(group_values[1]) if group_values[1] is not None else ""
                     )
                     row_parts.append(
-                        f"\\multirow{{{num_rows}}}{{*}}{{{_escape_latex_text(dataset_val)}}}"
+                        f"\\multirow{{{num_rows}}}{{*}}{{\\normalsize{{{_escape_latex_text(dataset_val)}}}}}"
                     )
                 if show_confidence:
                     conf_val = (
@@ -439,7 +440,7 @@ def _format_calibration_rows_simple(
                     # Clean up confidence level formatting - remove "@ " and "%"
                     cleaned_conf = conf_val.replace("@ ", "").replace("%", "\\%")
                     row_parts.append(
-                        f"\\multirow{{{num_rows}}}{{*}}{{{_escape_latex_text(cleaned_conf)}}}"
+                        f"\\multirow{{{num_rows}}}{{*}}{{\\normalsize{{{_escape_latex_text(cleaned_conf)}}}}}"
                     )
             elif group_values and len(group_values) == 1:
                 # Single grouping value - likely confidence level
@@ -451,7 +452,7 @@ def _format_calibration_rows_simple(
                     row_parts.append("")
                 if show_confidence:
                     row_parts.append(
-                        f"\\multirow{{{num_rows}}}{{*}}{{{_escape_latex_text(cleaned_val)}}}"
+                        f"\\multirow{{{num_rows}}}{{*}}{{\\normalsize{{{_escape_latex_text(cleaned_val)}}}}}"
                     )
             else:
                 # Use actual row values
@@ -462,7 +463,7 @@ def _format_calibration_rows_simple(
                         else ""
                     )
                     row_parts.append(
-                        f"\\multirow{{{num_rows}}}{{*}}{{{_escape_latex_text(bench_val)}}}"
+                        f"\\multirow{{{num_rows}}}{{*}}{{\\normalsize{{{_escape_latex_text(bench_val)}}}}}"
                     )
                 if show_dataset:
                     dataset_val = (
@@ -471,7 +472,7 @@ def _format_calibration_rows_simple(
                         else ""
                     )
                     row_parts.append(
-                        f"\\multirow{{{num_rows}}}{{*}}{{{_escape_latex_text(dataset_val)}}}"
+                        f"\\multirow{{{num_rows}}}{{*}}{{\\normalsize{{{_escape_latex_text(dataset_val)}}}}}"
                     )
                 if show_confidence:
                     conf_val = (
@@ -481,7 +482,7 @@ def _format_calibration_rows_simple(
                     )
                     cleaned_conf = conf_val.replace("@ ", "").replace("%", "\\%")
                     row_parts.append(
-                        f"\\multirow{{{num_rows}}}{{*}}{{{_escape_latex_text(cleaned_conf)}}}"
+                        f"\\multirow{{{num_rows}}}{{*}}{{\\normalsize{{{_escape_latex_text(cleaned_conf)}}}}}"
                     )
         else:
             # Empty cells for subsequent rows in the group
@@ -496,7 +497,7 @@ def _format_calibration_rows_simple(
         tuner_val = str(row["tuner"]) if pd.notna(row["tuner"]) else ""
         # Remove the confidence level part from tuner name (e.g., "@ 0.1%")
         cleaned_tuner = tuner_val.split(" @ ")[0] if " @ " in tuner_val else tuner_val
-        row_parts.append(_escape_latex_text(cleaned_tuner))
+        row_parts.append(f"\\normalsize{{{_escape_latex_text(cleaned_tuner)}}}")
 
         # Add score columns with confidence intervals
         score_configs = [
@@ -645,13 +646,54 @@ def _get_calibration_metrics_caption() -> str:
     return "Calibration Metrics by Entity"
 
 
+def _parse_and_group_entities(df_block: pd.DataFrame) -> dict:
+    """Parse entity names and group by method and adapter."""
+    grouped = {}
+
+    for _, row in df_block.iterrows():
+        tuner_name = row["tuner"]
+
+        # Parse the tuner name to extract method and adapter
+        if "unconformalized" in tuner_name.lower():
+            method = "Unconformalized"
+            adapter = "default"
+        elif "conformalized" in tuner_name.lower():
+            method = "Conformalized"
+            if "aci" in tuner_name.lower():
+                if "dtaci" in tuner_name.lower():
+                    adapter = "DtACI"
+                else:
+                    adapter = "ACI"
+            else:
+                adapter = "default"
+        elif (
+            "cross_validated" in tuner_name.lower()
+            or "cross validated" in tuner_name.lower()
+        ):
+            method = "Cross Validated"
+            if "aci" in tuner_name.lower():
+                if "dtaci" in tuner_name.lower():
+                    adapter = "DtACI"
+                else:
+                    adapter = "ACI"
+            else:
+                adapter = "default"
+        else:
+            # Default case - treat as is
+            method = tuner_name
+            adapter = "default"
+
+        if method not in grouped:
+            grouped[method] = {}
+
+        grouped[method][adapter] = row
+
+    return grouped
+
+
 def _build_calibration_metrics_table_block(df_block: pd.DataFrame, caption: str) -> str:
-    target_metrics = [
-        "chunked_target_coverage_deviation",
-        "llr_statistic", 
-        "width"
-    ]
-    
+    target_metrics = ["chunked_target_coverage_deviation", "llr_statistic", "width"]
+
     available_metrics = []
     for metric in target_metrics:
         mean_col = f"{metric}_mean"
@@ -659,65 +701,134 @@ def _build_calibration_metrics_table_block(df_block: pd.DataFrame, caption: str)
         upper_col = f"{metric}_upper"
         if all(col in df_block.columns for col in [mean_col, lower_col, upper_col]):
             available_metrics.append(metric)
-    
+
     if not available_metrics:
         return ""
-    
+
+    # Find best (minimum) values for each metric to bold them
+    best_values = {}
+    for metric in available_metrics:
+        mean_col = f"{metric}_mean"
+        if mean_col in df_block.columns:
+            best_values[metric] = df_block[mean_col].min()
+
     lines: List[str] = [
         "\\begin{table}[htbp]",
         "\\centering",
         f"\\caption{{{caption}}}",
         "\\vspace{1em}",
-        "\\resizebox{\\textwidth}{!}{%",
         f"\\begin{{tabular}}{{@{{}}l*{{{len(available_metrics)}}}{{>{{\\centering\\arraybackslash}}p{{3cm}}}}@{{}}}}",
         "\\toprule",
     ]
-    
+
     # Build header row
     header_parts = ["\\textbf{Entity}"]
     for metric in available_metrics:
-        metric_title = metric.replace('_', ' ').title()
+        metric_title = metric.replace("_", " ").title()
         header_parts.append(f"\\textbf{{{metric_title}}}")
-    
+
     lines.append(" & ".join(header_parts) + " \\\\")
     lines.append("\\midrule")
-    
-    # Get unique entities
-    entities = sorted(df_block["tuner"].unique())
-    
-    for entity in entities:
-        entity_data = df_block[df_block["tuner"] == entity]
-        if entity_data.empty:
+
+    # Parse and group entities
+    grouped_entities = _parse_and_group_entities(df_block)
+
+    # Define method order
+    method_order = ["Unconformalized", "Conformalized", "Cross Validated"]
+
+    for method in method_order:
+        if method not in grouped_entities:
             continue
-            
-        row_parts = [_escape_latex_text(entity)]
-        row_data = entity_data.iloc[0]
-        
-        for metric in available_metrics:
-            mean_col = f"{metric}_mean"
-            lower_col = f"{metric}_lower"
-            upper_col = f"{metric}_upper"
-            
-            if all(col in row_data.index for col in [mean_col, lower_col, upper_col]):
-                mean_val = row_data[mean_col]
-                lower_val = row_data[lower_col]
-                upper_val = row_data[upper_col]
-                
-                formatted_metric = _format_score_with_interval(mean_val, lower_val, upper_val, False)
-                row_parts.append(f"\\begin{{minipage}}{{3cm}}\\centering {formatted_metric} \\end{{minipage}}")
-            else:
-                row_parts.append("--")
-        
-        lines.append(" & ".join(row_parts) + " \\\\")
-    
-    lines.extend([
-        "\\bottomrule",
-        "\\end{tabular}%",
-        "}",
-        "\\label{tab:calibration_metrics_by_entity}",
-        "\\end{table}",
-    ])
-    
+
+        method_data = grouped_entities[method]
+
+        # Add main method row (no adapter)
+        if "default" in method_data:
+            row_parts = [f"\\normalsize{{\\textbf{{{method}}}}}"]
+            row_data = method_data["default"]
+
+            for metric in available_metrics:
+                mean_col = f"{metric}_mean"
+                lower_col = f"{metric}_lower"
+                upper_col = f"{metric}_upper"
+
+                if all(
+                    col in row_data.index for col in [mean_col, lower_col, upper_col]
+                ):
+                    mean_val = row_data[mean_col]
+                    lower_val = row_data[lower_col]
+                    upper_val = row_data[upper_col]
+
+                    # Check if this is the best value for this metric
+                    is_best = (
+                        metric in best_values
+                        and abs(mean_val - best_values[metric]) < 1e-10
+                    )
+
+                    formatted_metric = _format_score_with_interval(
+                        mean_val, lower_val, upper_val, is_best
+                    )
+                    row_parts.append(
+                        f"\\begin{{minipage}}{{3cm}}\\centering {formatted_metric} \\end{{minipage}}"
+                    )
+                else:
+                    row_parts.append("--")
+
+            lines.append(" & ".join(row_parts) + " \\\\")
+
+        # Add adapter variants
+        for adapter in sorted(method_data.keys()):
+            if adapter == "default":
+                continue
+
+            row_parts = [f"\\normalsize{{\\quad + {adapter}}}"]
+            row_data = method_data[adapter]
+
+            for metric in available_metrics:
+                mean_col = f"{metric}_mean"
+                lower_col = f"{metric}_lower"
+                upper_col = f"{metric}_upper"
+
+                if all(
+                    col in row_data.index for col in [mean_col, lower_col, upper_col]
+                ):
+                    mean_val = row_data[mean_col]
+                    lower_val = row_data[lower_col]
+                    upper_val = row_data[upper_col]
+
+                    # Check if this is the best value for this metric
+                    is_best = (
+                        metric in best_values
+                        and abs(mean_val - best_values[metric]) < 1e-10
+                    )
+
+                    formatted_metric = _format_score_with_interval(
+                        mean_val, lower_val, upper_val, is_best
+                    )
+                    row_parts.append(
+                        f"\\begin{{minipage}}{{3cm}}\\centering {formatted_metric} \\end{{minipage}}"
+                    )
+                else:
+                    row_parts.append("--")
+
+            lines.append(" & ".join(row_parts) + " \\\\")
+
+        # Add spacing after each method group except the last
+        if method != method_order[-1] and any(
+            m in grouped_entities
+            for m in method_order[method_order.index(method) + 1 :]
+        ):
+            lines.append("")
+
+    lines.extend(
+        [
+            "\\bottomrule",
+            "\\end{tabular}",
+            "\\label{tab:calibration_metrics_by_entity}",
+            "\\end{table}",
+        ]
+    )
+
     return "\n".join(lines)
 
 
