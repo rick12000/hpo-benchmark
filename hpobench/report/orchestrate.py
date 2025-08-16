@@ -6,7 +6,6 @@ from typing import Literal, Optional
 import gc
 import numpy as np
 from sklearn.metrics import mean_pinball_loss
-from sklearn.preprocessing import StandardScaler
 from confopt.selection.conformalization import QuantileConformalEstimator
 from confopt.utils.configurations.encoding import ConfigurationEncoder
 from confopt.utils.preprocessing import train_val_split
@@ -471,6 +470,7 @@ def run_static_benchmark(
         Literal[
             "jahs201",
             "lcbench_large",
+            "lcbench_heteroscedastic",
             "rbv2_xgboost_large",
             "rbv2_xgboost_heteroscedastic",
         ]
@@ -684,25 +684,20 @@ def run_static_benchmark(
                                 ordinal=False,
                             )
 
-                            scaler = StandardScaler()
-                            scaler.fit(X=X_train)
-                            X_train = scaler.transform(X=X_train)
-                            X_val = scaler.transform(X=X_val)
-                            X_holdout_encoded = scaler.transform(X=X_holdout_encoded)
-
                             # Train conformal searcher:
                             searcher = QuantileConformalEstimator(
                                 quantile_estimator_architecture=estimator_architecture,
                                 alphas=[alpha],
                                 n_pre_conformal_trials=n_pre_conformal_trials,
+                                calibration_split_strategy="train_test_split",
+                                symmetric_adjustment=True,
+                                normalize_features=True,
                             )
 
                             # Fit with tuning_iterations
                             searcher.fit(
-                                X_train=X_train,
-                                y_train=y_train,
-                                X_val=X_val,
-                                y_val=y_val,
+                                X=X_experiment_encoded,
+                                y=np.array(y_experiment),
                                 tuning_iterations=tuning_iterations,
                                 min_obs_for_tuning=n_pre_conformal_trials,
                                 random_state=base_random_state + repetition,

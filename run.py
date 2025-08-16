@@ -107,9 +107,9 @@ if __name__ == "__main__":
         raw_benchmark_data = run_and_analyze_main_benchmark(
             benchmarks=[
                 # "jahs201",
-                # "lcbench_large",
+                "lcbench_large",
                 # "lcbench_heteroscedastic",
-                "nas301",  # Uncomment to include NAS-301 benchmark
+                # "nas301",  # Uncomment to include NAS-301 benchmark
                 # "rbv2_xgboost_large",
             ],  # , "lcbench_large", "lcbench_heteroscedastic"],
             tuning_configurations=LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS

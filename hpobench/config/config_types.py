@@ -10,11 +10,13 @@ from hpobench.generation.generate import ObjectiveMetricGenerator
 class FloatRange(BaseModel):
     lower: float
     upper: float
+    log: bool = False
 
 
 class IntRange(BaseModel):
     lower: int
     upper: int
+    log: bool = False
 
 
 class CategoricalRange(BaseModel):

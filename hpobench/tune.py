@@ -27,10 +27,12 @@ from functools import partial
 from hpobench.syne_tune_integration import syne_tune_cqr_tune
 from ConfigSpace import (
     ConfigurationSpace,
-    Float,
-    Integer as CSInteger,
-    Categorical as CSCategorical,
     Configuration,
+)
+from ConfigSpace.hyperparameters import (
+    UniformFloatHyperparameter,
+    UniformIntegerHyperparameter,
+    CategoricalHyperparameter,
 )
 from smac.facade.hyperparameter_optimization_facade import (
     HyperparameterOptimizationFacade,
@@ -176,9 +178,15 @@ def set_optuna_params(
     optuna_params: dict[str, Any] = {}
     for name, param in raw_params.items():
         if isinstance(param, IntRange):
-            optuna_params[name] = trial.suggest_int(name, param.lower, param.upper)
+            log_flag = getattr(param, "log", False)
+            optuna_params[name] = trial.suggest_int(
+                name, param.lower, param.upper, log=log_flag
+            )
         elif isinstance(param, FloatRange):
-            optuna_params[name] = trial.suggest_float(name, param.lower, param.upper)
+            log_flag = getattr(param, "log", False)
+            optuna_params[name] = trial.suggest_float(
+                name, param.lower, param.upper, log=log_flag
+            )
         elif isinstance(param, CategoricalRange):
             optuna_params[name] = trial.suggest_categorical(name, param.choices)
         else:
@@ -218,13 +226,25 @@ def build_optuna_distributions(
     dists: dict[str, optuna.distributions.BaseDistribution] = {}
     for name, param in raw_params.items():
         if isinstance(param, IntRange):
-            dists[name] = optuna.distributions.IntUniformDistribution(
-                low=param.lower, high=param.upper
-            )
+            log_flag = getattr(param, "log", False)
+            if log_flag:
+                dists[name] = optuna.distributions.IntLogUniformDistribution(
+                    low=param.lower, high=param.upper
+                )
+            else:
+                dists[name] = optuna.distributions.IntUniformDistribution(
+                    low=param.lower, high=param.upper
+                )
         elif isinstance(param, FloatRange):
-            dists[name] = optuna.distributions.UniformDistribution(
-                low=param.lower, high=param.upper
-            )
+            log_flag = getattr(param, "log", False)
+            if log_flag:
+                dists[name] = optuna.distributions.LogUniformDistribution(
+                    low=param.lower, high=param.upper
+                )
+            else:
+                dists[name] = optuna.distributions.UniformDistribution(
+                    low=param.lower, high=param.upper
+                )
         elif isinstance(param, CategoricalRange):
             dists[name] = optuna.distributions.CategoricalDistribution(
                 choices=param.choices
@@ -366,12 +386,14 @@ def setup_confopt_params(
     confopt_params: dict[str, Any] = {}
     for name, param in raw_params.items():
         if isinstance(param, IntRange):
+            log_flag = getattr(param, "log", False)
             confopt_params[name] = ranges.IntRange(
-                min_value=param.lower, max_value=param.upper
+                min_value=param.lower, max_value=param.upper, log_scale=log_flag
             )
         elif isinstance(param, FloatRange):
+            log_flag = getattr(param, "log", False)
             confopt_params[name] = ranges.FloatRange(
-                min_value=param.lower, max_value=param.upper
+                min_value=param.lower, max_value=param.upper, log_scale=log_flag
             )
         elif isinstance(param, CategoricalRange):
             confopt_params[name] = ranges.CategoricalRange(choices=param.choices)
@@ -488,9 +510,15 @@ def setup_skopt_params(
     skopt_param_names: list[str] = []
     for name, param in raw_params.items():
         if isinstance(param, IntRange):
-            skopt_params.append(SKInteger(param.lower, param.upper, name=name))
+            log_flag = getattr(param, "log", False)
+            prior = "log-uniform" if log_flag else "uniform"
+            skopt_params.append(
+                SKInteger(param.lower, param.upper, prior=prior, name=name)
+            )
         elif isinstance(param, FloatRange):
-            skopt_params.append(Real(param.lower, param.upper, name=name))
+            log_flag = getattr(param, "log", False)
+            prior = "log-uniform" if log_flag else "uniform"
+            skopt_params.append(Real(param.lower, param.upper, prior=prior, name=name))
         elif isinstance(param, CategoricalRange):
             skopt_params.append(SKCategorical(param.choices, name=name))
         else:
@@ -650,11 +678,17 @@ def setup_smac_configspace(
 
     for name, param in raw_params.items():
         if isinstance(param, IntRange):
-            hp = CSInteger(name, (param.lower, param.upper))
+            log_flag = getattr(param, "log", False)
+            hp = UniformIntegerHyperparameter(
+                name, param.lower, param.upper, log=log_flag
+            )
         elif isinstance(param, FloatRange):
-            hp = Float(name, (param.lower, param.upper))
+            log_flag = getattr(param, "log", False)
+            hp = UniformFloatHyperparameter(
+                name, param.lower, param.upper, log=log_flag
+            )
         elif isinstance(param, CategoricalRange):
-            hp = CSCategorical(name, param.choices)
+            hp = CategoricalHyperparameter(name, param.choices)
         else:
             raise ValueError(f"Unknown parameter type: {type(param)}")
         cs.add_hyperparameter(hp)

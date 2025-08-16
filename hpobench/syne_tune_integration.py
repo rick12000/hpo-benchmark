@@ -99,9 +99,15 @@ def convert_params_to_syne_tune_config_space(
 
     for name, param in raw_params.items():
         if isinstance(param, IntRange):
-            config_space[name] = Integer(lower=param.lower, upper=param.upper)
+            # Note: syne-tune Integer doesn't support loguniform, so we use uniform for int parameters
+            # regardless of the log flag. This is a limitation of syne-tune.
+            domain = Integer(lower=param.lower, upper=param.upper)
+            config_space[name] = domain
         elif isinstance(param, FloatRange):
-            config_space[name] = Float(lower=param.lower, upper=param.upper)
+            domain = Float(lower=param.lower, upper=param.upper)
+            if getattr(param, "log", False):
+                domain = domain.loguniform()
+            config_space[name] = domain
         elif isinstance(param, CategoricalRange):
             config_space[name] = Categorical(categories=param.choices)
         else:

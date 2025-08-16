@@ -1,4 +1,6 @@
 import logging
+import json
+import os
 from hpobench.config.config_types import TunerConfig
 from hpobench.generation.generate import (
     Jahs201Generator,
@@ -23,6 +25,35 @@ import ConfigSpace as CS
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+
+def _get_yahpo_log_info(benchmark: str) -> dict[str, bool]:
+    """Extract log-scale information from yahpo benchmark JSON config files.
+
+    Args:
+        benchmark: Name of the yahpo benchmark (e.g., 'iaml_xgboost')
+
+    Returns:
+        Dictionary mapping parameter names to whether they should use log scale
+    """
+    config_path = os.path.join("yahpo_bench_data", benchmark, "config_space.json")
+    log_info = {}
+
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r") as f:
+                config_data = json.load(f)
+
+            for hp in config_data.get("hyperparameters", []):
+                param_name = hp.get("name")
+                log_flag = hp.get("log", False)
+                if param_name:
+                    log_info[param_name] = log_flag
+
+        except Exception as e:
+            logger.warning(f"Failed to read log info from {config_path}: {e}")
+
+    return log_info
 
 
 def setup_yahpo_instance_configs(
@@ -98,6 +129,9 @@ def setup_yahpo_instance_configs(
             drop_fidelity_params=False, seed=1234
         )
 
+        # Get log scale information from JSON config files
+        log_info = _get_yahpo_log_info(benchmark_override)
+
         # Identify fidelity parameters:
         fidelity_param_names = instance_benchmark_set.config.fidelity_params
         instance_names = instance_benchmark_set.config.instance_names
@@ -116,13 +150,18 @@ def setup_yahpo_instance_configs(
                     fidelity_space[hyperparameter.name] = hyperparameter.default_value
 
             elif hyperparameter.name != instance_names:
+                param_log_flag = log_info.get(hyperparameter.name, False)
                 if isinstance(hyperparameter, CS.UniformIntegerHyperparameter):
                     filtered_op_space_dict[hyperparameter.name] = IntRange(
-                        lower=hyperparameter.lower, upper=hyperparameter.upper
+                        lower=hyperparameter.lower,
+                        upper=hyperparameter.upper,
+                        log=param_log_flag,
                     )
                 elif isinstance(hyperparameter, CS.UniformFloatHyperparameter):
                     filtered_op_space_dict[hyperparameter.name] = FloatRange(
-                        lower=hyperparameter.lower, upper=hyperparameter.upper
+                        lower=hyperparameter.lower,
+                        upper=hyperparameter.upper,
+                        log=param_log_flag,
                     )
                 elif isinstance(hyperparameter, CS.CategoricalHyperparameter):
                     filtered_op_space_dict[hyperparameter.name] = CategoricalRange(
