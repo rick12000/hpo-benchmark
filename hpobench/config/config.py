@@ -28,7 +28,7 @@ DEFAULT_INTERVAL_WIDTH = 0.9
 
 # 1. Create configurations feeding the static tuning charts and tables:
 STATIC_ANALYSIS_ESTIMATOR_ARCHITECTURES = [
-    # "qgp",
+    "qgp",
     "ql",
     "qrf",
     "qgbm",
@@ -70,27 +70,27 @@ for interval_width in COVERAGE_INTERVAL_WIDTHS:
             )
         )
 
-        # SEARCHER = QuantileConformalSearcher(
-        #     quantile_estimator_architecture="qgbm",
-        #     sampler=SAMPLER,
-        #     n_calibration_folds=5,
-        #     calibration_split_strategy="cv",
-        #     symmetric_adjustment=True,
-        # )
-        # if adapter is None:
-        #     config_identifier = "Cross Validated"
-        # elif adapter in ["ACI", "DtACI"]:
-        #     config_identifier = f"Cross Validated + {adapter}"
-        # else:
-        #     raise ValueError(f"Unknown adapter: {adapter}")
-        # COVERAGE_ANALYSIS_CONFIGURATIONS.append(
-        #     TunerConfig(
-        #         tuner="confopt",
-        #         searcher=SEARCHER,
-        #         config_identifier=config_identifier,
-        #         searcher_tuning_framework=None,
-        #     )
-        # )
+        SEARCHER = QuantileConformalSearcher(
+            quantile_estimator_architecture="qgbm",
+            sampler=SAMPLER,
+            n_calibration_folds=5,
+            calibration_split_strategy="cv",
+            symmetric_adjustment=True,
+        )
+        if adapter is None:
+            config_identifier = "Cross Validated"
+        elif adapter in ["ACI", "DtACI"]:
+            config_identifier = f"Cross Validated + {adapter}"
+        else:
+            raise ValueError(f"Unknown adapter: {adapter}")
+        COVERAGE_ANALYSIS_CONFIGURATIONS.append(
+            TunerConfig(
+                tuner="confopt",
+                searcher=SEARCHER,
+                config_identifier=config_identifier,
+                searcher_tuning_framework=None,
+            )
+        )
 
     # Manually add the unconformalized configuration for each interval width:
     COVERAGE_ANALYSIS_CONFIGURATIONS.append(
@@ -115,7 +115,7 @@ for interval_width in COVERAGE_INTERVAL_WIDTHS:
 
 # 3. Create configurations feeding the comparative tuner rank plots:
 SAMPLER_VARIATION_N_DEFAULT_QUANTILES = 4
-SAMPLER_VARIATION_DEFAULT_ADAPTER = None
+SAMPLER_VARIATION_DEFAULT_ADAPTER = "DtACI"
 SAMPLER_VARIATION_CONFIGURATIONS = build_sampler_variation_configurations(
     samplers=[
         MaxValueEntropySearchSampler(
@@ -160,7 +160,7 @@ SAMPLER_VARIATION_CONFIGURATIONS = build_sampler_variation_configurations(
     quantile_arch="qgbm",
 )
 
-ARCHITECTURE_VARIATION_ADAPTER = None
+ARCHITECTURE_VARIATION_ADAPTER = "DtACI"
 ARCHITECTURE_VARIATION_N_QUANTILES = 4
 ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurations(
     architectures=[
@@ -172,11 +172,11 @@ ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurati
         # "qens4",
     ],
     samplers=[
-        # ExpectedImprovementSampler(
-        #     n_quantiles=ARCHITECTURE_VARIATION_N_QUANTILES,
-        #     num_ei_samples=1000,
-        #     adapter=ARCHITECTURE_VARIATION_ADAPTER,
-        # ),
+        ExpectedImprovementSampler(
+            n_quantiles=ARCHITECTURE_VARIATION_N_QUANTILES,
+            num_ei_samples=1000,
+            adapter=ARCHITECTURE_VARIATION_ADAPTER,
+        ),
         ThompsonSampler(
             n_quantiles=ARCHITECTURE_VARIATION_N_QUANTILES,
             enable_optimistic_sampling=False,
@@ -192,13 +192,13 @@ ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurati
     ],
 )
 
-LIMITED_ARCHITECTURE_ADAPTER = None
+LIMITED_ARCHITECTURE_ADAPTER = "DtACI"
 LIMITED_ARCHITECTURE_N_QUANTILES = 4
 LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurations(
     architectures=[
         "qrf",
         # "qgp",
-        # "qgbm",
+        "qgbm",
         # "qens3",
         # "qens4",
     ],
@@ -233,7 +233,7 @@ LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS.extend(
 )
 
 
-PRECONFORMAL_ADAPTER = None
+PRECONFORMAL_ADAPTER = "DtACI"
 PRECONFORMAL_N_QUANTILES = 4
 PRECONFORMAL_COMPARISON_CONFIGURATIONS = []
 for architecture in [
@@ -276,7 +276,7 @@ for architecture in [
 
 
 # 4. Create configurations feeding the quantile count variation plots:
-QUANTILE_COUNT_VARIATION_ADAPTER = None
+QUANTILE_COUNT_VARIATION_ADAPTER = "DtACI"
 QUANTILE_COUNT_VARIATION_CONFIGURATIONS = []
 QUANTILE_COUNT_VALUES = [4, 10]
 
@@ -312,7 +312,7 @@ for n_quantiles in QUANTILE_COUNT_VALUES:
 
 
 # 5. Create configurations feeding the search tuning effect plots:
-SEARCH_TUNING_EFFECT_ADAPTER = None
+SEARCH_TUNING_EFFECT_ADAPTER = "DtACI"
 SEARCH_TUNING_EFFECT_N_QUANTILES = 4
 SEARCH_TUNING_EFFECT_CONFIGURATIONS = []
 

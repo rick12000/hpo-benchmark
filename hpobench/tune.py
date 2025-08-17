@@ -1,5 +1,6 @@
 import pandas as pd
 import optuna
+import logging
 from datetime import datetime
 from hpobench.config.config_types import TunerConfig
 from hpobench.config.config_types import IntRange, FloatRange, CategoricalRange
@@ -59,6 +60,7 @@ N_CANDIDATES = 2000  # 10000
 # - No random interleaving (probability=0.0)
 # - No parallelization (n_workers=1)
 # - Single incumbent tracking (max_incumbents=1)
+# - No local search (RandomSearch acquisition maximizer only)
 # - Deterministic scenario
 
 
@@ -750,6 +752,13 @@ def smac_tune(
     Returns:
         DataFrame with tuning history.
     """
+    # Disable SMAC logging to reduce noise
+    logging.getLogger("smac").setLevel(logging.ERROR)
+    logging.getLogger("smac.facade").setLevel(logging.ERROR)
+    logging.getLogger("smac.intensifier").setLevel(logging.ERROR)
+    logging.getLogger("smac.runhistory").setLevel(logging.ERROR)
+    logging.getLogger("smac.optimizer").setLevel(logging.ERROR)
+
     # Create configuration space
     configspace = setup_smac_configspace(raw_params, random_state)
 
@@ -765,12 +774,13 @@ def smac_tune(
     )
 
     # Configure acquisition function and maximizer based on sampler
+    # Use RandomSearch for both to disable local search and ensure fair comparison
     if sampler == "smac_rf_ei":
-        acquisition_function = EI(xi=0.0, log=True)
-        acquisition_maximizer = (
-            HyperparameterOptimizationFacade.get_acquisition_maximizer(
-                scenario, challengers=N_CANDIDATES
-            )
+        acquisition_function = EI(xi=0.0, log=False)
+        acquisition_maximizer = RandomSearch(
+            configspace=configspace,
+            challengers=N_CANDIDATES,
+            seed=random_state,
         )
     elif sampler == "smac_rf_ts":
         acquisition_function = TS(xi=0.0)  # xi not used for TS but kept for consistency

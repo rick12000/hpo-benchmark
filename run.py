@@ -26,23 +26,23 @@ BASE_RANDOM_STATE = 42
 
 # Granular run section control
 run_sections = {
-    "run_coverage_analysis": False,
+    "run_coverage_analysis": True,
     "run_sampler_variation_analysis": False,
     "run_architecture_variation_analysis": False,
-    "run_external_tuning_analysis": True,
+    "run_external_tuning_analysis": False,
     "run_preconformal_comparison_analysis": False,
     "run_static_analysis": False,
 }
 
 CACHE_PATH = "cache/"
 run_start_str, logger = setup_environment(cache_path=CACHE_PATH)
-DEFAULT_MAX_N_INSTANCES = 2
-STATIC_DATA_SIZES = [50, 100]
-TUNING_ITERATIONS = [0]
-N_COVERAGE_TRIALS = 60
-SMALL_N_REPETITIONS_PER_TUNER_CONFIG = 2
-MEDIUM_N_REPETITIONS_PER_TUNER_CONFIG = 2
-LARGE_N_REPETITIONS_PER_TUNER_CONFIG = 2
+DEFAULT_MAX_N_INSTANCES = 20
+STATIC_DATA_SIZES = [50, 100, 500]
+TUNING_ITERATIONS = [0, 20]
+N_COVERAGE_TRIALS = 100
+SMALL_N_REPETITIONS_PER_TUNER_CONFIG = 5
+MEDIUM_N_REPETITIONS_PER_TUNER_CONFIG = 5
+LARGE_N_REPETITIONS_PER_TUNER_CONFIG = 5
 
 if __name__ == "__main__":
     # Coverage Analysis
@@ -106,10 +106,10 @@ if __name__ == "__main__":
     if run_sections["run_external_tuning_analysis"]:
         raw_benchmark_data = run_and_analyze_main_benchmark(
             benchmarks=[
-                # "jahs201",
+                "jahs201",
                 "lcbench_large",
-                # "lcbench_heteroscedastic",
-                # "nas301",  # Uncomment to include NAS-301 benchmark
+                "lcbench_heteroscedastic",
+                "nas301",  # Uncomment to include NAS-301 benchmark
                 # "rbv2_xgboost_large",
             ],  # , "lcbench_large", "lcbench_heteroscedastic"],
             tuning_configurations=LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS
