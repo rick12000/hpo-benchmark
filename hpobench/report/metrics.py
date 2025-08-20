@@ -6,9 +6,7 @@ from scikit_posthocs import posthoc_nemenyi_friedman
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 
-from hpobench.utils import save_analysis_results
 from hpobench.utils import get_group_dict
-from hpobench.process import bootstrap_aggregate, calculate_ranks
 from scipy.stats import friedmanchisquare
 
 
@@ -186,149 +184,6 @@ def nemenyi_pairwise_test(
     return pd.DataFrame(results)
 
 
-def calculate_win_percentage(
-    data: pd.DataFrame,
-    breakout_cols: List[str],
-    dataset_col: str,
-    entity_col: str,
-    rank_col: str,
-) -> pd.DataFrame:
-    """
-    Calculate the win percentage for each entity within experimental groupings.
-
-    For each group defined by `breakout_cols`, computes how often each entity achieves the best (minimum) rank on each dataset,
-    returning the proportion of datasets where the entity is the winner. Used in HPO benchmarking to summarize the frequency
-    with which each tuner or estimator achieves the best result across datasets and conditions.
-
-    As the data is pre-ranked, ensure the breakout_cols don't break the original rank groups and
-    ensure your data is ranked within each dataset.
-
-    Args:
-        data: DataFrame with results, including all grouping and ranking columns.
-        breakout_cols: Columns to stratify by (win rates will be averaged across datasets
-            but stratified by the groups in breakout_cols, so one set of results per group).
-        dataset_col: Column identifying the experiment dataset.
-        entity_col: Column identifying the entity being compared (usually a tuner).
-        rank_col: Column with the entity's performance rank.
-
-    Returns:
-        DataFrame with win percentages.
-
-    Raises:
-        ValueError: If the combination of grouping columns is not unique in the input data.
-    """
-    data_copy = data.copy()
-    key_cols = breakout_cols + [dataset_col, entity_col]
-    if data_copy.duplicated(subset=key_cols).any():
-        raise ValueError(
-            f"Non-unique key detected: The combination of {key_cols} is not unique in the input data."
-        )
-
-    grouping_cols = breakout_cols + [dataset_col]
-
-    data_copy["min_rank"] = data_copy.groupby(grouping_cols)[rank_col].transform("min")
-    data_copy["is_winner"] = (data_copy[rank_col] == data_copy["min_rank"]).astype(int)
-
-    # Calculate win rate by each entity across datasets:
-    win_counts = (
-        data_copy.groupby(breakout_cols + [entity_col], observed=True)["is_winner"]
-        .sum()
-        .reset_index(name="win_count")
-    )
-    total_datasets = (
-        data_copy.groupby(breakout_cols, observed=True)[dataset_col]
-        .nunique()
-        .reset_index(name="total_datasets")
-    )
-
-    all_combos = data_copy[breakout_cols + [entity_col]].drop_duplicates()
-    win_analysis = pd.merge(
-        all_combos, win_counts, on=breakout_cols + [entity_col], how="left"
-    )
-    win_analysis = pd.merge(win_analysis, total_datasets, on=breakout_cols, how="left")
-
-    win_analysis["win_count"] = win_analysis["win_count"].fillna(0).astype(int)
-    win_analysis["win_percentage"] = np.where(
-        win_analysis["total_datasets"] > 0,
-        (win_analysis["win_count"] / win_analysis["total_datasets"]) * 100,
-        0,
-    )
-    win_analysis["win_percentage"] = win_analysis["win_percentage"].fillna(0)
-
-    return win_analysis[
-        breakout_cols + [entity_col, "win_count", "total_datasets", "win_percentage"]
-    ]
-
-
-def calculate_coverage_snapshots(
-    iteration_data: pd.DataFrame,
-    relativized_budget_cross_sections: List[int],
-    identifier_cols: List[str],
-    confidence_level_col: str,
-    iteration_col: str,
-    cache_path: str,
-    run_start_str: str,
-    analysis_type: str,
-) -> None:
-    """
-    Calculates coverage analysis snapshots at specific budget cross-sections.
-
-    Takes the already aggregated iteration data and extracts cumulative breach rates
-    at specified budget points. Budget points are specified as normalized values
-    even if data is at iteration level. The function will relativize the budget
-    and then apply the specified budget filters.
-
-    Args:
-        iteration_data: Absolute iteration results with breach rates (already aggregated)
-        identifier_cols: Columns you want to retain as identifiers in the output
-        relativized_budget_cross_sections: Relativized budget points to analyze (e.g., [50, 100])
-        confidence_level_col: Column name for confidence levels
-        cache_path: Base path for saving results
-        run_start_str: Timestamp string for file naming
-        analysis_type: Analysis type for folder organization
-    """
-    # Normalize budget:
-    max_iteration = iteration_data[iteration_col].max()
-    min_iteration = iteration_data[iteration_col].min()
-    iteration_targets = []
-    for budget in relativized_budget_cross_sections:
-        target_iteration = min_iteration + (budget / 100.0) * (
-            max_iteration - min_iteration
-        )
-        target_iteration = round(target_iteration)
-        iteration_targets.append(target_iteration)
-
-    # Subset the data to only include the target budgets:
-    coverage_data = iteration_data[
-        iteration_data[iteration_col].isin(iteration_targets)
-    ].copy()
-    iteration_to_budget = dict(
-        zip(iteration_targets, relativized_budget_cross_sections)
-    )
-    coverage_data["relativized_budget"] = coverage_data[iteration_col].map(
-        iteration_to_budget
-    )
-
-    # Retain only relevant columns:
-    identifier_cols_copy = identifier_cols.copy()
-    output_cols = identifier_cols_copy + [
-        confidence_level_col,
-        iteration_col,
-        "relativized_budget",
-        "cumulative_breach_rate",
-    ]
-    final_data = coverage_data[output_cols]
-
-    save_analysis_results(
-        final_data,
-        cache_path,
-        run_start_str,
-        "coverage_analysis_snapshots.csv",
-        analysis_type,
-        "coverage_analysis",
-    )
-
-
 def _log_likelihood(model, X_input, y):
     eps = 1e-15
     probs = model.predict_proba(X_input)
@@ -357,7 +212,6 @@ def _compute_likelihood_ratio_statistic(
     # Check if y contains only one class
     if len(y.unique()) < 2:
         return np.nan
-    
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
 
@@ -377,6 +231,7 @@ def _compute_likelihood_ratio_statistic(
     ll_full = _log_likelihood(full_model, X_scaled, y)
 
     return 2 * (ll_full - ll_null)
+
 
 def _calculate_chunked_target_coverage_deviation(
     group: pd.DataFrame, breach_column: str
@@ -407,65 +262,29 @@ def _calculate_chunked_target_coverage_deviation(
             chunk_data = group.iloc[start_idx:end_idx]
             chunk_breach_rate = chunk_data[breach_column].mean()
             miscoverage_level = 1 - float(chunk_data["confidence_level"].iloc[0])
-            if pd.isna(miscoverage_level) or miscoverage_level is None or miscoverage_level == "None"  or miscoverage_level == "":
+            if (
+                pd.isna(miscoverage_level)
+                or miscoverage_level is None
+                or miscoverage_level == "None"
+                or miscoverage_level == ""
+            ):
                 break
             if pd.notna(chunk_breach_rate):
                 target_coverage_deviation = abs(chunk_breach_rate - miscoverage_level)
             else:
                 target_coverage_deviation = np.nan
             chunked_deviations.iloc[start_idx] = target_coverage_deviation
-            
+
     return chunked_deviations
 
 
-
-def _bootstrap_calibration_group(
-    group_data: pd.DataFrame,
-    score_columns: List[str],
-    n_bootstraps: int,
-    random_state: Optional[int],
-) -> pd.Series:
-    """Bootstrap aggregation for calibration score groups.
-
-    Args:
-        group_data: Data for a single group.
-        score_columns: List of score column names to process.
-        n_bootstraps: Number of bootstrap samples.
-        random_state: Random seed for reproducible results.
-
-    Returns:
-        Series with bootstrap statistics for each score column.
-    """
-    results = {}
-    for score_col in score_columns:
-        score_values = group_data[score_col].values
-
-        if len(score_values) > 5:
-            # Bootstrap the observations
-            bootstrap_result = bootstrap_aggregate(
-                pd.Series(score_values), n_bootstraps, random_state
-            )
-            results[f"{score_col}_mean"] = bootstrap_result["value"]
-            results[f"{score_col}_lower"] = bootstrap_result["q10"]
-            results[f"{score_col}_upper"] = bootstrap_result["q90"]
-        else:
-            # No observations
-            results[f"{score_col}_mean"] = np.mean(score_values)
-            results[f"{score_col}_lower"] = np.nan
-            results[f"{score_col}_upper"] = np.nan
-
-    return pd.Series(results)
-
-
-def calculate_calibration_statistics(
+def calculate_calibration_statistics_per_repetition(
     raw_benchmark_data: pd.DataFrame,
     aggregators: List[str],
-    repetition_column: str,
     breach_column: str,
     entity_column: str,
     metric_columns: List[str],
     budget_unit: str,
-    n_bootstraps: int = 1000,
     random_state: Optional[int] = None,
     rank_metrics: bool = False,
 ) -> pd.DataFrame:
@@ -488,7 +307,7 @@ def calculate_calibration_statistics(
     ).reset_index(drop=True)
 
     sorted_experiment_log["chunked_target_coverage_deviation"] = (
-        sorted_experiment_log.groupby(aggregators, as_index=False)
+        sorted_experiment_log.groupby(aggregators)
         .apply(
             lambda group: _calculate_chunked_target_coverage_deviation(
                 group, breach_column
@@ -501,7 +320,9 @@ def calculate_calibration_statistics(
     score_columns = [col for col in metric_columns if col != "llr_statistic"]
 
     avg_scores_per_repetition = (
-        sorted_experiment_log.groupby(aggregators)[score_columns].mean().reset_index()
+        sorted_experiment_log.groupby(aggregators)
+        .agg({col: "mean" for col in score_columns})
+        .reset_index()
     )
 
     if "llr_statistic" in metric_columns:
@@ -520,27 +341,17 @@ def calculate_calibration_statistics(
         )
 
         score_columns.append("llr_statistic")
-    
-    # NOTE: Rank is computed after raw scores are averaged across iterations (differes from search results)
+
+    # NOTE: Rank is computed after raw scores are averaged across iterations (differs from search results)
     if rank_metrics:
         for metric_column in score_columns:
             rank_ascending = True
             rank_groupers = [col for col in aggregators if col != entity_column]
-            avg_scores_per_repetition[metric_column] = avg_scores_per_repetition.groupby(rank_groupers)[metric_column].rank(
-                method="average", ascending=rank_ascending
+            avg_scores_per_repetition[
+                metric_column
+            ] = avg_scores_per_repetition.groupby(rank_groupers)[metric_column].rank(
+                method="average",
+                ascending=rank_ascending,
             )
 
-    bootstrap_aggregators = [col for col in aggregators if col != repetition_column]
-    summary_statistics = (
-        avg_scores_per_repetition.groupby(bootstrap_aggregators)
-        .apply(
-            _bootstrap_calibration_group,
-            score_columns=score_columns,
-            n_bootstraps=n_bootstraps,
-            random_state=random_state,
-        )
-        .reset_index()
-    )
-
-    return summary_statistics
-
+    return avg_scores_per_repetition

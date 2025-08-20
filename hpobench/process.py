@@ -2,12 +2,8 @@ import pandas as pd
 import numpy as np
 import logging
 from copy import deepcopy
-from typing import Dict, List, Optional, Any
+from typing import List
 
-from hpobench.utils import (
-    q10,
-    q90,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -69,29 +65,20 @@ def collapse_per_budget(
 
     aggregations = {}
     for metric in metrics:
-        aggregations[metric] = [
-            ("mean", "mean"),
-            ("q10", q10),
-            ("q90", q90),
-        ]
+        aggregations[metric] = "mean"
 
     processed_benchmark_data = data_cleaned.groupby(
         groupby_columns, as_index=False
     ).agg(aggregations)
 
-    new_columns = []
-    for col in processed_benchmark_data.columns:
-        if isinstance(col, tuple):
-            metric, agg_name = col
-            if agg_name == "mean":
-                new_columns.append(metric)
-            elif agg_name in ["q10", "q90"]:
-                new_columns.append(f"{metric}_{agg_name}")
-            else:
-                new_columns.append(metric)
-        else:
-            new_columns.append(col)
-    processed_benchmark_data.columns = new_columns
+    # Remove '_mean' suffix from aggregated metric columns
+    rename_dict = {
+        f"{metric}_mean": metric
+        for metric in metrics
+        if f"{metric}_mean" in processed_benchmark_data.columns
+    }
+    processed_benchmark_data = processed_benchmark_data.rename(columns=rename_dict)
+
     return processed_benchmark_data
 
 
@@ -101,6 +88,7 @@ def accumulate_breaches(
     budget_unit: str,
     breach_column: str,
     rolling_breach_count: int,
+    confidence_column: str,
 ) -> pd.DataFrame:
     """
     Tracks cumulative and rolling breach rates for HPO constraint violations.
@@ -115,9 +103,10 @@ def accumulate_breaches(
         budget_unit: Budget progression column ('iteration' or 'runtime').
         breach_column: Boolean column indicating constraint violations.
         rolling_breach_count: Window size for rolling breach rate calculation.
+        confidence_column: Column containing confidence level values.
 
     Returns:
-        Data with cumulative, rolling breach rate, and chunked target coverage deviation columns added.
+        Data with cumulative, rolling breach rate, and coverage error columns added.
     """
     data_cleaned = validate_groupby_columns(data, aggregators)
 
@@ -137,6 +126,20 @@ def accumulate_breaches(
         .mean()
         .reset_index(level=aggregators, drop=True)
     )
+
+    if (~sorted_experiment_log[confidence_column].isin([None, ""])).all():
+        # Calculate coverage errors
+        sorted_experiment_log["cumulative_coverage_error"] = abs(
+            (1 - sorted_experiment_log["cumulative_breach_rate"])
+            - sorted_experiment_log[confidence_column].astype(float)
+        )
+        sorted_experiment_log["rolling_coverage_error"] = abs(
+            (1 - sorted_experiment_log["rolling_breach_rate"])
+            - sorted_experiment_log[confidence_column].astype(float)
+        )
+    else:
+        sorted_experiment_log["cumulative_coverage_error"] = np.nan
+        sorted_experiment_log["rolling_coverage_error"] = np.nan
 
     return sorted_experiment_log
 
@@ -415,88 +418,6 @@ def align_tuners(
     return data_cleaned
 
 
-def bootstrap_aggregate(
-    group_data: pd.Series, n_bootstraps: int, random_state: Optional[int]
-) -> Dict[str, float]:
-    """
-    Estimates confidence intervals using bootstrap resampling.
-
-    Computes robust statistical estimates with uncertainty quantification
-    for small sample sizes common in HPO experiments. Provides mean estimates
-    with 10th and 90th percentile confidence bounds.
-
-    Args:
-        group_data: Performance values to aggregate.
-        n_bootstraps: Number of bootstrap samples for confidence estimation.
-        random_state: Random seed for reproducible results.
-
-    Returns:
-        Dictionary with mean value and confidence interval bounds (q10, q90).
-    """
-    if len(group_data) == 0:
-        return {"value": float("nan"), "q10": float("nan"), "q90": float("nan")}
-    sample_mean = float(np.mean(group_data))
-    np.random.seed(random_state)
-    bootstrap_means = []
-    for _ in range(n_bootstraps):
-        bootstrap_sample = np.random.choice(
-            group_data, size=len(group_data), replace=True
-        )
-        bootstrap_means.append(float(np.mean(bootstrap_sample)))
-    return {
-        "value": sample_mean,
-        "q10": float(np.percentile(bootstrap_means, 10)),
-        "q90": float(np.percentile(bootstrap_means, 90)),
-    }
-
-
-def aggregate_benchmark_data(
-    data: pd.DataFrame,
-    aggregators: List[str],
-    metrics: List[str],
-    n_bootstraps: int,
-    random_state: int,
-) -> pd.DataFrame:
-    """
-    Produces final benchmark summaries with statistical confidence bounds.
-
-    Aggregates multiple experimental repetitions into robust statistical
-    summaries using bootstrap resampling. Creates publication-ready data
-    with uncertainty estimates for downstream analysis and visualization.
-
-    Args:
-        data: HPO benchmark data with multiple repetitions.
-        aggregators: Grouping columns for aggregation context.
-        metrics: Performance metrics to summarize.
-        n_bootstraps: Number of bootstrap samples for confidence estimation.
-        random_state: Random seed for reproducible statistical estimates.    Returns:
-        Summary data with mean values and confidence intervals for each metric.
-    """
-    data_cleaned = validate_groupby_columns(data, aggregators)
-
-    results = []
-    grouped = data_cleaned.groupby(aggregators)
-
-    for group_name, group_data in grouped:
-        group_keys = group_name if isinstance(group_name, tuple) else (group_name,)
-        group_result: Dict[str, Any] = dict(zip(aggregators, group_keys))
-
-        for metric in metrics:
-            if metric in group_data.columns:
-                valid_data = group_data[metric].dropna()
-                bootstrap_stats = bootstrap_aggregate(
-                    valid_data,
-                    n_bootstraps=n_bootstraps,
-                    random_state=random_state,
-                )
-                group_result[f"{metric}"] = bootstrap_stats["value"]
-                group_result[f"{metric}_q10"] = bootstrap_stats["q10"]
-                group_result[f"{metric}_q90"] = bootstrap_stats["q90"]
-        results.append(group_result)
-
-    return pd.DataFrame(results)
-
-
 def process_performance_records(
     raw_benchmark_data: pd.DataFrame,
     aggregators: List[str],
@@ -595,6 +516,7 @@ def process_performance_records(
             budget_unit=budget_unit,
             breach_column="breach_status",
             rolling_breach_count=30,
+            confidence_column="confidence_level",
         )
     elif budget_unit == "runtime":
         discretized_benchmark_data_time = time_discretize_benchmark_data(
@@ -619,36 +541,14 @@ def process_performance_records(
             metric_column="best_performance",
         )
     if relativize_budget:
-        standardized_performance_data = standardize_budget_unit(
+        aggregated_data = standardize_budget_unit(
             data=aggregated_data,
             aggregators=aggregators,
             budget_unit=budget_unit,
             metrics_to_keep=["rank", "best_performance"],
         )
-        metrics = ["rank", "best_performance"]
-        collapsed_performance_data = collapse_per_budget(
-            data=standardized_performance_data,
-            aggregators=alignment_columns,
-            metrics=metrics,
-            budget_unit=f"normalized_{budget_unit}",
-        )
-    else:
-        if budget_unit == "iteration":
-            metrics = [
-                "rank",
-                "best_performance",
-                "cumulative_breach_rate",
-                "rolling_breach_rate",
-            ]
-        else:
-            metrics = ["rank", "best_performance"]
-        collapsed_performance_data = collapse_per_budget(
-            data=aggregated_data,
-            aggregators=alignment_columns,
-            metrics=metrics,
-            budget_unit=budget_unit,
-        )
-    return collapsed_performance_data
+
+    return aggregated_data
 
 
 def rank_and_collapse_data(

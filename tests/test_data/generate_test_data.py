@@ -14,150 +14,13 @@ from hpobench.process import (
     collapse_per_budget,
     accumulate_breaches,
 )
+import pytest
 
 # Ensure we use the local development version
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 JSON_EXT = ".json"
 CSV_EXT = ".csv"
-
-
-def create_dummy_data():
-    data = {
-        "performance": [
-            -83.3992,
-            -91.3902,
-            -89.9583,
-            -88.5413,
-            -79.0829,
-            -87.9277,
-            -80.241,
-            -87.4604,
-            -84.0319,
-            -71.6547,
-            -89.9583,
-            -88.5413,
-            -79.0829,
-            -83.757,
-            -81.358,
-            -87.4604,
-            -84.0319,
-            -71.6547,
-            -84.2562,
-            -84.0319,
-            -71.6547,
-            -89.9583,
-            -88.5413,
-            -79.0829,
-            -88.5413,
-            -79.0829,
-            -83.757,
-        ],
-        "iteration": [
-            1,
-            2,
-            3,
-            4,
-            5,
-            6,
-            1,
-            2,
-            3,
-            4,
-            1,
-            2,
-            3,
-            4,
-            5,
-            1,
-            2,
-            3,
-            4,
-            1,
-            2,
-            1,
-            2,
-            1,
-            2,
-            1,
-            2,
-        ],
-        "breach_status": [
-            np.nan,
-            1,
-            0,
-            0,
-            1,
-            1,
-            0,
-            0,
-            1,
-            1,
-            np.nan,
-            np.nan,
-            np.nan,
-            np.nan,
-            np.nan,
-            np.nan,
-            np.nan,
-            np.nan,
-            np.nan,
-            np.nan,
-            np.nan,
-            np.nan,
-            np.nan,
-            np.nan,
-            np.nan,
-            np.nan,
-            np.nan,
-        ],
-        "runtime": [
-            256.8546,
-            257.8,
-            259.8,
-            259.9,
-            260,
-            260.1,
-            254.2,
-            257.5,
-            258,
-            259,
-            257.1,
-            258.2,
-            258.3,
-            258.5,
-            259.1,
-            256,
-            257.2,
-            258.5,
-            258.9,
-            50,
-            50.5,
-            50.1,
-            52,
-            50.3,
-            52.2,
-            50.3,
-            50.8,
-        ],
-        "benchmark_identifier": ["lcbench"] * 19 + ["nahs201"] * 8,
-        "dataset": [3945] * 19 + ["cifar10"] * 8,
-        "tuner": ["GBRT"] * 10 + ["TPE"] * 9 + ["GBRT"] * 4 + ["TPE"] * 4,
-        "repetition": [1] * 6
-        + [2] * 4
-        + [1] * 5
-        + [2] * 4
-        + [1] * 2
-        + [2] * 2
-        + [1] * 2
-        + [2] * 2,
-        "sampler": ["gbrt"] * 10 + ["tpe"] * 9 + ["gbrt"] * 4 + ["tpe"] * 4,
-        "confidence_level": [None]
-        * 27,  # Non-confopt tuners have None confidence level
-        "estimator_architecture": [None]
-        * 27,  # Non-confopt tuners have None estimator architecture
-    }
-    return pd.DataFrame(data)
 
 
 def save_dataframe(df, filename):
@@ -195,12 +58,16 @@ def load_dataframe(filename):
     return df
 
 
-def generate_test_data():
+pytestmark = pytest.mark.manual
+
+
+@pytest.mark.manual
+def test_generate_test_data(dummy_processing_raw_data):
     # Use current directory for test data files
     test_data_dir = Path(".")
 
-    # Initialize test data
-    raw_data = create_dummy_data()
+    # Use dummy_processing_raw_data fixture for test data
+    raw_data = dummy_processing_raw_data
 
     # Common parameters - exactly as defined in process_performance_records
     grouping_columns = [
@@ -224,7 +91,7 @@ def generate_test_data():
         if col in raw_data.columns:
             raw_data[col] = raw_data[col].fillna("")
 
-    save_dataframe_all_formats(raw_data, test_data_dir / "dummy_experiment_data")
+    save_dataframe_all_formats(raw_data, test_data_dir / "dummy_processing_raw_data")
 
     # Derived columns exactly as in process_performance_records
     alignment_columns = deepcopy(grouping_columns)
@@ -286,6 +153,7 @@ def generate_test_data():
         budget_unit=budget_unit,
         breach_column="breach_status",
         rolling_breach_count=10,
+        confidence_column="confidence_level",
     )
     save_dataframe_all_formats(
         accumulated_breaches, test_data_dir / "accumulated_breaches_iteration"
@@ -419,7 +287,3 @@ def generate_test_data():
     )
 
     print("Test data generation completed successfully!")
-
-
-if __name__ == "__main__":
-    generate_test_data()

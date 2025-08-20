@@ -3,7 +3,6 @@ from confopt.selection.acquisition import (
 )
 from confopt.selection.sampling.bound_samplers import (
     LowerBoundSampler,
-    PessimisticLowerBoundSampler,
 )
 from confopt.selection.sampling.entropy_samplers import MaxValueEntropySearchSampler
 from confopt.selection.sampling.expected_improvement_samplers import (
@@ -51,7 +50,7 @@ for interval_width in COVERAGE_INTERVAL_WIDTHS:
         SEARCHER = QuantileConformalSearcher(
             quantile_estimator_architecture="qgbm",
             sampler=SAMPLER,
-            n_calibration_folds=3,
+            n_calibration_folds=5,
             calibration_split_strategy="train_test_split",
             symmetric_adjustment=True,
         )
@@ -70,27 +69,27 @@ for interval_width in COVERAGE_INTERVAL_WIDTHS:
             )
         )
 
-        SEARCHER = QuantileConformalSearcher(
-            quantile_estimator_architecture="qgbm",
-            sampler=SAMPLER,
-            n_calibration_folds=5,
-            calibration_split_strategy="cv",
-            symmetric_adjustment=True,
-        )
-        if adapter is None:
-            config_identifier = "Cross Validated"
-        elif adapter in ["ACI", "DtACI"]:
-            config_identifier = f"Cross Validated + {adapter}"
-        else:
-            raise ValueError(f"Unknown adapter: {adapter}")
-        COVERAGE_ANALYSIS_CONFIGURATIONS.append(
-            TunerConfig(
-                tuner="confopt",
-                searcher=SEARCHER,
-                config_identifier=config_identifier,
-                searcher_tuning_framework=None,
-            )
-        )
+        # SEARCHER = QuantileConformalSearcher(
+        #     quantile_estimator_architecture="qgbm",
+        #     sampler=SAMPLER,
+        #     n_calibration_folds=5,
+        #     calibration_split_strategy="cv",
+        #     symmetric_adjustment=True,
+        # )
+        # if adapter is None:
+        #     config_identifier = "Cross Validated"
+        # elif adapter in ["ACI", "DtACI"]:
+        #     config_identifier = f"Cross Validated + {adapter}"
+        # else:
+        #     raise ValueError(f"Unknown adapter: {adapter}")
+        # COVERAGE_ANALYSIS_CONFIGURATIONS.append(
+        #     TunerConfig(
+        #         tuner="confopt",
+        #         searcher=SEARCHER,
+        #         config_identifier=config_identifier,
+        #         searcher_tuning_framework=None,
+        #     )
+        # )
 
     # Manually add the unconformalized configuration for each interval width:
     COVERAGE_ANALYSIS_CONFIGURATIONS.append(
@@ -125,27 +124,27 @@ SAMPLER_VARIATION_CONFIGURATIONS = build_sampler_variation_configurations(
             n_y_candidates_per_x=100,  # Should be 1000, but too slow
             entropy_method="distance",
         ),
-        LowerBoundSampler(
-            interval_width=DEFAULT_INTERVAL_WIDTH,
-            adapter=SAMPLER_VARIATION_DEFAULT_ADAPTER,
-            c=2,
-            beta_decay="logarithmic_decay",
-        ),
-        LowerBoundSampler(
-            interval_width=DEFAULT_INTERVAL_WIDTH,
-            adapter=SAMPLER_VARIATION_DEFAULT_ADAPTER,
-            c=1,
-            beta_decay="logarithmic_decay",
-        ),
-        PessimisticLowerBoundSampler(
-            interval_width=DEFAULT_INTERVAL_WIDTH,
-            adapter=SAMPLER_VARIATION_DEFAULT_ADAPTER,
-        ),
-        ExpectedImprovementSampler(
-            n_quantiles=SAMPLER_VARIATION_N_DEFAULT_QUANTILES,
-            num_ei_samples=1000,
-            adapter=SAMPLER_VARIATION_DEFAULT_ADAPTER,
-        ),
+        # LowerBoundSampler(
+        #     interval_width=DEFAULT_INTERVAL_WIDTH,
+        #     adapter=SAMPLER_VARIATION_DEFAULT_ADAPTER,
+        #     c=2,
+        #     beta_decay="logarithmic_decay",
+        # ),
+        # LowerBoundSampler(
+        #     interval_width=DEFAULT_INTERVAL_WIDTH,
+        #     adapter=SAMPLER_VARIATION_DEFAULT_ADAPTER,
+        #     c=1,
+        #     beta_decay="logarithmic_decay",
+        # ),
+        # PessimisticLowerBoundSampler(
+        #     interval_width=DEFAULT_INTERVAL_WIDTH,
+        #     adapter=SAMPLER_VARIATION_DEFAULT_ADAPTER,
+        # ),
+        # ExpectedImprovementSampler(
+        #     n_quantiles=SAMPLER_VARIATION_N_DEFAULT_QUANTILES,
+        #     num_ei_samples=1000,
+        #     adapter=SAMPLER_VARIATION_DEFAULT_ADAPTER,
+        # ),
         ThompsonSampler(
             n_quantiles=SAMPLER_VARIATION_N_DEFAULT_QUANTILES,
             enable_optimistic_sampling=False,
@@ -166,20 +165,20 @@ ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurati
     architectures=[
         # "qgp",
         "ql",
-        "qrf",
+        # "qrf",
         "qgbm",
         "qens3",
         # "qens4",
     ],
     samplers=[
-        ExpectedImprovementSampler(
-            n_quantiles=ARCHITECTURE_VARIATION_N_QUANTILES,
-            num_ei_samples=1000,
-            adapter=ARCHITECTURE_VARIATION_ADAPTER,
-        ),
+        # ExpectedImprovementSampler(
+        #     n_quantiles=ARCHITECTURE_VARIATION_N_QUANTILES,
+        #     num_ei_samples=1000,
+        #     adapter=ARCHITECTURE_VARIATION_ADAPTER,
+        # ),
         ThompsonSampler(
             n_quantiles=ARCHITECTURE_VARIATION_N_QUANTILES,
-            enable_optimistic_sampling=False,
+            enable_optimistic_sampling=True,
             adapter=ARCHITECTURE_VARIATION_ADAPTER,
         ),
         # MaxValueEntropySearchSampler(
@@ -196,11 +195,12 @@ LIMITED_ARCHITECTURE_ADAPTER = "DtACI"
 LIMITED_ARCHITECTURE_N_QUANTILES = 4
 LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurations(
     architectures=[
-        "qrf",
+        # "qrf",
         # "qgp",
+        # "ql",
         "qgbm",
-        # "qens3",
-        # "qens4",
+        "qens3",
+        "qens4",
     ],
     samplers=[
         ThompsonSampler(
@@ -213,33 +213,14 @@ LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_con
     searcher_tuning_framework=None,
 )
 
-LIMITED_ARCHITECTURE_N_QUANTILES = 10
-LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS.extend(
-    build_architecture_variation_configurations(
-        architectures=[
-            # "qrf",
-            # "qens4",
-        ],
-        samplers=[
-            ThompsonSampler(
-                n_quantiles=SAMPLER_VARIATION_N_DEFAULT_QUANTILES,
-                enable_optimistic_sampling=True,
-                adapter=SAMPLER_VARIATION_DEFAULT_ADAPTER,
-            )
-        ],
-        n_pre_conformal_trials=32,
-        searcher_tuning_framework="fixed",
-    )
-)
-
 
 PRECONFORMAL_ADAPTER = "DtACI"
 PRECONFORMAL_N_QUANTILES = 4
 PRECONFORMAL_COMPARISON_CONFIGURATIONS = []
 for architecture in [
     # "qgp",
-    # "ql",
-    "qgbm",
+    "ql",
+    # "qgbm",
     "qrf",
 ]:
     # Simulate normal pre-conformal cutoff vs. unreachable one:
@@ -255,19 +236,19 @@ for architecture in [
                     ExpectedImprovementSampler(
                         n_quantiles=PRECONFORMAL_N_QUANTILES,
                         num_ei_samples=1000,
-                        adapter=PRECONFORMAL_ADAPTER,
+                        adapter=adapter,
                     ),
-                    MaxValueEntropySearchSampler(
-                        n_quantiles=PRECONFORMAL_N_QUANTILES,
-                        adapter=PRECONFORMAL_ADAPTER,
-                        n_paths=1000,
-                        n_y_candidates_per_x=100,
-                        entropy_method="distance",
-                    ),
+                    # MaxValueEntropySearchSampler(
+                    #     n_quantiles=PRECONFORMAL_N_QUANTILES,
+                    #     adapter=adapter,
+                    #     n_paths=1000,
+                    #     n_y_candidates_per_x=100,
+                    #     entropy_method="distance",
+                    # ),
                     ThompsonSampler(
                         n_quantiles=PRECONFORMAL_N_QUANTILES,
-                        enable_optimistic_sampling=False,
-                        adapter=PRECONFORMAL_ADAPTER,
+                        enable_optimistic_sampling=True,
+                        adapter=adapter,
                     ),
                 ],
                 n_pre_conformal_trials=pre_conformal_trials,
@@ -297,13 +278,13 @@ for n_quantiles in QUANTILE_COUNT_VALUES:
                     num_ei_samples=1000,
                     adapter=QUANTILE_COUNT_VARIATION_ADAPTER,
                 ),
-                MaxValueEntropySearchSampler(
-                    n_quantiles=n_quantiles,
-                    adapter=QUANTILE_COUNT_VARIATION_ADAPTER,
-                    n_paths=1000,
-                    n_y_candidates_per_x=100,
-                    entropy_method="distance",
-                ),
+                # MaxValueEntropySearchSampler(
+                #     n_quantiles=n_quantiles,
+                #     adapter=QUANTILE_COUNT_VARIATION_ADAPTER,
+                #     n_paths=1000,
+                #     n_y_candidates_per_x=100,
+                #     entropy_method="distance",
+                # ),
             ],
             n_pre_conformal_trials=32,
             searcher_tuning_framework=None,

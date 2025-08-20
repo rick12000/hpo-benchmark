@@ -1,7 +1,6 @@
 from hpobench.report.metrics import (
     friedman_test_runner,
     nemenyi_pairwise_test,
-    calculate_win_percentage,
 )
 from hpobench.utils import generate_hyperparameter_combinations
 import pandas as pd
@@ -9,17 +8,11 @@ import logging
 import os
 from typing import List, Optional
 
-from hpobench.utils import save_analysis_results, AnalysisPathManager
-from hpobench.process import (
-    aggregate_benchmark_data,
-)
+from hpobench.utils import save_analysis_results, AnalysisPathManager, block_bootstrap
 from hpobench.report.latex import (
     format_nemenyi_results_to_latex,
-    format_win_percentage_to_latex,
-    format_calibration_statistics_to_latex,
     format_calibration_metrics_to_latex,
 )
-
 
 
 def _save_text_content(
@@ -176,19 +169,23 @@ def run_and_save_nemenyi(
 def aggregate_and_save(
     data: pd.DataFrame,
     grouping_cols: List[str],
+    breakout_cols: str,
+    block_cols: List[str],
     metrics: List[str],
     cache_path: str,
     run_start_str: str,
     filename: str,
     analysis_type: str,
 ) -> pd.DataFrame:
-    aggregated_results = aggregate_benchmark_data(
+    aggregated_results = block_bootstrap(
         data=data,
+        breakout_cols=breakout_cols,
+        block_cols=block_cols,
         aggregators=grouping_cols,
-        metrics=metrics,
-        n_bootstraps=100,
-        random_state=1234,
+        metric_cols=metrics,
+        n_bootstraps=1000,
     )
+
     save_analysis_results(
         aggregated_results,
         cache_path,
@@ -200,60 +197,12 @@ def aggregate_and_save(
     return aggregated_results
 
 
-def _run_and_save_win_percentage(
-    data: pd.DataFrame,
-    breakout_cols: List[str],
-    dataset_col: str,
-    entity_col: str,
-    rank_col: str,
-    cache_path: str,
-    run_start_str: str,
-    filename: str,
-    analysis_type: str,
-    subfolder: str = "win_percentages",
-    latex_vertical_separator: Optional[str] = None,
-    latex_comparison_column: Optional[str] = None,
-) -> pd.DataFrame:
-    logger = logging.getLogger(__name__)
-    win_percentage_results = calculate_win_percentage(
-        data=data,
-        breakout_cols=breakout_cols,
-        dataset_col=dataset_col,
-        entity_col=entity_col,
-        rank_col=rank_col,
-    )
-    save_analysis_results(
-        win_percentage_results,
-        cache_path,
-        run_start_str,
-        filename,
-        analysis_type,
-        subfolder,
-    )
-    # Optionally generate LaTeX code for results
-    if latex_vertical_separator and latex_comparison_column:
-        latex_str = format_win_percentage_to_latex(
-            win_percentage_results, latex_vertical_separator, latex_comparison_column
-        )
-        logger.info("Generated LaTeX for win percentage results:\n%s", latex_str)
-
-        # Save LaTeX output to file
-        latex_filename = f"{filename.replace('.csv', '')}_latex.tex"
-        _save_text_content(
-            latex_str,
-            cache_path,
-            run_start_str,
-            latex_filename,
-            analysis_type,
-            "latex_outputs",
-        )
-    return win_percentage_results
-
-
 def run_and_save_calibration_statistics(
     raw_benchmark_data: pd.DataFrame,
     aggregators: List[str],
     repetition_column: str,
+    benchmark_col: str,
+    tuner_column: str,
     breach_column: str,
     dataset_column: str,
     entity_column: str,
@@ -263,7 +212,6 @@ def run_and_save_calibration_statistics(
     run_start_str: str,
     filename: str,
     analysis_type: str,
-    subfolder: str = "coverage",
     latex_layout_breakout_col: Optional[str] = None,
     random_state: int = 42,
 ) -> pd.DataFrame:
@@ -285,114 +233,51 @@ def run_and_save_calibration_statistics(
     Returns:
         DataFrame with calibration statistics
     """
-    from hpobench.report.metrics import calculate_calibration_statistics
+    from hpobench.report.metrics import calculate_calibration_statistics_per_repetition
 
     metric_columns = [
         "winkler_score",
         "width",
         "miscoverage_penalty",
         "chunked_target_coverage_deviation",
-        "llr_statistic"
+        "llr_statistic",
     ]
 
     logger = logging.getLogger(__name__)
 
-    if raw_benchmark_data[dataset_column].nunique() > 1:
+    calibration_stats = calculate_calibration_statistics_per_repetition(
+        raw_benchmark_data=raw_benchmark_data,
+        aggregators=aggregators,
+        breach_column=breach_column,
+        entity_column=entity_column,
+        metric_columns=metric_columns,
+        budget_unit=budget_unit,
+        random_state=random_state,
+        rank_metrics=True,
+    )
+    collapsed_calibration_stats = block_bootstrap(
+        data=calibration_stats,
+        breakout_cols=[benchmark_col],
+        block_cols=[confidence_column, dataset_column],
+        aggregators=[benchmark_col, tuner_column],
+        metric_cols=metric_columns,
+        n_bootstraps=1000,
+    )
 
-        calibration_stats = calculate_calibration_statistics(
-            raw_benchmark_data=raw_benchmark_data,
-            aggregators=aggregators,
-            repetition_column=repetition_column,
-            breach_column=breach_column,
-            entity_column=entity_column,
-            metric_columns=metric_columns,
-            budget_unit=budget_unit,
-            random_state=random_state,
-            rank_metrics=True
+    # Generate LaTeX table for calibration metrics
+    latex_metrics_str = format_calibration_metrics_to_latex(
+        collapsed_calibration_stats,
+        layout_breakout_col=latex_layout_breakout_col,
+    )
+
+    if latex_metrics_str:
+        latex_metrics_filename = f"{filename.replace('.csv', '')}_metrics_latex.tex"
+        _save_text_content(
+            latex_metrics_str,
+            cache_path,
+            run_start_str,
+            latex_metrics_filename,
+            analysis_type,
+            "latex_outputs",
         )
-            
-        # Multiple datasets - save data and create box plots
-        save_analysis_results(
-            df=calibration_stats,
-            cache_path=cache_path,
-            run_start_str=run_start_str,
-            filename=filename,
-            analysis_type=analysis_type,
-            subfolder=subfolder,
-        )
-
-        collapsing_aggregators = [
-            col for col in aggregators if col not in [repetition_column, confidence_column]
-        ]
-        quantile_collapsed_calibration_stats = calibration_stats.groupby(
-            collapsing_aggregators
-        ).mean().reset_index()
-
-
-
-        # Generate LaTeX table for calibration metrics
-        latex_metrics_str = format_calibration_metrics_to_latex(
-            quantile_collapsed_calibration_stats,
-            layout_breakout_col=latex_layout_breakout_col,
-        )
-
-        if latex_metrics_str:
-            latex_metrics_filename = f"{filename.replace('.csv', '')}_metrics_latex.tex"
-            _save_text_content(
-                latex_metrics_str,
-                cache_path,
-                run_start_str,
-                latex_metrics_filename,
-                analysis_type,
-                "latex_outputs",
-            )
-            logger.info("Generated LaTeX table for calibration metrics by entity")
-
-    elif raw_benchmark_data[dataset_column].nunique() == 1:
-
-        calibration_stats = calculate_calibration_statistics(
-            raw_benchmark_data=raw_benchmark_data,
-            aggregators=aggregators,
-            repetition_column=repetition_column,
-            breach_column=breach_column,
-            entity_column=entity_column,
-            metric_columns=metric_columns,
-            budget_unit=budget_unit,
-            random_state=random_state,
-            rank_metrics=False
-        )
-
-        save_analysis_results(
-            df=calibration_stats,
-            cache_path=cache_path,
-            run_start_str=run_start_str,
-            filename=filename,
-            analysis_type=analysis_type,
-            subfolder=subfolder,
-        )
-
-        # Generate LaTeX table for calibration statistics
-        latex_str = format_calibration_statistics_to_latex(
-            calibration_stats,
-            layout_breakout_col=latex_layout_breakout_col,
-        )
-
-        if latex_str:
-            latex_filename = f"{filename.replace('.csv', '')}_latex.tex"
-            _save_text_content(
-                latex_str,
-                cache_path,
-                run_start_str,
-                latex_filename,
-                analysis_type,
-                "latex_outputs",
-            )
-            logger.info("Generated LaTeX table for calibration statistics")
-        else:
-            logger.warning("Failed to generate LaTeX for calibration statistics")
-
-    else:
-        raise ValueError()
-
-
-    return calibration_stats
+        logger.info("Generated LaTeX table for calibration metrics by entity")

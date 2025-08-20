@@ -7,17 +7,16 @@ from hpobench.utils import save_analysis_results
 from hpobench.plot import (
     plot_and_save,
 )
-from hpobench.process import process_performance_records, rank_and_collapse_data
-
-# Import missing functions from metrics.py
-from hpobench.report.metrics import (
-    calculate_coverage_snapshots,
+from hpobench.process import (
+    process_performance_records,
+    rank_and_collapse_data,
+    collapse_per_budget,
 )
+
 from hpobench.report.utils import (
     run_and_save_friedman,
     run_and_save_nemenyi,
     aggregate_and_save,
-    _run_and_save_win_percentage,
     run_and_save_calibration_statistics,
 )
 
@@ -33,7 +32,6 @@ def analyze_main_benchmark(
         Literal[
             "friedman",
             "nemenyi",
-            "win_percentage",
             "coverage",
             "dataset_performances",
             "rank_analysis",
@@ -56,7 +54,6 @@ def analyze_main_benchmark(
 
     The function processes raw benchmark data through multiple analytical lenses:
     - Statistical tests (Friedman, Nemenyi) to assess tuner performance differences
-    - Win percentage calculations for pairwise comparisons
     - Coverage analysis for conformal prediction breach rates
     - Rank-based performance analysis across runtime and iteration budgets
     - Architecture and sampler comparison breakdowns
@@ -80,7 +77,6 @@ def analyze_main_benchmark(
         analysis_components: List of analysis types to execute. Valid options:
             - "friedman": Friedman test for overall statistical significance
             - "nemenyi": Nemenyi post-hoc test for pairwise comparisons
-            - "win_percentage": Win rate calculations between tuners
             - "coverage": Coverage breach rate analysis for conformal prediction
             - "dataset_performances": Per-dataset performance trajectory plots
             - "rank_analysis": Ranking evolution across runtime and iteration budgets
@@ -126,7 +122,7 @@ def analyze_main_benchmark(
 
     # Create broad use processed data:
     # 1. Relativized runtime results:
-    relativized_runtime_results = process_performance_records(
+    cleaned_relative_runtime_results = process_performance_records(
         raw_benchmark_data=raw_benchmark_data,
         aggregators=grouping_cols,
         performance_column=perf_col,
@@ -140,7 +136,7 @@ def analyze_main_benchmark(
     )
 
     # 2. Absolute iteration results:
-    absolute_iteration_results = process_performance_records(
+    cleaned_iterative_results = process_performance_records(
         raw_benchmark_data=raw_benchmark_data,
         aggregators=grouping_cols,
         performance_column=perf_col,
@@ -152,11 +148,17 @@ def analyze_main_benchmark(
         confidence_level_column=confidence_level_col,
         estimator_architecture_column=estimator_architecture_col,
     )
+    cross_repetition_relative_runtime_results = collapse_per_budget(
+        data=cleaned_relative_runtime_results,
+        aggregators=[col for col in grouping_cols if col != rep_col],
+        metrics=["rank", "best_performance"],
+        budget_unit=norm_runtime_unit,
+    )
 
     # Run stratified analysis:
     for budget in budget_cross_sections:
-        budget_data = relativized_runtime_results[
-            relativized_runtime_results[norm_runtime_unit] == budget
+        budget_data = cross_repetition_relative_runtime_results[
+            cross_repetition_relative_runtime_results[norm_runtime_unit] == budget
         ]
 
         # 1. Statistical tests:
@@ -190,20 +192,6 @@ def analyze_main_benchmark(
             nemenyi_df[norm_runtime_unit] = budget
 
         # 2. Win rates:
-        if "win_percentage" in analysis_components:
-            _run_and_save_win_percentage(
-                data=budget_data,
-                breakout_cols=[bench_col],
-                dataset_col=data_col,
-                entity_col=tuner_col,
-                rank_col="rank",
-                cache_path=cache_path,
-                run_start_str=run_start_str,
-                filename=f"tuner_win_percentage_{budget}.csv",
-                analysis_type=analysis_type,
-                latex_vertical_separator=bench_col,
-                latex_comparison_column=tuner_col,
-            )
 
     # Coverage analysis plots:
     if "coverage" in analysis_components:
@@ -211,26 +199,49 @@ def analyze_main_benchmark(
             raw_benchmark_data_adj = raw_benchmark_data[
                 raw_benchmark_data[iter_unit] >= starting_coverage_trial
             ]
-            absolute_iteration_results_adj = process_performance_records(
-                raw_benchmark_data=raw_benchmark_data_adj,
-                aggregators=grouping_cols,
-                performance_column=perf_col,
-                budget_unit=iter_unit,
-                repetition_column=rep_col,
-                tuner_column=tuner_col,
-                relativize_budget=False,
-                sampler_column=sampler_col,
-                confidence_level_column=confidence_level_col,
-                estimator_architecture_column=estimator_architecture_col,
-            )
         else:
             raw_benchmark_data_adj = raw_benchmark_data.copy()
-            absolute_iteration_results_adj = absolute_iteration_results.copy()
+
+        absolute_iteration_results_adj = process_performance_records(
+            raw_benchmark_data=raw_benchmark_data_adj,
+            aggregators=[
+                bench_col,
+                data_col,
+                tuner_col,
+                rep_col,
+                confidence_level_col,
+            ],
+            performance_column=perf_col,
+            budget_unit=iter_unit,
+            repetition_column=rep_col,
+            tuner_column=tuner_col,
+            relativize_budget=False,
+            sampler_column=sampler_col,
+            confidence_level_column=confidence_level_col,
+            estimator_architecture_column=estimator_architecture_col,
+        )
+        data_conf_aggregated_results = aggregate_and_save(
+            data=absolute_iteration_results_adj,
+            grouping_cols=[
+                bench_col,
+                data_col,
+                iter_unit,
+                tuner_col,
+                confidence_level_col,
+            ],
+            breakout_cols=[bench_col, data_col, confidence_level_col],
+            block_cols=[rep_col],
+            metrics=["cumulative_coverage_error", "rolling_coverage_error"],
+            cache_path=cache_path,
+            run_start_str=run_start_str,
+            filename="runtime_aggregated_results.csv",
+            analysis_type=analysis_type,
+        )
 
         plot_and_save(
-            data=absolute_iteration_results_adj,
+            data=data_conf_aggregated_results,
             x_col=iter_unit,
-            y_cols=["cumulative_breach_rate", "rolling_breach_rate"],
+            y_cols=["cumulative_coverage_error", "rolling_coverage_error"],
             entity_col=tuner_col,
             col_measure=confidence_level_col,
             row_measure=data_col,
@@ -239,25 +250,22 @@ def analyze_main_benchmark(
             filename_prefix="coverage_per_dataset",
             analysis_type=analysis_type,
             subfolder="coverage_breach_rates",
-            y_cols_lower=["cumulative_breach_rate_q10", "rolling_breach_rate_q10"],
-            y_cols_upper=["cumulative_breach_rate_q90", "rolling_breach_rate_q90"],
+            y_cols_lower=[
+                "cumulative_coverage_error_lower",
+                "rolling_coverage_error_lower",
+            ],
+            y_cols_upper=[
+                "cumulative_coverage_error_upper",
+                "rolling_coverage_error_upper",
+            ],
             share_y_axis=False,
-        )
-
-        calculate_coverage_snapshots(
-            iteration_data=absolute_iteration_results_adj,
-            relativized_budget_cross_sections=budget_cross_sections,
-            identifier_cols=[bench_col, data_col, tuner_col],
-            iteration_col=iter_unit,
-            confidence_level_col=confidence_level_col,
-            cache_path=cache_path,
-            run_start_str=run_start_str,
-            analysis_type=analysis_type,
         )
 
         run_and_save_calibration_statistics(
             raw_benchmark_data=raw_benchmark_data_adj,
             aggregators=grouping_cols,
+            benchmark_col=bench_col,
+            tuner_column=tuner_col,
             repetition_column=rep_col,
             breach_column="breach_status",
             dataset_column=data_col,
@@ -268,15 +276,30 @@ def analyze_main_benchmark(
             run_start_str=run_start_str,
             filename="calibration_statistics.csv",
             analysis_type=analysis_type,
-            subfolder="coverage",
             latex_layout_breakout_col=None,  # Can be modified to include estimator_architecture if needed
             random_state=42,
         )
 
     # Dataset level analysis:
     if "dataset_performances" in analysis_components:
+        data_aggregated_results = aggregate_and_save(
+            data=cleaned_iterative_results,
+            grouping_cols=[
+                bench_col,
+                data_col,
+                iter_unit,
+                tuner_col,
+            ],
+            breakout_cols=[bench_col, data_col],
+            block_cols=[rep_col],
+            metrics=["rank", "best_performance"],
+            cache_path=cache_path,
+            run_start_str=run_start_str,
+            filename="runtime_aggregated_results.csv",
+            analysis_type=analysis_type,
+        )
         plot_and_save(
-            data=absolute_iteration_results,
+            data=data_aggregated_results,
             x_col=iter_unit,
             y_cols=["best_performance", "rank"],
             entity_col=tuner_col,
@@ -287,8 +310,8 @@ def analyze_main_benchmark(
             filename_prefix="perf_vs_iter",
             analysis_type=analysis_type,
             subfolder="dataset_performances",
-            y_cols_lower=["best_performance_q10", "rank_q10"],
-            y_cols_upper=["best_performance_q90", "rank_q90"],
+            y_cols_lower=["best_performance_lower", "rank_lower"],
+            y_cols_upper=["best_performance_upper", "rank_upper"],
             share_y_axis=False,
         )
 
@@ -296,14 +319,14 @@ def analyze_main_benchmark(
     if "rank_analysis" in analysis_components:
         # Group at benchmark level:
         relativized_runtime_aggregated_results = aggregate_and_save(
-            data=relativized_runtime_results,
+            data=cleaned_relative_runtime_results,
             grouping_cols=[
                 bench_col,
                 norm_runtime_unit,
                 tuner_col,
-                sampler_col,
-                estimator_architecture_col,
             ],
+            breakout_cols=[bench_col],
+            block_cols=[data_col, rep_col],
             metrics=["rank"],
             cache_path=cache_path,
             run_start_str=run_start_str,
@@ -323,21 +346,21 @@ def analyze_main_benchmark(
             filename_prefix="rank_vs_norm_runtime",
             analysis_type=analysis_type,
             subfolder="rank_analysis",
-            y_cols_lower=["rank_q10"],
-            y_cols_upper=["rank_q90"],
+            y_cols_lower=["rank_lower"],
+            y_cols_upper=["rank_upper"],
             share_y_axis=False,
         )
 
         # Group at benchmark level:
         iteration_aggregated_results = aggregate_and_save(
-            data=absolute_iteration_results,
+            data=cleaned_iterative_results,
             grouping_cols=[
                 bench_col,
                 iter_unit,
                 tuner_col,
-                sampler_col,
-                estimator_architecture_col,
             ],
+            breakout_cols=[bench_col],
+            block_cols=[data_col, rep_col],
             metrics=["rank"],
             cache_path=cache_path,
             run_start_str=run_start_str,
@@ -357,8 +380,8 @@ def analyze_main_benchmark(
             filename_prefix="rank_vs_iteration",
             analysis_type=analysis_type,
             subfolder="rank_analysis",
-            y_cols_lower=["rank_q10"],
-            y_cols_upper=["rank_q90"],
+            y_cols_lower=["rank_lower"],
+            y_cols_upper=["rank_upper"],
             share_y_axis=False,
         )
 
@@ -380,8 +403,8 @@ def analyze_main_benchmark(
             filename_prefix="sampler_partitioned_perf_vs_runtime",
             analysis_type=analysis_type,
             subfolder="sampler_comparison",
-            y_cols_lower=["rank_q10"],
-            y_cols_upper=["rank_q90"],
+            y_cols_lower=["rank_lower"],
+            y_cols_upper=["rank_upper"],
             share_y_axis=False,
         )
 
@@ -399,8 +422,8 @@ def analyze_main_benchmark(
             filename_prefix="architecture_partitioned_perf_vs_runtime",
             analysis_type=analysis_type,
             subfolder="architecture_comparison",
-            y_cols_lower=["rank_q10"],
-            y_cols_upper=["rank_q90"],
+            y_cols_lower=["rank_lower"],
+            y_cols_upper=["rank_upper"],
             share_y_axis=False,
         )
 
@@ -440,32 +463,34 @@ def analyze_main_benchmark(
                     )
                 )
 
-                estimator_slice_aggregated_runtime_results = aggregate_and_save(
-                    data=estimator_slice_relativized_runtime_results,
-                    grouping_cols=[
-                        bench_col,
-                        norm_runtime_unit,
-                        tuner_col,
-                        estimator_architecture_col,
-                        sampler_col,
-                    ],
-                    metrics=["rank"],
-                    cache_path=cache_path,
-                    run_start_str=run_start_str,
-                    filename="placeholder.csv",
-                    analysis_type=analysis_type,
-                )
-
                 conformalized_vs_nonconformalized_results = pd.concat(
                     [
                         conformalized_vs_nonconformalized_results,
-                        estimator_slice_aggregated_runtime_results,
+                        estimator_slice_relativized_runtime_results,
                     ]
                 )
 
+        aggregated_conformalized_vs_nonconformalized_results = aggregate_and_save(
+            data=conformalized_vs_nonconformalized_results,
+            grouping_cols=[
+                bench_col,
+                norm_runtime_unit,
+                tuner_col,
+                estimator_architecture_col,
+                sampler_col,
+            ],
+            breakout_cols=[bench_col],
+            block_cols=[data_col, rep_col],
+            metrics=["rank"],
+            cache_path=cache_path,
+            run_start_str=run_start_str,
+            filename="placeholder.csv",
+            analysis_type=analysis_type,
+        )
+
         # Architecture partitioned plots (each ranking conf vs. unconf):
         plot_and_save(
-            data=conformalized_vs_nonconformalized_results,
+            data=aggregated_conformalized_vs_nonconformalized_results,
             x_col=norm_runtime_unit,
             y_cols=["rank"],
             entity_col=tuner_col,
@@ -476,8 +501,8 @@ def analyze_main_benchmark(
             filename_prefix="perf_vs_runtime_n_pre_conformal_trials",
             analysis_type=analysis_type,
             subfolder="conformalization_effect",
-            y_cols_lower=["rank_q10"],
-            y_cols_upper=["rank_q90"],
+            y_cols_lower=["rank_lower"],
+            y_cols_upper=["rank_upper"],
             share_y_axis=False,
         )
 
@@ -507,32 +532,34 @@ def analyze_main_benchmark(
                 estimator_architecture_column=estimator_architecture_col,
             )
 
-            sampler_slice_aggregated_runtime_results = aggregate_and_save(
-                data=sampler_slice_relativized_runtime_results,
-                grouping_cols=[
-                    bench_col,
-                    norm_runtime_unit,
-                    tuner_col,
-                    estimator_architecture_col,
-                    sampler_col,
-                ],
-                metrics=["rank"],
-                cache_path=cache_path,
-                run_start_str=run_start_str,
-                filename="quantile_count_comparison_results.csv",
-                analysis_type=analysis_type,
-            )
-
             quantile_count_comparison_results = pd.concat(
                 [
                     quantile_count_comparison_results,
-                    sampler_slice_aggregated_runtime_results,
+                    sampler_slice_relativized_runtime_results,
                 ]
             )
 
+        aggregated_quantile_count_comparison_results = aggregate_and_save(
+            data=quantile_count_comparison_results,
+            grouping_cols=[
+                bench_col,
+                norm_runtime_unit,
+                tuner_col,
+                estimator_architecture_col,
+                sampler_col,
+            ],
+            breakout_cols=[bench_col],
+            block_cols=[data_col, rep_col],
+            metrics=["rank"],
+            cache_path=cache_path,
+            run_start_str=run_start_str,
+            filename="quantile_count_comparison_results.csv",
+            analysis_type=analysis_type,
+        )
+
         # Sampler partitioned plots (each column showing different samplers with quantile variations):
         plot_and_save(
-            data=quantile_count_comparison_results,
+            data=aggregated_quantile_count_comparison_results,
             x_col=norm_runtime_unit,
             y_cols=["rank"],
             entity_col=tuner_col,
@@ -543,8 +570,8 @@ def analyze_main_benchmark(
             filename_prefix="perf_vs_runtime_quantile_count_variation",
             analysis_type=analysis_type,
             subfolder="quantile_count_comparison",
-            y_cols_lower=["rank_q10"],
-            y_cols_upper=["rank_q90"],
+            y_cols_lower=["rank_lower"],
+            y_cols_upper=["rank_upper"],
             share_y_axis=False,
         )
 
@@ -578,33 +605,34 @@ def analyze_main_benchmark(
                     estimator_architecture_column=estimator_architecture_col,
                 )
             )
-
-            architecture_slice_aggregated_runtime_results = aggregate_and_save(
-                data=architecture_slice_relativized_runtime_results,
-                grouping_cols=[
-                    bench_col,
-                    norm_runtime_unit,
-                    tuner_col,
-                    estimator_architecture_col,
-                    sampler_col,
-                ],
-                metrics=["rank"],
-                cache_path=cache_path,
-                run_start_str=run_start_str,
-                filename="search_tuning_effect_comparison_results.csv",
-                analysis_type=analysis_type,
-            )
-
             search_tuning_effect_comparison_results = pd.concat(
                 [
                     search_tuning_effect_comparison_results,
-                    architecture_slice_aggregated_runtime_results,
+                    architecture_slice_relativized_runtime_results,
                 ]
             )
 
+        aggregated_search_tuning_effect_comparison_results = aggregate_and_save(
+            data=search_tuning_effect_comparison_results,
+            grouping_cols=[
+                bench_col,
+                norm_runtime_unit,
+                tuner_col,
+                estimator_architecture_col,
+                sampler_col,
+            ],
+            breakout_cols=[bench_col],
+            block_cols=[data_col, rep_col],
+            metrics=["rank"],
+            cache_path=cache_path,
+            run_start_str=run_start_str,
+            filename="search_tuning_effect_comparison_results.csv",
+            analysis_type=analysis_type,
+        )
+
         # Architecture partitioned plots (each column showing different architectures with tuning framework variations):
         plot_and_save(
-            data=search_tuning_effect_comparison_results,
+            data=aggregated_search_tuning_effect_comparison_results,
             x_col=norm_runtime_unit,
             y_cols=["rank"],
             entity_col=tuner_col,
@@ -615,8 +643,8 @@ def analyze_main_benchmark(
             filename_prefix="perf_vs_runtime_search_tuning_effect",
             analysis_type=analysis_type,
             subfolder="search_tuning_effect_comparison",
-            y_cols_lower=["rank_q10"],
-            y_cols_upper=["rank_q90"],
+            y_cols_lower=["rank_lower"],
+            y_cols_upper=["rank_upper"],
             share_y_axis=False,
         )
 
@@ -742,6 +770,8 @@ def analyze_searcher_tuning_effect(
     aggregated_df = aggregate_and_save(
         data=filtered_df,
         grouping_cols=aggregation_columns,
+        breakout_cols=[bench_col, data_size_col, tuning_iterations_column],
+        block_cols=[data_col, repetition_column],
         metrics=["rank"],
         cache_path=cache_path,
         run_start_str=run_start_str,
@@ -761,8 +791,8 @@ def analyze_searcher_tuning_effect(
         subfolder="tuning_effect",
         col_measure=data_size_col,
         row_measure=bench_col,
-        y_cols_lower=["rank_q10"],
-        y_cols_upper=["rank_q90"],
+        y_cols_lower=["rank_lower"],
+        y_cols_upper=["rank_upper"],
         share_y_axis=False,
     )
 
@@ -895,6 +925,8 @@ def analyze_searcher_estimator_comparison(
     aggregated_df = aggregate_and_save(
         data=filtered_df,
         grouping_cols=aggregation_columns,
+        breakout_cols=[bench_col, data_size_col],
+        block_cols=[data_col, repetition_column],
         metrics=["rank"],
         cache_path=cache_path,
         run_start_str=run_start_str,
@@ -913,7 +945,7 @@ def analyze_searcher_estimator_comparison(
         subfolder="estimator_comparison",
         col_measure=bench_col,
         row_measure=None,
-        y_cols_lower=["rank_q10"],
-        y_cols_upper=["rank_q90"],
+        y_cols_lower=["rank_lower"],
+        y_cols_upper=["rank_upper"],
         share_y_axis=False,
     )

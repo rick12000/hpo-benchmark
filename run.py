@@ -9,6 +9,8 @@ from hpobench.config.config import (
     N_WARM_STARTS,
     TIMEOUT,
     STATIC_ANALYSIS_ESTIMATOR_ARCHITECTURES,
+    QUANTILE_COUNT_VARIATION_CONFIGURATIONS,
+    SEARCH_TUNING_EFFECT_CONFIGURATIONS,
 )
 from hpobench.report.analyze import (
     analyze_searcher_tuning_effect,
@@ -26,12 +28,14 @@ BASE_RANDOM_STATE = 42
 
 # Granular run section control
 run_sections = {
-    "run_coverage_analysis": True,
+    "run_coverage_analysis": False,
     "run_sampler_variation_analysis": False,
     "run_architecture_variation_analysis": False,
     "run_external_tuning_analysis": False,
     "run_preconformal_comparison_analysis": False,
     "run_static_analysis": False,
+    "run_quantile_count_comparison": False,
+    "run_search_tuning_effect_comparison": True,
 }
 
 CACHE_PATH = "cache/"
@@ -40,9 +44,9 @@ DEFAULT_MAX_N_INSTANCES = 20
 STATIC_DATA_SIZES = [50, 100, 500]
 TUNING_ITERATIONS = [0, 20]
 N_COVERAGE_TRIALS = 100
-SMALL_N_REPETITIONS_PER_TUNER_CONFIG = 5
-MEDIUM_N_REPETITIONS_PER_TUNER_CONFIG = 5
-LARGE_N_REPETITIONS_PER_TUNER_CONFIG = 5
+SMALL_N_REPETITIONS_PER_TUNER_CONFIG = 10
+MEDIUM_N_REPETITIONS_PER_TUNER_CONFIG = 10
+LARGE_N_REPETITIONS_PER_TUNER_CONFIG = 10
 
 if __name__ == "__main__":
     # Coverage Analysis
@@ -106,10 +110,10 @@ if __name__ == "__main__":
     if run_sections["run_external_tuning_analysis"]:
         raw_benchmark_data = run_and_analyze_main_benchmark(
             benchmarks=[
-                "jahs201",
+                # "jahs201",
                 "lcbench_large",
-                "lcbench_heteroscedastic",
-                "nas301",  # Uncomment to include NAS-301 benchmark
+                # "lcbench_heteroscedastic",
+                # "nas301",  # Uncomment to include NAS-301 benchmark
                 # "rbv2_xgboost_large",
             ],  # , "lcbench_large", "lcbench_heteroscedastic"],
             tuning_configurations=LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS
@@ -126,7 +130,6 @@ if __name__ == "__main__":
             analysis_components=[
                 "friedman",
                 "nemenyi",
-                "win_percentage",
                 "rank_analysis",
                 "dataset_performances",
             ],
@@ -153,8 +156,51 @@ if __name__ == "__main__":
             analysis_components=[
                 "friedman",
                 "nemenyi",
-                "win_percentage",
                 "conformalization_effect",
+            ],
+        )
+
+    if run_sections["run_quantile_count_comparison"]:
+        raw_benchmark_data = run_and_analyze_main_benchmark(
+            benchmarks=[
+                # "jahs201",
+                "lcbench_large",
+                # "lcbench_heteroscedastic",
+            ],
+            tuning_configurations=QUANTILE_COUNT_VARIATION_CONFIGURATIONS,
+            n_warm_starts=N_WARM_STARTS,
+            n_trials=N_TRIALS,
+            timeout=TIMEOUT,
+            base_random_state=BASE_RANDOM_STATE,
+            cache_path=CACHE_PATH,
+            run_start_str=run_start_str,
+            analysis_type="06_quantile_count_comparison",
+            max_n_instances_per_benchmark=DEFAULT_MAX_N_INSTANCES,
+            n_repetitions=MEDIUM_N_REPETITIONS_PER_TUNER_CONFIG,
+            analysis_components=[
+                "quantile_count_comparison",
+            ],
+        )
+
+    if run_sections["run_search_tuning_effect_comparison"]:
+        raw_benchmark_data = run_and_analyze_main_benchmark(
+            benchmarks=[
+                # "jahs201",
+                "lcbench_large",
+                # "lcbench_heteroscedastic",
+            ],
+            tuning_configurations=SEARCH_TUNING_EFFECT_CONFIGURATIONS,
+            n_warm_starts=N_WARM_STARTS,
+            n_trials=N_TRIALS,
+            timeout=TIMEOUT,
+            base_random_state=BASE_RANDOM_STATE,
+            cache_path=CACHE_PATH,
+            run_start_str=run_start_str,
+            analysis_type="07_search_tuning_effect_comparison",
+            max_n_instances_per_benchmark=DEFAULT_MAX_N_INSTANCES,
+            n_repetitions=MEDIUM_N_REPETITIONS_PER_TUNER_CONFIG,
+            analysis_components=[
+                "search_tuning_effectsearch_tuning_effect_comparison",
             ],
         )
 

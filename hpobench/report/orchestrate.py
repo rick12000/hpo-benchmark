@@ -357,7 +357,6 @@ def run_and_analyze_main_benchmark(
         Literal[
             "friedman",
             "nemenyi",
-            "win_percentage",
             "coverage",
             "dataset_performances",
             "rank_analysis",
@@ -413,7 +412,6 @@ def run_and_analyze_main_benchmark(
         analysis_components: List of specific analyses to perform on the experimental data:
             - "friedman": Friedman test for overall statistical differences
             - "nemenyi": Post-hoc Nemenyi test for pairwise comparisons
-            - "win_percentage": Win percentage matrices between algorithms
             - "coverage": Conformal prediction interval coverage validation
             - "dataset_performances": Per-dataset performance breakdowns
             - "rank_analysis": Algorithm ranking analysis across datasets

@@ -183,86 +183,8 @@ def format_nemenyi_results_to_latex(
     return "\n\n".join(blocks)
 
 
-def _get_win_percentage_caption() -> str:
-    return "Tuner Win Percentage Across Benchmarks"
-
-
 def _escape_latex_text(text: str) -> str:
     return text.replace("_", "\\_")
-
-
-def _build_win_percentage_table(
-    results_df: pd.DataFrame,
-    vertical_separator: str,
-    comparison_column: str,
-) -> str:
-    lines: List[str] = [
-        "\\begin{table}[htbp]",
-        "\\centering",
-        f"\\caption{{{_get_win_percentage_caption()}}}",
-        "\\vspace{1em}",
-        "\\begin{tabular}{@{}p{4cm}p{6cm}>{\\centering\\arraybackslash}p{2cm}@{}}",
-        "\\toprule",
-        f"\\textbf{{{_escape_latex_text(vertical_separator.title())}}} & \\textbf{{{_escape_latex_text(comparison_column.title())}}} & \\textbf{{Win \\%}} \\\\",
-        "\\midrule",
-    ]
-
-    vertical_values = sorted(results_df[vertical_separator].unique())
-
-    for idx, v_val in enumerate(vertical_values):
-        df_subset = results_df[results_df[vertical_separator] == v_val]
-        comparison_values = sorted(df_subset[comparison_column].unique())
-        len(comparison_values)
-
-        # First row includes the benchmark name
-        first_row = True
-        for j, comp_val in enumerate(comparison_values):
-            row_data = df_subset[df_subset[comparison_column] == comp_val]
-            if not row_data.empty:
-                win_pct = row_data["win_percentage"].iloc[0]
-
-                if first_row:
-                    lines.append(
-                        f"\\normalsize{{{_escape_latex_text(str(v_val))}}} & \\normalsize{{{_escape_latex_text(str(comp_val))}}} & \\normalsize{{{win_pct:.1f}}} \\\\"
-                    )
-                    first_row = False
-                else:
-                    lines.append(
-                        f" & \\normalsize{{{_escape_latex_text(str(comp_val))}}} & \\normalsize{{{win_pct:.1f}}} \\\\"
-                    )
-
-        # Add midrule between benchmarks (except after last one)
-        if idx < len(vertical_values) - 1:
-            lines.append("\\midrule")
-
-    lines.extend(
-        [
-            "\\bottomrule",
-            "\\end{tabular}",
-            "\\label{tab:tuner_win_percentage}",
-            "\\end{table}",
-        ]
-    )
-    return "\n".join(lines)
-
-
-def format_win_percentage_to_latex(
-    results_df: pd.DataFrame,
-    vertical_separator: str,
-    comparison_column: str,
-) -> str:
-    return _build_win_percentage_table(
-        results_df, vertical_separator, comparison_column
-    )
-
-
-def _get_calibration_stats_caption() -> str:
-    return (
-        "Calibration performance rank by calibration metric. "
-        "Metrics are computed for intervals at 25\\%, 50\\% and 75\\% confidence on all LCbench datasets, "
-        "then ranked across frameworks within each interval confidence and dataset. "
-        "Individual ranks are then averaged by framework to demonstrate cross-confidence and cross-dataset performance."
-    )
 
 
 def _format_score_with_interval(
@@ -276,379 +198,13 @@ def _format_score_with_interval(
     return f"\\normalsize{{{mean_str}}} \\\\ {interval_str}"
 
 
-def _identify_best_scores(group_df: pd.DataFrame) -> pd.DataFrame:
-    score_columns = [
-        "winkler_score_mean",
-        "width_mean",
-        "miscoverage_penalty_mean",
-        "llr_statistic_mean",
-        "chunked_target_coverage_deviation_mean",
-    ]
-    result_df = group_df.copy()
-
-    for score_col in score_columns:
-        min_val = group_df[score_col].min()
-        is_best_col = f"{score_col}_is_best"
-        result_df[is_best_col] = group_df[score_col] == min_val
-
-    return result_df
-
-
-def _build_calibration_table_block(df_block: pd.DataFrame, caption: str) -> str:
-    # Determine which columns to show based on unique values
-    show_benchmark = (
-        len(df_block["benchmark_identifier"].unique()) > 1
-        if "benchmark_identifier" in df_block.columns
-        else False
-    )
-    show_dataset = (
-        len(df_block["dataset"].unique()) > 1
-        if "dataset" in df_block.columns
-        else False
-    )
-    show_confidence = (
-        len(df_block["confidence_level"].unique()) > 1
-        if "confidence_level" in df_block.columns
-        else True
-    )
-
-    # Count visible columns for table structure
-    visible_cols = 6  # Tuner + 5 score columns (always shown)
-    if show_benchmark:
-        visible_cols += 1
-    if show_dataset:
-        visible_cols += 1
-    if show_confidence:
-        visible_cols += 1
-
-    lines: List[str] = [
-        "\\begin{table}[htbp]",
-        "\\centering",
-        f"\\caption{{{caption}}}",
-        "\\vspace{1em}",
-        f"\\begin{{tabular}}{{@{{}}*{{{visible_cols}}}{{>{{\\centering\\arraybackslash}}p{{2.2cm}}}}@{{}}}}",
-        "\\toprule",
-    ]
-
-    # Build header row
-    header_parts = []
-    if show_benchmark:
-        header_parts.append("\\textbf{Benchmark}")
-    if show_dataset:
-        header_parts.append("\\textbf{Dataset}")
-    if show_confidence:
-        header_parts.append("\\textbf{Confidence Level}")
-    header_parts.extend(
-        [
-            "\\textbf{Tuner}",
-            "\\textbf{Winkler Score}",
-            "\\textbf{Width}",
-            "\\textbf{Miscoverage Penalty}",
-            "\\textbf{LLR Statistic}",
-            "\\textbf{Coverage MAD}",
-        ]
-    )
-
-    lines.append(" & ".join(header_parts) + " \\\\")
-    lines.append("\\midrule")
-
-    # Group by benchmark, dataset, confidence_level
-    group_cols = []
-    if show_benchmark and "benchmark_identifier" in df_block.columns:
-        group_cols.append("benchmark_identifier")
-    if show_dataset and "dataset" in df_block.columns:
-        group_cols.append("dataset")
-    if show_confidence and "confidence_level" in df_block.columns:
-        group_cols.append("confidence_level")
-
-    if not group_cols:
-        # If no grouping columns available, treat all as one group
-        processed_df = _identify_best_scores(df_block)
-        lines.extend(
-            _format_calibration_rows_simple(
-                processed_df, None, show_benchmark, show_dataset, show_confidence
-            )
-        )
-    else:
-        # Calculate best scores across the entire df_block before grouping
-        processed_df_all = _identify_best_scores(df_block)
-        grouped = processed_df_all.groupby(group_cols)
-
-        for group_idx, (group_keys, group_df) in enumerate(grouped):
-            group_lines = _format_calibration_rows_simple(
-                group_df,
-                group_keys if len(group_cols) > 1 else (group_keys,),
-                show_benchmark,
-                show_dataset,
-                show_confidence,
-            )
-            lines.extend(group_lines)
-
-            # Add midrule between groups (except after last group)
-            if group_idx < len(grouped) - 1:
-                lines.append("\\midrule")
-
-    lines.extend(
-        [
-            "\\bottomrule",
-            "\\end{tabular}",
-            "\\label{tab:calibration_statistics}",
-            "\\end{table}",
-        ]
-    )
-
-    return "\n".join(lines)
-
-
-def _format_calibration_rows_simple(
-    df: pd.DataFrame,
-    group_values: Optional[tuple] = None,
-    show_benchmark: bool = True,
-    show_dataset: bool = True,
-    show_confidence: bool = True,
-) -> List[str]:
-    """Simplified row formatting with proper multirow support for confidence levels."""
-    lines: List[str] = []
-
-    if df.empty:
-        return lines
-
-    # Sort by tuner for consistent ordering
-    df_sorted = df.sort_values("tuner")
-    num_rows = len(df_sorted)
-
-    for idx, (_, row) in enumerate(df_sorted.iterrows()):
-        row_parts: List[str] = []
-
-        # Add group column values using multirow for the first row only
-        if idx == 0:
-            if group_values and len(group_values) >= 3:
-                # benchmark, dataset, confidence_level
-                if show_benchmark:
-                    bench_val = (
-                        str(group_values[0]) if group_values[0] is not None else ""
-                    )
-                    row_parts.append(
-                        f"\\multirow{{{num_rows}}}{{*}}{{\\normalsize{{{_escape_latex_text(bench_val)}}}}}"
-                    )
-                if show_dataset:
-                    dataset_val = (
-                        str(group_values[1]) if group_values[1] is not None else ""
-                    )
-                    row_parts.append(
-                        f"\\multirow{{{num_rows}}}{{*}}{{\\normalsize{{{_escape_latex_text(dataset_val)}}}}}"
-                    )
-                if show_confidence:
-                    conf_val = (
-                        str(group_values[2]) if group_values[2] is not None else ""
-                    )
-                    # Clean up confidence level formatting - remove "@ " and "%"
-                    cleaned_conf = conf_val.replace("@ ", "").replace("%", "\\%")
-                    row_parts.append(
-                        f"\\multirow{{{num_rows}}}{{*}}{{\\normalsize{{{_escape_latex_text(cleaned_conf)}}}}}"
-                    )
-            elif group_values and len(group_values) == 1:
-                # Single grouping value - likely confidence level
-                val = str(group_values[0]) if group_values[0] is not None else ""
-                cleaned_val = val.replace("@ ", "").replace("%", "\\%")
-                if show_benchmark:
-                    row_parts.append("")
-                if show_dataset:
-                    row_parts.append("")
-                if show_confidence:
-                    row_parts.append(
-                        f"\\multirow{{{num_rows}}}{{*}}{{\\normalsize{{{_escape_latex_text(cleaned_val)}}}}}"
-                    )
-            else:
-                # Use actual row values
-                if show_benchmark:
-                    bench_val = (
-                        str(row.get("benchmark_identifier", ""))
-                        if pd.notna(row.get("benchmark_identifier"))
-                        else ""
-                    )
-                    row_parts.append(
-                        f"\\multirow{{{num_rows}}}{{*}}{{\\normalsize{{{_escape_latex_text(bench_val)}}}}}"
-                    )
-                if show_dataset:
-                    dataset_val = (
-                        str(row.get("dataset", ""))
-                        if pd.notna(row.get("dataset"))
-                        else ""
-                    )
-                    row_parts.append(
-                        f"\\multirow{{{num_rows}}}{{*}}{{\\normalsize{{{_escape_latex_text(dataset_val)}}}}}"
-                    )
-                if show_confidence:
-                    conf_val = (
-                        str(row.get("confidence_level", ""))
-                        if pd.notna(row.get("confidence_level"))
-                        else ""
-                    )
-                    cleaned_conf = conf_val.replace("@ ", "").replace("%", "\\%")
-                    row_parts.append(
-                        f"\\multirow{{{num_rows}}}{{*}}{{\\normalsize{{{_escape_latex_text(cleaned_conf)}}}}}"
-                    )
-        else:
-            # Empty cells for subsequent rows in the group
-            if show_benchmark:
-                row_parts.append("")
-            if show_dataset:
-                row_parts.append("")
-            if show_confidence:
-                row_parts.append("")
-
-        # Add tuner - clean up tuner names
-        tuner_val = str(row["tuner"]) if pd.notna(row["tuner"]) else ""
-        # Remove the confidence level part from tuner name (e.g., "@ 0.1%")
-        cleaned_tuner = tuner_val.split(" @ ")[0] if " @ " in tuner_val else tuner_val
-        row_parts.append(f"\\normalsize{{{_escape_latex_text(cleaned_tuner)}}}")
-
-        # Add score columns with confidence intervals
-        score_configs = [
-            ("winkler_score_mean", "winkler_score_lower", "winkler_score_upper"),
-            ("width_mean", "width_lower", "width_upper"),
-            (
-                "miscoverage_penalty_mean",
-                "miscoverage_penalty_lower",
-                "miscoverage_penalty_upper",
-            ),
-            (
-                "llr_statistic_mean",
-                "llr_statistic_lower",
-                "llr_statistic_upper",
-            ),
-            (
-                "chunked_target_coverage_deviation_mean",
-                "chunked_target_coverage_deviation_lower",
-                "chunked_target_coverage_deviation_upper",
-            ),
-        ]
-
-        for mean_col, lower_col, upper_col in score_configs:
-            if all(col in row.index for col in [mean_col, lower_col, upper_col]):
-                is_best = row.get(f"{mean_col}_is_best", False)
-                formatted_score = _format_score_with_interval(
-                    row[mean_col], row[lower_col], row[upper_col], is_best
-                )
-                # Wrap in a minipage to allow line breaks within the cell
-                row_parts.append(
-                    f"\\begin{{minipage}}{{2.2cm}}\\centering {formatted_score} \\end{{minipage}}"
-                )
-            else:
-                row_parts.append("--")
-
-        # Add spacing between rows within the same group, but not after the last row
-        if idx < num_rows - 1:  # Not the last row in the group
-            lines.append(" & ".join(row_parts) + " \\\\[1em]")
-        else:  # Last row in the group
-            lines.append(" & ".join(row_parts) + " \\\\")
-
-    return lines
-
-
-def _format_calibration_rows(
-    df: pd.DataFrame, group_cols: List[str], group_values: Optional[tuple] = None
-) -> List[str]:
-    lines: List[str] = []
-
-    if df.empty:
-        return lines
-
-    # Sort by tuner for consistent ordering
-    df_sorted = df.sort_values("tuner")
-    num_rows = len(df_sorted)
-
-    for idx, (_, row) in enumerate(df_sorted.iterrows()):
-        row_parts: List[str] = []
-
-        # Add group column values (benchmark, dataset, confidence_level)
-        if idx == 0:  # Only show group values in first row
-            if group_values and len(group_cols) > 1:
-                for i, col in enumerate(group_cols):
-                    if i < len(group_values):
-                        val = (
-                            str(group_values[i]) if group_values[i] is not None else ""
-                        )
-                        row_parts.append(
-                            f"\\multirow{{{num_rows}}}{{*}}{{{_escape_latex_text(val)}}}"
-                        )
-                    else:
-                        row_parts.append(f"\\multirow{{{num_rows}}}{{*}}{{}}")
-            elif group_values:
-                # Single group column case
-                val = str(group_values[0]) if group_values[0] is not None else ""
-                for col in group_cols:
-                    row_parts.append(
-                        f"\\multirow{{{num_rows}}}{{*}}{{{_escape_latex_text(val)}}}"
-                    )
-            else:
-                # No group values, use actual row values
-                for col in group_cols:
-                    if col in df.columns:
-                        val = str(row[col]) if pd.notna(row[col]) else ""
-                        if idx == 0:
-                            row_parts.append(
-                                f"\\multirow{{{num_rows}}}{{*}}{{{_escape_latex_text(val)}}}"
-                            )
-                        else:
-                            row_parts.append("")
-                    else:
-                        row_parts.append("")
-        else:
-            # Empty cells for subsequent rows in the group
-            row_parts.extend([""] * len(group_cols))
-
-        # Add tuner
-        tuner_val = str(row["tuner"]) if pd.notna(row["tuner"]) else ""
-        row_parts.append(_escape_latex_text(tuner_val))
-
-        # Add score columns with confidence intervals
-        score_configs = [
-            ("winkler_score_mean", "winkler_score_lower", "winkler_score_upper"),
-            ("width_mean", "width_lower", "width_upper"),
-            (
-                "miscoverage_penalty_mean",
-                "miscoverage_penalty_lower",
-                "miscoverage_penalty_upper",
-            ),
-        ]
-
-        for mean_col, lower_col, upper_col in score_configs:
-            if all(col in row.index for col in [mean_col, lower_col, upper_col]):
-                is_best = row.get(f"{mean_col}_is_best", False)
-                formatted_score = _format_score_with_interval(
-                    row[mean_col], row[lower_col], row[upper_col], is_best
-                )
-                row_parts.append(formatted_score)
-            else:
-                row_parts.append("--")
-
-        lines.append(" & ".join(row_parts) + " \\\\")
-
-    return lines
-
-
-def format_calibration_statistics_to_latex(
-    results_df: pd.DataFrame,
-    layout_breakout_col: Optional[str] = None,
-) -> str:
-    blocks: List[str] = []
-    caption = _get_calibration_stats_caption()
-
-    if layout_breakout_col and layout_breakout_col in results_df.columns:
-        for l_val in sorted(results_df[layout_breakout_col].unique()):
-            df_l = results_df[results_df[layout_breakout_col] == l_val]
-            table_caption = f"{caption} - {_escape_latex_text(str(l_val))}"
-            blocks.append(_build_calibration_table_block(df_l, table_caption))
-    else:
-        blocks.append(_build_calibration_table_block(results_df, caption))
-
-    return "\n\n".join(blocks)
-
-
 def _get_calibration_metrics_caption() -> str:
-    return "Calibration Metrics by Entity"
+    return (
+        "Calibration performance rank by calibration metric. "
+        "Metrics are computed for intervals at 25\\%, 50\\% and 75\\% confidence on all LCbench datasets, "
+        "then ranked across frameworks within each interval confidence and dataset. "
+        "Individual ranks are then averaged by framework to demonstrate cross-confidence and cross-dataset performance."
+    )
 
 
 def _parse_and_group_entities(df_block: pd.DataFrame) -> dict:
@@ -701,9 +257,11 @@ def _build_calibration_metrics_table_block(df_block: pd.DataFrame, caption: str)
 
     available_metrics = []
     for metric in target_metrics:
-        mean_col = f"{metric}_mean"
+        # Require mean aggregation to be under the original metric name only.
+        mean_col = metric
         lower_col = f"{metric}_lower"
         upper_col = f"{metric}_upper"
+
         if all(col in df_block.columns for col in [mean_col, lower_col, upper_col]):
             available_metrics.append(metric)
 
@@ -713,9 +271,9 @@ def _build_calibration_metrics_table_block(df_block: pd.DataFrame, caption: str)
     # Find best (minimum) values for each metric to bold them
     best_values = {}
     for metric in available_metrics:
-        mean_col = f"{metric}_mean"
-        if mean_col in df_block.columns:
-            best_values[metric] = df_block[mean_col].min()
+        # Use the original metric name for the mean column.
+        mean_col = metric
+        best_values[metric] = df_block[mean_col].min()
 
     lines: List[str] = [
         "\\begin{table}[htbp]",
@@ -753,7 +311,7 @@ def _build_calibration_metrics_table_block(df_block: pd.DataFrame, caption: str)
             row_data = method_data["default"]
 
             for metric in available_metrics:
-                mean_col = f"{metric}_mean"
+                mean_col = metric
                 lower_col = f"{metric}_lower"
                 upper_col = f"{metric}_upper"
 
@@ -790,7 +348,7 @@ def _build_calibration_metrics_table_block(df_block: pd.DataFrame, caption: str)
             row_data = method_data[adapter]
 
             for metric in available_metrics:
-                mean_col = f"{metric}_mean"
+                mean_col = metric
                 lower_col = f"{metric}_lower"
                 upper_col = f"{metric}_upper"
 

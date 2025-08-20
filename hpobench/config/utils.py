@@ -272,11 +272,11 @@ def get_external_tuning_configurations() -> List[TunerConfig]:
         #     searcher="gp",
         #     config_identifier="GP1",
         # ),
-        TunerConfig(
-            tuner="optuna",
-            searcher="tpe",
-            config_identifier="TPE",
-        ),
+        # TunerConfig(
+        #     tuner="optuna",
+        #     searcher="tpe",
+        #     config_identifier="TPE",
+        # ),
         # TunerConfig(
         #     tuner="optuna",
         #     searcher="gp",
@@ -303,11 +303,11 @@ def get_external_tuning_configurations() -> List[TunerConfig]:
             searcher="confopt_gp_expected_improvement",
             config_identifier="GP-EI",
         ),
-        TunerConfig(
-            tuner="optuna",
-            searcher="confopt_gp_thompson_sampling",
-            config_identifier="GP-TS",
-        ),
+        # TunerConfig(
+        #     tuner="optuna",
+        #     searcher="confopt_gp_thompson_sampling",
+        #     config_identifier="GP-TS",
+        # ),
         # TunerConfig(
         #     tuner="smac",
         #     searcher="smac_rf_ei",

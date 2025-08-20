@@ -1,0 +1,14 @@
+\begin{table}[htbp]
+\centering
+\caption{Calibration performance rank by calibration metric. Metrics are computed for intervals at 25\%, 50\% and 75\% confidence on all LCbench datasets, then ranked across frameworks within each interval confidence and dataset. Individual ranks are then averaged by framework to demonstrate cross-confidence and cross-dataset performance. - bench\_A}
+\vspace{1em}
+\begin{tabular}{@{}l*{3}{>{\centering\arraybackslash}p{3cm}}@{}}
+\toprule
+\textbf{Entity} & \textbf{Chunked Target Coverage Deviation} & \textbf{Llr Statistic} & \textbf{Width} \\
+\midrule
+\normalsize{\textbf{Conformalized}} & \begin{minipage}{3cm}\centering \normalsize{1.688} \\ \small{[1.375, 2.000]} \end{minipage} & \begin{minipage}{3cm}\centering \normalsize{\textbf{1.250}} \\ \small{[1.000, 1.500]} \end{minipage} & \begin{minipage}{3cm}\centering \normalsize{2.000} \\ \small{[2.000, 2.000]} \end{minipage} \\
+\normalsize{\quad + DtACI} & \begin{minipage}{3cm}\centering \normalsize{\textbf{1.312}} \\ \small{[1.000, 1.625]} \end{minipage} & \begin{minipage}{3cm}\centering \normalsize{1.750} \\ \small{[1.500, 2.000]} \end{minipage} & \begin{minipage}{3cm}\centering \normalsize{\textbf{1.000}} \\ \small{[1.000, 1.000]} \end{minipage} \\
+\bottomrule
+\end{tabular}
+\label{tab:calibration_metrics_by_entity}
+\end{table}

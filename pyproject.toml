@@ -42,5 +42,5 @@ dev = [
 Homepage = "https://github.com/rick12000/hpo-benchmark"
 
 [tool.setuptools]
-packages = {find = {}}
+packages = ["hpobench"]
 include-package-data = true

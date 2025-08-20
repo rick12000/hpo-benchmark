@@ -30,7 +30,7 @@ def load_test_data(filename):
 @pytest.mark.parametrize("budget_unit", ["iteration", "runtime"])
 @pytest.mark.parametrize("relativize_budget", [True, False])
 def test_process_performance_records(
-    dummy_experiment_data,
+    dummy_calibration_raw_data,
     grouping_columns,
     performance_column,
     repetition_column,
@@ -43,7 +43,7 @@ def test_process_performance_records(
 ):
     """Test the full process_performance_records function"""
     result = process_performance_records(
-        raw_benchmark_data=dummy_experiment_data,
+        raw_benchmark_data=dummy_calibration_raw_data,
         aggregators=grouping_columns,
         performance_column=performance_column,
         budget_unit=budget_unit,
@@ -76,13 +76,13 @@ def test_process_performance_records(
 
 
 def test_accumulate_performances_iteration(
-    dummy_experiment_data,
+    dummy_calibration_raw_data,
     grouping_columns,
     performance_column,
 ):
     """Test accumulate_performances with iteration budget unit"""
     result = accumulate_performances(
-        data=dummy_experiment_data,
+        data=dummy_calibration_raw_data,
         aggregators=grouping_columns,
         budget_unit="iteration",
         performance_column=performance_column,
@@ -98,7 +98,7 @@ def test_accumulate_performances_iteration(
 
 
 def test_align_tuners_iteration(
-    dummy_experiment_data,
+    dummy_calibration_raw_data,
     grouping_columns,
     performance_column,
     tuner_column,
@@ -110,7 +110,7 @@ def test_align_tuners_iteration(
     alignment_columns.remove(repetition_column)
 
     accumulated_performances = accumulate_performances(
-        data=dummy_experiment_data,
+        data=dummy_calibration_raw_data,
         aggregators=grouping_columns,
         budget_unit="iteration",
         performance_column=performance_column,
@@ -134,7 +134,7 @@ def test_align_tuners_iteration(
 
 
 def test_calculate_ranks_iteration(
-    dummy_experiment_data,
+    dummy_calibration_raw_data,
     grouping_columns,
     performance_column,
     tuner_column,
@@ -154,7 +154,7 @@ def test_calculate_ranks_iteration(
     ranking_columns.remove(estimator_architecture_column)
 
     accumulated_performances = accumulate_performances(
-        data=dummy_experiment_data,
+        data=dummy_calibration_raw_data,
         aggregators=grouping_columns,
         budget_unit="iteration",
         performance_column=performance_column,
@@ -185,7 +185,7 @@ def test_calculate_ranks_iteration(
 
 
 def test_accumulate_breaches_iteration(
-    dummy_experiment_data,
+    dummy_calibration_raw_data,
     grouping_columns,
     performance_column,
     tuner_column,
@@ -205,7 +205,7 @@ def test_accumulate_breaches_iteration(
     ranking_columns.remove(estimator_architecture_column)
 
     accumulated_performances = accumulate_performances(
-        data=dummy_experiment_data,
+        data=dummy_calibration_raw_data,
         aggregators=grouping_columns,
         budget_unit="iteration",
         performance_column=performance_column,
@@ -232,6 +232,7 @@ def test_accumulate_breaches_iteration(
         budget_unit="iteration",
         breach_column="breach_status",
         rolling_breach_count=10,
+        confidence_column="confidence_level",
     )
 
     expected = load_test_data("accumulated_breaches_iteration.json")
@@ -244,7 +245,7 @@ def test_accumulate_breaches_iteration(
 
 
 def test_time_discretize_benchmark_data(
-    dummy_experiment_data,
+    dummy_calibration_raw_data,
     grouping_columns,
     repetition_column,
     performance_column,
@@ -266,7 +267,7 @@ def test_time_discretize_benchmark_data(
     ]
 
     result = time_discretize_benchmark_data(
-        data=dummy_experiment_data,
+        data=dummy_calibration_raw_data,
         entity_columns=alignment_columns,
         tuner_columns=tuner_columns,
         repetition_column=repetition_column,
@@ -284,7 +285,7 @@ def test_time_discretize_benchmark_data(
 
 
 def test_align_tuners_runtime(
-    dummy_experiment_data,
+    dummy_calibration_raw_data,
     grouping_columns,
     repetition_column,
     performance_column,
@@ -312,7 +313,7 @@ def test_align_tuners_runtime(
     ]
 
     discretized_data = time_discretize_benchmark_data(
-        data=dummy_experiment_data,
+        data=dummy_calibration_raw_data,
         entity_columns=alignment_columns,
         tuner_columns=tuner_columns,
         repetition_column=repetition_column,
@@ -338,7 +339,7 @@ def test_align_tuners_runtime(
 
 
 def test_calculate_ranks_runtime(
-    dummy_experiment_data,
+    dummy_calibration_raw_data,
     grouping_columns,
     repetition_column,
     performance_column,
@@ -371,7 +372,7 @@ def test_calculate_ranks_runtime(
     ]
 
     discretized_data = time_discretize_benchmark_data(
-        data=dummy_experiment_data,
+        data=dummy_calibration_raw_data,
         entity_columns=alignment_columns,
         tuner_columns=tuner_columns,
         repetition_column=repetition_column,
@@ -404,7 +405,7 @@ def test_calculate_ranks_runtime(
 
 
 def test_standardize_budget_unit_iteration(
-    dummy_experiment_data,
+    dummy_calibration_raw_data,
     grouping_columns,
     performance_column,
     tuner_column,
@@ -424,7 +425,7 @@ def test_standardize_budget_unit_iteration(
     ranking_columns.remove(estimator_architecture_column)
 
     accumulated_performances = accumulate_performances(
-        data=dummy_experiment_data,
+        data=dummy_calibration_raw_data,
         aggregators=grouping_columns,
         budget_unit="iteration",
         performance_column=performance_column,
@@ -470,7 +471,7 @@ def test_standardize_budget_unit_iteration(
 
 
 def test_standardize_budget_unit_runtime(
-    dummy_experiment_data,
+    dummy_calibration_raw_data,
     grouping_columns,
     repetition_column,
     performance_column,
@@ -503,7 +504,7 @@ def test_standardize_budget_unit_runtime(
     ]
 
     discretized_data = time_discretize_benchmark_data(
-        data=dummy_experiment_data,
+        data=dummy_calibration_raw_data,
         entity_columns=alignment_columns,
         tuner_columns=tuner_columns,
         repetition_column=repetition_column,
@@ -543,7 +544,7 @@ def test_standardize_budget_unit_runtime(
 
 
 def test_collapse_per_budget_iteration(
-    dummy_experiment_data,
+    dummy_calibration_raw_data,
     grouping_columns,
     performance_column,
     tuner_column,
@@ -563,7 +564,7 @@ def test_collapse_per_budget_iteration(
     ranking_columns.remove(estimator_architecture_column)
 
     accumulated_performances = accumulate_performances(
-        data=dummy_experiment_data,
+        data=dummy_calibration_raw_data,
         aggregators=grouping_columns,
         budget_unit="iteration",
         performance_column=performance_column,
@@ -614,7 +615,7 @@ def test_collapse_per_budget_iteration(
 
 
 def test_collapse_per_budget_runtime(
-    dummy_experiment_data,
+    dummy_calibration_raw_data,
     grouping_columns,
     repetition_column,
     performance_column,
@@ -647,7 +648,7 @@ def test_collapse_per_budget_runtime(
     ]
 
     discretized_data = time_discretize_benchmark_data(
-        data=dummy_experiment_data,
+        data=dummy_calibration_raw_data,
         entity_columns=alignment_columns,
         tuner_columns=tuner_columns,
         repetition_column=repetition_column,
