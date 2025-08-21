@@ -2,7 +2,7 @@ import pandas as pd
 import logging
 from typing import List, Literal, Optional
 from hpobench.utils import AnalysisPathManager
-
+from hpobench.config.schema import BenchmarkDataSchema
 from hpobench.utils import save_analysis_results
 from hpobench.plot import (
     plot_and_save,
@@ -17,8 +17,7 @@ from hpobench.process import (
 from hpobench.report.utils import (
     run_and_save_friedman,
     run_and_save_nemenyi,
-    run_and_save_wilcoxon,
-    run_and_save_permutation_test,
+    run_statistical_tests_for_budget,
     aggregate_and_save,
     run_and_save_calibration_statistics,
 )
@@ -47,6 +46,7 @@ def analyze_main_benchmark(
             "search_tuning_effect_comparison",
         ]
     ],
+    schema: BenchmarkDataSchema,
     alpha: float = 0.05,
     starting_coverage_trial: Optional[int] = None,
     cd_significance_method: Literal[
@@ -110,143 +110,98 @@ def analyze_main_benchmark(
         meaningful coverage rate calculations. Multi-dataset benchmarks will skip
         coverage components with a warning message.
     """
-    # Define constants and column names:
-    grouping_cols = [
-        "benchmark_identifier",
-        "dataset",
-        "tuner",
-        "repetition",
-        "sampler",
-        "confidence_level",
-        "estimator_architecture",
-    ]
-    rep_col = "repetition"
-    perf_col = "performance"
-    tuner_col = "tuner"
-    bench_col = "benchmark_identifier"
-    data_col = "dataset"
-    sampler_col = "sampler"
-    confidence_level_col = "confidence_level"
-    estimator_architecture_col = "estimator_architecture"
-    runtime_unit = "runtime"
-    iter_unit = "iteration"
-    norm_runtime_unit = f"normalized_{runtime_unit}"
-    budget_cross_sections = [50, 100]
+    rep_col = schema.rep_col
+    perf_col = schema.perf_col
+    tuner_col = schema.tuner_col
+    bench_col = schema.bench_col
+    data_col = schema.data_col
+    sampler_col = schema.sampler_col
+    confidence_level_col = schema.confidence_level_col
+    estimator_architecture_col = schema.estimator_architecture_col
+    runtime_unit = schema.runtime_unit
+    iter_unit = schema.iter_unit
+    norm_runtime_unit = schema.norm_runtime_unit
 
-    # Create broad use processed data:
-    # 1. Relativized runtime results:
+    default_aggregators = [
+        bench_col,
+        data_col,
+        tuner_col,
+        rep_col,
+        sampler_col,
+        confidence_level_col,
+        estimator_architecture_col,
+    ]
+
+    # 1. Create broad use processed data:
+    # 1.1 Relativized runtime results:
     cleaned_relative_runtime_results = process_performance_records(
         raw_benchmark_data=raw_benchmark_data,
-        aggregators=grouping_cols,
+        aggregators=default_aggregators,
         performance_column=perf_col,
         budget_unit=runtime_unit,
         repetition_column=rep_col,
         tuner_column=tuner_col,
         relativize_budget=True,
-        sampler_column=sampler_col,
-        confidence_level_column=confidence_level_col,
-        estimator_architecture_column=estimator_architecture_col,
+        comparison_columns=[
+            tuner_col,
+            sampler_col,
+            confidence_level_col,
+            estimator_architecture_col,
+        ],
     )
 
-    # 2. Absolute iteration results:
+    # 1.2 Absolute iteration results:
     cleaned_iterative_results = process_performance_records(
         raw_benchmark_data=raw_benchmark_data,
-        aggregators=grouping_cols,
+        aggregators=default_aggregators,
         performance_column=perf_col,
         budget_unit=iter_unit,
         repetition_column=rep_col,
         tuner_column=tuner_col,
         relativize_budget=False,
-        sampler_column=sampler_col,
-        confidence_level_column=confidence_level_col,
-        estimator_architecture_column=estimator_architecture_col,
+        comparison_columns=[
+            tuner_col,
+            sampler_col,
+            confidence_level_col,
+            estimator_architecture_col,
+        ],
     )
+
+    # 2. Carry out component analysis:
+    # 2.1 Significance Analysis:
     cross_repetition_relative_runtime_results = collapse_per_budget(
         data=cleaned_relative_runtime_results,
         aggregators=[
-            col for col in grouping_cols + [norm_runtime_unit] if col != rep_col
+            col for col in default_aggregators + [norm_runtime_unit] if col != rep_col
         ],
-        metrics=["rank", "best_performance"],
+        metrics=["rank"],
     )
 
-    # Run stratified analysis and store significance results for critical difference diagrams
     significance_results_for_cd = {}
-
-    for budget in budget_cross_sections:
+    for budget in [50, 100]:
         budget_data = cross_repetition_relative_runtime_results[
             cross_repetition_relative_runtime_results[norm_runtime_unit] == budget
         ]
 
-        # 1. Statistical tests:
-        if "friedman" in analysis_components:
-            run_and_save_friedman(
-                data=budget_data,
-                breakout_col=[bench_col],
-                across_col=data_col,
-                entity_col=tuner_col,
-                rank_col="rank",
-                alpha=alpha,
-                cache_path=cache_path,
-                run_start_str=run_start_str,
-                filename=f"friedman_test_budget_{budget}.csv",
-                analysis_type=analysis_type,
-            )
+        cd_df = run_statistical_tests_for_budget(
+            data=budget_data,
+            budget=budget,
+            norm_runtime_unit=norm_runtime_unit,
+            analysis_components=analysis_components,
+            cd_significance_method=cd_significance_method,
+            bench_col=bench_col,
+            data_col=data_col,
+            tuner_col=tuner_col,
+            alpha=alpha,
+            cache_path=cache_path,
+            run_start_str=run_start_str,
+            analysis_type=analysis_type,
+            random_state=42,
+        )
+        if cd_df is not None:
+            significance_results_for_cd[budget] = cd_df
 
-        if "nemenyi" in analysis_components:
-            nemenyi_df = run_and_save_nemenyi(
-                data=budget_data,
-                breakout_col=[bench_col],
-                across_col=data_col,
-                entity_col=tuner_col,
-                rank_col="rank",
-                alpha=alpha,
-                cache_path=cache_path,
-                run_start_str=run_start_str,
-                filename=f"nemenyi_pairwise_budget_{budget}.csv",
-                analysis_type=analysis_type,
-            )
-            nemenyi_df[norm_runtime_unit] = budget
-            if cd_significance_method == "nemenyi":
-                significance_results_for_cd[budget] = nemenyi_df
-
-        if "wilcoxon" in analysis_components:
-            wilcoxon_df = run_and_save_wilcoxon(
-                data=budget_data,
-                breakout_col=[bench_col],
-                across_col=data_col,
-                entity_col=tuner_col,
-                rank_col="rank",
-                alpha=alpha,
-                cache_path=cache_path,
-                run_start_str=run_start_str,
-                filename=f"wilcoxon_pairwise_budget_{budget}.csv",
-                analysis_type=analysis_type,
-            )
-            wilcoxon_df[norm_runtime_unit] = budget
-            if cd_significance_method == "wilcoxon":
-                significance_results_for_cd[budget] = wilcoxon_df
-
-        if "permutation_test" in analysis_components:
-            permutation_df = run_and_save_permutation_test(
-                data=budget_data,
-                breakout_col=[bench_col],
-                across_col=data_col,
-                entity_col=tuner_col,
-                rank_col="rank",
-                alpha=alpha,
-                cache_path=cache_path,
-                run_start_str=run_start_str,
-                filename=f"permutation_pairwise_budget_{budget}.csv",
-                analysis_type=analysis_type,
-                random_state=42,  # For reproducibility
-            )
-            permutation_df[norm_runtime_unit] = budget
-            if cd_significance_method == "permutation_test":
-                significance_results_for_cd[budget] = permutation_df
-
-        # 2. Win rates:
-
-    # Coverage analysis plots:
+    # 2.2 Coverage analysis plots:
     if "coverage" in analysis_components:
         if starting_coverage_trial is not None:
             raw_benchmark_data_adj = raw_benchmark_data[
@@ -269,9 +224,12 @@ def analyze_main_benchmark(
             repetition_column=rep_col,
             tuner_column=tuner_col,
             relativize_budget=False,
-            sampler_column=sampler_col,
-            confidence_level_column=confidence_level_col,
-            estimator_architecture_column=estimator_architecture_col,
+            comparison_columns=[
+                tuner_col,
+                sampler_col,
+                confidence_level_col,
+                estimator_architecture_col,
+            ],
         )
         data_conf_aggregated_results = aggregate_and_save(
             data=absolute_iteration_results_adj,
@@ -310,7 +268,7 @@ def analyze_main_benchmark(
 
         run_and_save_calibration_statistics(
             raw_benchmark_data=raw_benchmark_data_adj,
-            aggregators=grouping_cols,
+            aggregators=default_aggregators,
             benchmark_col=bench_col,
             tuner_column=tuner_col,
             repetition_column=rep_col,
@@ -399,7 +357,7 @@ def analyze_main_benchmark(
         )
 
         # Add paired plotting with critical difference diagrams if significance results are available
-        cd_budget = 100  # Default budget for critical difference diagrams
+        cd_budget = 100
         if (
             cd_budget in significance_results_for_cd
             and cd_significance_method in analysis_components
@@ -500,47 +458,19 @@ def analyze_main_benchmark(
 
     # Conformalization effect analysis:
     if "conformalization_effect" in analysis_components:
-        conformalized_vs_nonconformalized_results = pd.DataFrame()
-        # The data functions don't natively handle grouping or ranking in custom
-        # ways, so pre vs. post conformal comparisons have to be done manually.
-        # Given the config, the tuner below will differ, so if we slice by conformal trials
-        # (meaning conformal vs. non conformal) we can then aggregate results
-        # as normal within the slice to rank conformal vs. non conformal for a given
-        # estimator architecture, then show plots broken down by architecture:
-        for estimator_architecture in raw_benchmark_data[
-            estimator_architecture_col
-        ].unique():
-            for sampler in raw_benchmark_data[sampler_col].unique():
-                estimator_slice_data = raw_benchmark_data[
-                    (
-                        raw_benchmark_data[estimator_architecture_col]
-                        == estimator_architecture
-                    )
-                    & (raw_benchmark_data[sampler_col] == sampler)
-                ].copy()
-
-                estimator_slice_relativized_runtime_results = (
-                    process_performance_records(
-                        raw_benchmark_data=estimator_slice_data,
-                        aggregators=grouping_cols,
-                        performance_column=perf_col,
-                        budget_unit=runtime_unit,
-                        repetition_column=rep_col,
-                        tuner_column=tuner_col,
-                        relativize_budget=True,
-                        sampler_column=sampler_col,
-                        confidence_level_column=confidence_level_col,
-                        estimator_architecture_column=estimator_architecture_col,
-                    )
-                )
-
-                conformalized_vs_nonconformalized_results = pd.concat(
-                    [
-                        conformalized_vs_nonconformalized_results,
-                        estimator_slice_relativized_runtime_results,
-                    ]
-                )
-
+        conformalized_vs_nonconformalized_results = process_performance_records(
+            raw_benchmark_data=raw_benchmark_data,
+            aggregators=default_aggregators,
+            performance_column=perf_col,
+            budget_unit=runtime_unit,
+            repetition_column=rep_col,
+            tuner_column=tuner_col,
+            relativize_budget=True,
+            comparison_columns=[
+                tuner_col,
+                confidence_level_col,
+            ],
+        )
         aggregated_conformalized_vs_nonconformalized_results = aggregate_and_save(
             data=conformalized_vs_nonconformalized_results,
             grouping_cols=[
@@ -585,31 +515,20 @@ def analyze_main_benchmark(
                 "Quantile count comparison analysis requires only one architecture."
             )
 
-        for sampler in raw_benchmark_data[sampler_col].unique():
-            sampler_slice_data = raw_benchmark_data[
-                (raw_benchmark_data[sampler_col] == sampler)
-            ].copy()
-
-            sampler_slice_relativized_runtime_results = process_performance_records(
-                raw_benchmark_data=sampler_slice_data,
-                aggregators=grouping_cols,
-                performance_column=perf_col,
-                budget_unit=runtime_unit,
-                repetition_column=rep_col,
-                tuner_column=tuner_col,
-                relativize_budget=True,
-                sampler_column=sampler_col,
-                confidence_level_column=confidence_level_col,
-                estimator_architecture_column=estimator_architecture_col,
-            )
-
-            quantile_count_comparison_results = pd.concat(
-                [
-                    quantile_count_comparison_results,
-                    sampler_slice_relativized_runtime_results,
-                ]
-            )
-
+        quantile_count_comparison_results = process_performance_records(
+            raw_benchmark_data=raw_benchmark_data,
+            aggregators=default_aggregators,
+            performance_column=perf_col,
+            budget_unit=runtime_unit,
+            repetition_column=rep_col,
+            tuner_column=tuner_col,
+            relativize_budget=True,
+            comparison_columns=[
+                tuner_col,
+                confidence_level_col,
+                estimator_architecture_col,
+            ],
+        )
         aggregated_quantile_count_comparison_results = aggregate_and_save(
             data=quantile_count_comparison_results,
             grouping_cols=[
@@ -654,34 +573,20 @@ def analyze_main_benchmark(
             raise ValueError(
                 "Search tuning effect comparison analysis requires only one sampler."
             )
-
-        for estimator_architecture in raw_benchmark_data[
-            estimator_architecture_col
-        ].unique():
-            architecture_slice_data = raw_benchmark_data[
-                raw_benchmark_data[estimator_architecture_col] == estimator_architecture
-            ].copy()
-
-            architecture_slice_relativized_runtime_results = (
-                process_performance_records(
-                    raw_benchmark_data=architecture_slice_data,
-                    aggregators=grouping_cols,
-                    performance_column=perf_col,
-                    budget_unit=runtime_unit,
-                    repetition_column=rep_col,
-                    tuner_column=tuner_col,
-                    relativize_budget=True,
-                    sampler_column=sampler_col,
-                    confidence_level_column=confidence_level_col,
-                    estimator_architecture_column=estimator_architecture_col,
-                )
-            )
-            search_tuning_effect_comparison_results = pd.concat(
-                [
-                    search_tuning_effect_comparison_results,
-                    architecture_slice_relativized_runtime_results,
-                ]
-            )
+        search_tuning_effect_comparison_results = process_performance_records(
+            raw_benchmark_data=raw_benchmark_data,
+            aggregators=default_aggregators,
+            performance_column=perf_col,
+            budget_unit=runtime_unit,
+            repetition_column=rep_col,
+            tuner_column=tuner_col,
+            relativize_budget=True,
+            comparison_columns=[
+                tuner_col,
+                sampler_col,
+                confidence_level_col,
+            ],
+        )
 
         aggregated_search_tuning_effect_comparison_results = aggregate_and_save(
             data=search_tuning_effect_comparison_results,

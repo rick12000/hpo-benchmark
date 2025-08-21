@@ -18,10 +18,6 @@ from hpobench.config.config_types import (
     TunerConfig,
 )
 
-N_TRIALS = 100
-TIMEOUT = None
-N_WARM_STARTS = 15
-
 # Environment variables used only in configuration:
 DEFAULT_INTERVAL_WIDTH = 0.9
 

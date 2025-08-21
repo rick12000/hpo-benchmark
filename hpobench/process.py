@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 import logging
 from copy import deepcopy
-from typing import List
+from typing import List, Optional
 
 
 logger = logging.getLogger(__name__)
@@ -85,8 +85,8 @@ def accumulate_breaches(
     aggregators: List[str],
     budget_unit: str,
     breach_column: str,
-    rolling_breach_count: int,
     confidence_column: str,
+    rolling_breach_count: int,
 ) -> pd.DataFrame:
     """
     Tracks cumulative and rolling breach rates for HPO constraint violations.
@@ -424,9 +424,7 @@ def process_performance_records(
     repetition_column: str,
     tuner_column: str,
     relativize_budget: bool,
-    sampler_column: str,
-    confidence_level_column: str,
-    estimator_architecture_column: str,
+    comparison_columns: List[str],
 ) -> pd.DataFrame:
     """
     Orchestrates the complete HPO benchmark data processing pipeline.
@@ -450,24 +448,16 @@ def process_performance_records(
     Returns:
         Processed performance data ready for statistical analysis and visualization.
     """
-    # Define columns to remove for different grouping contexts
-    tuner_related_columns = [
-        tuner_column,
-        sampler_column,
-        confidence_level_column,
-        estimator_architecture_column,
-    ]
-
     alignment_columns = deepcopy(aggregators)
     alignment_columns.remove(repetition_column)
 
     ranking_columns = deepcopy(aggregators) + [budget_unit]
-    for col in tuner_related_columns:
+    for col in comparison_columns:
         if col in ranking_columns:
             ranking_columns.remove(col)
 
     dataset_columns = deepcopy(aggregators)
-    for col in tuner_related_columns + [repetition_column]:
+    for col in comparison_columns + [repetition_column]:
         if col in dataset_columns:
             dataset_columns.remove(col)
 
@@ -478,7 +468,7 @@ def process_performance_records(
             + alignment_columns
             + ranking_columns
             + dataset_columns
-            + tuner_related_columns
+            + comparison_columns
             + [repetition_column]
         )
     )
@@ -520,7 +510,7 @@ def process_performance_records(
         discretized_benchmark_data_time = time_discretize_benchmark_data(
             data=data_cleaned,
             entity_columns=alignment_columns,
-            tuner_columns=tuner_related_columns,
+            tuner_columns=comparison_columns,
             repetition_column=repetition_column,
             budget_unit=budget_unit,
             performance_column=performance_column,
@@ -588,3 +578,132 @@ def rank_and_collapse_data(
     )
 
     return collapsed_df
+
+
+def block_bootstrap(
+    data: pd.DataFrame,
+    breakout_cols: List[str],
+    block_cols: List[str],
+    aggregators: List[str],
+    metric_cols: List[str],
+    n_bootstraps: int,
+    random_state: Optional[int] = None,
+) -> pd.DataFrame:
+    """Compute block-bootstrap percentile intervals for grouped metrics.
+
+    Performs a block bootstrap within each combination of `breakout_cols`.
+    Blocks are defined by `block_cols` and are resampled with replacement to
+    create bootstrap samples. For each bootstrap iteration the mean of the
+    `metric_cols` is computed per `aggregators` group. The function returns
+    the original group means plus 5th and 95th percentile bounds computed
+    over the bootstrap iterations (named "<metric>_lower" and "<metric>_upper").
+
+    Args:
+        data: Input DataFrame containing metrics and grouping columns.
+        breakout_cols: Columns defining independent breakout groups; bootstrapping
+            is performed separately within each breakout group.
+        block_cols: Columns whose combined values define a block/key that is
+            resampled (preserves within-block dependencies).
+        aggregators: Columns to group by when computing means (e.g. experimental
+            factors to aggregate over).
+        metric_cols: Numeric metric columns to aggregate and compute percentiles for.
+        n_bootstraps: Number of bootstrap iterations to perform per breakout group.
+        random_state: Optional seed for numpy's RNG to make results reproducible.
+
+    Returns:
+        DataFrame: A table containing the original means for each `aggregators`
+        group and, for each metric in `metric_cols`, the lower (5th pct) and
+        upper (95th pct) bootstrap bounds named "<metric>_lower" and
+        "<metric>_upper". If no valid bootstrap could be performed for a
+        group, the bounds are NaN.
+    """
+
+    if random_state is not None:
+        np.random.seed(random_state)
+
+    # Create unique key column from nesting_cols (work with copy for key creation only)
+    all_cols = list(set(block_cols + aggregators + metric_cols + breakout_cols))
+    data_with_key = data[all_cols].copy()
+    data_with_key["_bootstrap_key"] = (
+        data_with_key[block_cols].astype(str).agg("_".join, axis=1)
+    )
+
+    # Calculate original means for each aggregator group.
+    # Keep the original metric column names for the mean aggregation (no "_mean" suffix).
+    original_means = data_with_key.groupby(aggregators, as_index=False)[
+        metric_cols
+    ].mean()
+
+    all_bootstrap_results = []
+
+    # Group by all breakout columns
+    for breakout_values, breakout_group in data_with_key.groupby(breakout_cols):
+        unique_keys = breakout_group["_bootstrap_key"].unique()
+        if len(unique_keys) < 2:
+            continue
+
+        bootstrap_iterations = []
+        for _ in range(n_bootstraps):
+            sampled_keys = np.random.choice(
+                unique_keys, size=len(unique_keys), replace=True
+            )
+            bootstrap_sample = pd.concat(
+                [
+                    breakout_group[breakout_group["_bootstrap_key"] == key]
+                    for key in sampled_keys
+                ],
+                ignore_index=True,
+            )
+            bootstrap_means = bootstrap_sample.groupby(aggregators, as_index=False)[
+                metric_cols
+            ].mean()
+            bootstrap_iterations.append(bootstrap_means)
+
+        if bootstrap_iterations:
+            combined_bootstrap = pd.concat(bootstrap_iterations, ignore_index=True)
+            # Add breakout columns to keep track of group
+            if isinstance(breakout_values, tuple):
+                for col, val in zip(breakout_cols, breakout_values):
+                    combined_bootstrap[col] = val
+            else:
+                combined_bootstrap[breakout_cols[0]] = breakout_values
+            all_bootstrap_results.append(combined_bootstrap)
+
+    if all_bootstrap_results:
+        all_bootstrap_data = pd.concat(all_bootstrap_results, ignore_index=True)
+
+        def p5(x):
+            return np.percentile(x, 5)
+
+        def p95(x):
+            return np.percentile(x, 95)
+
+        agg_dict = {col: [p5, p95] for col in metric_cols}
+        group_cols = list(set(breakout_cols + aggregators))
+        percentile_results = all_bootstrap_data.groupby(group_cols, as_index=False).agg(
+            agg_dict
+        )
+
+        new_cols = []
+        for col in percentile_results.columns:
+            if isinstance(col, tuple):
+                if col[1] == "p5":
+                    new_cols.append(f"{col[0]}_lower")
+                elif col[1] == "p95":
+                    new_cols.append(f"{col[0]}_upper")
+                else:
+                    new_cols.append("_".join([str(c) for c in col if c]))
+            else:
+                new_cols.append(col)
+        percentile_results.columns = new_cols
+    else:
+        percentile_results = original_means[aggregators].copy()
+        for metric in metric_cols:
+            percentile_results[f"{metric}_lower"] = np.nan
+            percentile_results[f"{metric}_upper"] = np.nan
+
+    final_results = original_means.merge(
+        percentile_results, on=aggregators, how="outer"
+    )
+
+    return final_results

@@ -10,7 +10,8 @@ import logging
 import os
 from typing import List, Optional
 
-from hpobench.utils import save_analysis_results, AnalysisPathManager, block_bootstrap
+from hpobench.utils import save_analysis_results, AnalysisPathManager
+from hpobench.process import block_bootstrap
 from hpobench.report.latex import (
     format_calibration_metrics_to_latex,
 )
@@ -251,6 +252,112 @@ def run_and_save_permutation_test(
         subfolder,
     )
     return results_df
+
+
+def run_statistical_tests_for_budget(
+    data: pd.DataFrame,
+    budget: int,
+    norm_runtime_unit: str,
+    analysis_components: List[str],
+    cd_significance_method: str,
+    bench_col: str,
+    data_col: str,
+    tuner_col: str,
+    alpha: float,
+    cache_path: str,
+    run_start_str: str,
+    analysis_type: str,
+    random_state: Optional[int] = None,
+    subfolder: str = "statistical_tests",
+) -> Optional[pd.DataFrame]:
+    """Run the configured statistical tests for a single budget slice.
+
+    Returns the pairwise results DataFrame to be used for critical-difference
+    plotting if the chosen `cd_significance_method` produced results, otherwise
+    returns None.
+    """
+    logger = logging.getLogger(__name__)
+    cd_results: Optional[pd.DataFrame] = None
+
+    # Friedman (no return expected from helper)
+    if "friedman" in analysis_components:
+        run_and_save_friedman(
+            data=data,
+            breakout_col=[bench_col],
+            across_col=data_col,
+            entity_col=tuner_col,
+            rank_col="rank",
+            alpha=alpha,
+            cache_path=cache_path,
+            run_start_str=run_start_str,
+            filename=f"friedman_test_budget_{budget}.csv",
+            analysis_type=analysis_type,
+            subfolder=subfolder,
+        )
+
+    # Pairwise tests: keep consistent behaviour and optionally collect
+    # the results used for CD diagrams.
+    if "nemenyi" in analysis_components:
+        results_df = run_and_save_nemenyi(
+            data=data,
+            breakout_col=[bench_col],
+            across_col=data_col,
+            entity_col=tuner_col,
+            rank_col="rank",
+            alpha=alpha,
+            cache_path=cache_path,
+            run_start_str=run_start_str,
+            filename=f"nemenyi_pairwise_budget_{budget}.csv",
+            analysis_type=analysis_type,
+            subfolder=subfolder,
+        )
+        results_df[norm_runtime_unit] = budget
+        if cd_significance_method == "nemenyi":
+            cd_results = results_df
+
+    if "wilcoxon" in analysis_components:
+        results_df = run_and_save_wilcoxon(
+            data=data,
+            breakout_col=[bench_col],
+            across_col=data_col,
+            entity_col=tuner_col,
+            rank_col="rank",
+            alpha=alpha,
+            cache_path=cache_path,
+            run_start_str=run_start_str,
+            filename=f"wilcoxon_pairwise_budget_{budget}.csv",
+            analysis_type=analysis_type,
+            subfolder=subfolder,
+        )
+        results_df[norm_runtime_unit] = budget
+        if cd_significance_method == "wilcoxon":
+            cd_results = results_df
+
+    if "permutation_test" in analysis_components:
+        results_df = run_and_save_permutation_test(
+            data=data,
+            breakout_col=[bench_col],
+            across_col=data_col,
+            entity_col=tuner_col,
+            rank_col="rank",
+            alpha=alpha,
+            cache_path=cache_path,
+            run_start_str=run_start_str,
+            filename=f"permutation_pairwise_budget_{budget}.csv",
+            analysis_type=analysis_type,
+            subfolder=subfolder,
+            random_state=random_state,
+        )
+        results_df[norm_runtime_unit] = budget
+        if cd_significance_method == "permutation_test":
+            cd_results = results_df
+
+    logger.info(
+        "Completed statistical tests for budget=%s; cd_method=%s",
+        budget,
+        cd_significance_method,
+    )
+    return cd_results
 
 
 def aggregate_and_save(

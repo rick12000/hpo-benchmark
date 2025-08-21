@@ -1,21 +1,20 @@
-from hpobench.config.config import (
+from hpobench.config.tuner_configurations import (
     PRECONFORMAL_COMPARISON_CONFIGURATIONS,
     EXTERNAL_TUNING_CONFIGURATIONS,
     LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS,
     ARCHITECTURE_VARIATION_CONFIGURATIONS,
     SAMPLER_VARIATION_CONFIGURATIONS,
     COVERAGE_ANALYSIS_CONFIGURATIONS,
-    N_TRIALS,
-    N_WARM_STARTS,
-    TIMEOUT,
     STATIC_ANALYSIS_ESTIMATOR_ARCHITECTURES,
     QUANTILE_COUNT_VARIATION_CONFIGURATIONS,
     SEARCH_TUNING_EFFECT_CONFIGURATIONS,
 )
+from hpobench.config.constants import ExperimentParameters
 from hpobench.report.analyze import (
     analyze_searcher_tuning_effect,
     analyze_searcher_estimator_comparison,
 )
+from hpobench.config.schema import BenchmarkDataSchema
 from hpobench.report.orchestrate import (
     run_and_analyze_main_benchmark,
     run_static_benchmark,
@@ -24,7 +23,7 @@ from hpobench.utils import setup_environment
 
 BASE_RANDOM_STATE = 42
 
-# Section control dictionary
+experiment_params = ExperimentParameters()
 
 # Granular run section control
 run_sections = {
@@ -38,15 +37,11 @@ run_sections = {
     "run_search_tuning_effect_comparison": False,
 }
 
+
 CACHE_PATH = "cache/"
 run_start_str, logger = setup_environment(cache_path=CACHE_PATH)
-DEFAULT_MAX_N_INSTANCES = 5
-STATIC_DATA_SIZES = [50, 100, 500]
-TUNING_ITERATIONS = [0, 20]
-N_COVERAGE_TRIALS = 100
-SMALL_N_REPETITIONS_PER_TUNER_CONFIG = 3
-MEDIUM_N_REPETITIONS_PER_TUNER_CONFIG = 3
-LARGE_N_REPETITIONS_PER_TUNER_CONFIG = 3
+
+schema = BenchmarkDataSchema()
 
 if __name__ == "__main__":
     # Coverage Analysis
@@ -54,15 +49,16 @@ if __name__ == "__main__":
         raw_benchmark_data = run_and_analyze_main_benchmark(
             benchmarks=["lcbench_large"],
             tuning_configurations=COVERAGE_ANALYSIS_CONFIGURATIONS,
-            n_warm_starts=N_WARM_STARTS,
-            n_trials=N_COVERAGE_TRIALS,
-            timeout=TIMEOUT,
+            n_warm_starts=experiment_params.n_warm_starts,
+            n_trials=experiment_params.n_trials,
+            timeout=experiment_params.timeout,
             base_random_state=BASE_RANDOM_STATE,
+            schema=schema,
             cache_path=CACHE_PATH,
             run_start_str=run_start_str,
             analysis_type="01_coverage_analysis",
-            max_n_instances_per_benchmark=DEFAULT_MAX_N_INSTANCES,
-            n_repetitions=LARGE_N_REPETITIONS_PER_TUNER_CONFIG,
+            max_n_instances_per_benchmark=experiment_params.default_max_n_instances,
+            n_repetitions=experiment_params.large_n_repetitions_per_tuner_config,
             starting_coverage_trial=32,
             analysis_components=["coverage"],
             # datasets_per_benchmark=[["cifar10"]],
@@ -73,16 +69,17 @@ if __name__ == "__main__":
         raw_benchmark_data = run_and_analyze_main_benchmark(
             benchmarks=["lcbench_large"],
             tuning_configurations=SAMPLER_VARIATION_CONFIGURATIONS,
-            n_warm_starts=N_WARM_STARTS,
-            n_trials=N_TRIALS,
-            timeout=TIMEOUT,
+            n_warm_starts=experiment_params.n_warm_starts,
+            n_trials=experiment_params.n_trials,
+            timeout=experiment_params.timeout,
             base_random_state=BASE_RANDOM_STATE,
             cache_path=CACHE_PATH,
             run_start_str=run_start_str,
             analysis_type="02_sampler_variation",
-            max_n_instances_per_benchmark=DEFAULT_MAX_N_INSTANCES,
-            n_repetitions=MEDIUM_N_REPETITIONS_PER_TUNER_CONFIG,
+            max_n_instances_per_benchmark=experiment_params.default_max_n_instances,
+            n_repetitions=experiment_params.medium_n_repetitions_per_tuner_config,
             analysis_components=["rank_analysis"],
+            schema=schema,
         )
 
     # Architecture Variation Analysis
@@ -90,20 +87,21 @@ if __name__ == "__main__":
         raw_benchmark_data = run_and_analyze_main_benchmark(
             benchmarks=["lcbench_large"],
             tuning_configurations=ARCHITECTURE_VARIATION_CONFIGURATIONS,
-            n_warm_starts=N_WARM_STARTS,
-            n_trials=N_TRIALS,
-            timeout=TIMEOUT,
+            n_warm_starts=experiment_params.n_warm_starts,
+            n_trials=experiment_params.n_trials,
+            timeout=experiment_params.timeout,
             base_random_state=BASE_RANDOM_STATE,
             cache_path=CACHE_PATH,
             run_start_str=run_start_str,
             analysis_type="03_architecture_variation",
-            max_n_instances_per_benchmark=DEFAULT_MAX_N_INSTANCES,
-            n_repetitions=SMALL_N_REPETITIONS_PER_TUNER_CONFIG,
+            max_n_instances_per_benchmark=experiment_params.default_max_n_instances,
+            n_repetitions=experiment_params.small_n_repetitions_per_tuner_config,
             analysis_components=[
                 "architecture_comparison",
                 "rank_analysis",
                 "sampler_comparison",
             ],
+            schema=schema,
         )
 
     # External Tuning Analysis
@@ -118,15 +116,16 @@ if __name__ == "__main__":
             ],  # , "lcbench_large", "lcbench_heteroscedastic"],
             tuning_configurations=LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS
             + EXTERNAL_TUNING_CONFIGURATIONS,
-            n_warm_starts=N_WARM_STARTS,
-            n_trials=N_TRIALS,
-            timeout=TIMEOUT,
+            n_warm_starts=experiment_params.n_warm_starts,
+            n_trials=experiment_params.n_trials,
+            timeout=experiment_params.timeout,
             base_random_state=BASE_RANDOM_STATE,
             cache_path=CACHE_PATH,
             run_start_str=run_start_str,
             analysis_type="04_external_tuning",
-            max_n_instances_per_benchmark=DEFAULT_MAX_N_INSTANCES,
-            n_repetitions=SMALL_N_REPETITIONS_PER_TUNER_CONFIG,
+            max_n_instances_per_benchmark=experiment_params.default_max_n_instances,
+            schema=schema,
+            n_repetitions=experiment_params.small_n_repetitions_per_tuner_config,
             analysis_components=[
                 "wilcoxon",
                 "permutation_test",
@@ -145,20 +144,21 @@ if __name__ == "__main__":
                 # "lcbench_heteroscedastic",
             ],
             tuning_configurations=PRECONFORMAL_COMPARISON_CONFIGURATIONS,
-            n_warm_starts=N_WARM_STARTS,
-            n_trials=N_TRIALS,
-            timeout=TIMEOUT,
+            n_warm_starts=experiment_params.n_warm_starts,
+            n_trials=experiment_params.n_trials,
+            timeout=experiment_params.timeout,
             base_random_state=BASE_RANDOM_STATE,
             cache_path=CACHE_PATH,
             run_start_str=run_start_str,
             analysis_type="05_preconformal_comparison",
-            max_n_instances_per_benchmark=DEFAULT_MAX_N_INSTANCES,
-            n_repetitions=MEDIUM_N_REPETITIONS_PER_TUNER_CONFIG,
+            max_n_instances_per_benchmark=experiment_params.default_max_n_instances,
+            n_repetitions=experiment_params.medium_n_repetitions_per_tuner_config,
             analysis_components=[
                 "friedman",
                 "nemenyi",
                 "conformalization_effect",
             ],
+            schema=schema,
         )
 
     if run_sections["run_quantile_count_comparison"]:
@@ -169,18 +169,19 @@ if __name__ == "__main__":
                 # "lcbench_heteroscedastic",
             ],
             tuning_configurations=QUANTILE_COUNT_VARIATION_CONFIGURATIONS,
-            n_warm_starts=N_WARM_STARTS,
-            n_trials=N_TRIALS,
-            timeout=TIMEOUT,
+            n_warm_starts=experiment_params.n_warm_starts,
+            n_trials=experiment_params.n_trials,
+            timeout=experiment_params.timeout,
             base_random_state=BASE_RANDOM_STATE,
             cache_path=CACHE_PATH,
             run_start_str=run_start_str,
             analysis_type="06_quantile_count_comparison",
-            max_n_instances_per_benchmark=DEFAULT_MAX_N_INSTANCES,
-            n_repetitions=MEDIUM_N_REPETITIONS_PER_TUNER_CONFIG,
+            max_n_instances_per_benchmark=experiment_params.default_max_n_instances,
+            n_repetitions=experiment_params.medium_n_repetitions_per_tuner_config,
             analysis_components=[
                 "quantile_count_comparison",
             ],
+            schema=schema,
         )
 
     if run_sections["run_search_tuning_effect_comparison"]:
@@ -191,18 +192,19 @@ if __name__ == "__main__":
                 # "lcbench_heteroscedastic",
             ],
             tuning_configurations=SEARCH_TUNING_EFFECT_CONFIGURATIONS,
-            n_warm_starts=N_WARM_STARTS,
-            n_trials=N_TRIALS,
-            timeout=TIMEOUT,
+            n_warm_starts=experiment_params.n_warm_starts,
+            n_trials=experiment_params.n_trials,
+            timeout=experiment_params.timeout,
             base_random_state=BASE_RANDOM_STATE,
             cache_path=CACHE_PATH,
             run_start_str=run_start_str,
             analysis_type="07_search_tuning_effect_comparison",
-            max_n_instances_per_benchmark=DEFAULT_MAX_N_INSTANCES,
-            n_repetitions=MEDIUM_N_REPETITIONS_PER_TUNER_CONFIG,
+            max_n_instances_per_benchmark=experiment_params.default_max_n_instances,
+            n_repetitions=experiment_params.medium_n_repetitions_per_tuner_config,
             analysis_components=[
                 "search_tuning_effectsearch_tuning_effect_comparison",
             ],
+            schema=schema,
         )
 
     # Static Analysis Section
@@ -211,14 +213,14 @@ if __name__ == "__main__":
 
         static_results = run_static_benchmark(
             benchmarks=["lcbench_large"],
-            data_size_range=STATIC_DATA_SIZES,
+            data_size_range=experiment_params.static_data_sizes,
             estimator_architectures=STATIC_ANALYSIS_ESTIMATOR_ARCHITECTURES,
-            n_repetitions_per_estimator=MEDIUM_N_REPETITIONS_PER_TUNER_CONFIG,
-            tuning_iterations_range=TUNING_ITERATIONS,
+            n_repetitions_per_estimator=experiment_params.medium_n_repetitions_per_tuner_config,
+            tuning_iterations_range=experiment_params.tuning_iterations,
             calibration_split=0.1,
             alpha=0.2,
-            n_pre_conformal_trials=min(TUNING_ITERATIONS) - 1,
-            max_n_instances=DEFAULT_MAX_N_INSTANCES,
+            n_pre_conformal_trials=min(experiment_params.tuning_iterations) - 1,
+            max_n_instances=experiment_params.default_max_n_instances,
             base_random_state=BASE_RANDOM_STATE,
         )
 

@@ -24,6 +24,8 @@ from hpobench.prepare import (
     setup_jahs201_configs,
     setup_nas301_configs,
 )
+from hpobench.config.schema import BenchmarkDataSchema
+
 from hpobench.tune import tune
 from hpobench.report.analyze import analyze_main_benchmark
 
@@ -204,6 +206,9 @@ def run_main_benchmark(
         - 'confidence_level': Confidence interval width for confopt (empty for others)
         - 'sampler': Sampling strategy class name for confopt (empty for others)
         - 'n_pre_conformal_trials': Pre-conformal trials for confopt (empty for others)
+        - 'sampler_n_quantiles': Number of quantiles used by sampler for confopt (empty for others)
+        - 'sampler_adapter': Adapter used by sampler for confopt ("None" if None, empty for others)
+        - 'tuner_searcher_tuning_framework': Searcher tuning framework from tuner config ("None" if None, empty for others)
     """
     logger.info("Running HPO benchmark...")
 
@@ -291,12 +296,38 @@ def run_main_benchmark(
                         n_pre_conformal_trials = tuner.searcher.n_pre_conformal_trials
                     else:
                         n_pre_conformal_trials = ""
+
+                    # Extract sampler's n_quantiles
+                    if hasattr(tuner.searcher.sampler, "n_quantiles"):
+                        sampler_n_quantiles = tuner.searcher.sampler.n_quantiles
+                    else:
+                        sampler_n_quantiles = ""
+
+                    # Extract sampler's adapter (convert None to string "None")
+                    if hasattr(tuner.searcher.sampler, "adapter"):
+                        if tuner.searcher.sampler.adapter is None:
+                            sampler_adapter = "None"
+                        else:
+                            sampler_adapter = str(tuner.searcher.sampler.adapter)
+                    else:
+                        sampler_adapter = ""
+
+                    # Extract tuner config's searcher_tuning_framework
+                    if tuner.searcher_tuning_framework is None:
+                        tuner_searcher_tuning_framework = "None"
+                    else:
+                        tuner_searcher_tuning_framework = str(
+                            tuner.searcher_tuning_framework
+                        )
                 else:
                     # NOTE: Use "" instead of None or NaN to avoid bad groupby behavior
                     sampler_name = ""
                     confidence_level = ""
                     estimator_architecture = ""
                     n_pre_conformal_trials = ""
+                    sampler_n_quantiles = ""
+                    sampler_adapter = ""
+                    tuner_searcher_tuning_framework = ""
 
                 historical_performance[
                     "estimator_architecture"
@@ -306,6 +337,11 @@ def run_main_benchmark(
                 historical_performance[
                     "n_pre_conformal_trials"
                 ] = n_pre_conformal_trials
+                historical_performance["sampler_n_quantiles"] = sampler_n_quantiles
+                historical_performance["sampler_adapter"] = sampler_adapter
+                historical_performance[
+                    "tuner_searcher_tuning_framework"
+                ] = tuner_searcher_tuning_framework
 
                 raw_benchmark_data = pd.concat(
                     [raw_benchmark_data, historical_performance], axis=0
@@ -350,6 +386,7 @@ def run_and_analyze_main_benchmark(
     n_trials: int,
     timeout: Optional[float],
     base_random_state: int,
+    schema: BenchmarkDataSchema,
     cache_path: str,
     run_start_str: str,
     analysis_type: str,
@@ -457,6 +494,7 @@ def run_and_analyze_main_benchmark(
         run_start_str=run_start_str,
         analysis_type=analysis_type,
         analysis_components=analysis_components,
+        schema=schema,
         starting_coverage_trial=starting_coverage_trial,
     )
 
