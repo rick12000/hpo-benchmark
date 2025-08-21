@@ -19,3 +19,6 @@
 - Avoid *args or **kwargs unless absolutely necessary.
 - Use pydantic models for configuration values.
 - Follow DRY and SOLID coding principles.
+
+# Environment Guidelines
+- When running anything in a terminal for the first time in a session, run 'conda activate hpo_benchmark_env' and 'pip install -e .'

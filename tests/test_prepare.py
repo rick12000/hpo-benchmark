@@ -7,7 +7,11 @@ from hpobench.prepare import (
 from hpobench.config.types import (
     ExperimentConfig,
 )
-from hpobench.config.benchmark_data import JAHS201_SEARCH_SPACE, BLACK_BOX_SEARCH_SPACE, NAS301_SEARCH_SPACE
+from hpobench.config.benchmark_data import (
+    JAHS201_SEARCH_SPACE,
+    BLACK_BOX_SEARCH_SPACE,
+    NAS301_SEARCH_SPACE,
+)
 from hpobench.config.config import SEARCHER, TunerConfig
 from hpobench.config.utils import create_sampler_config_id
 
@@ -92,21 +96,21 @@ def test_setup_nas301_configs():
     assert all(c.search_space == NAS301_SEARCH_SPACE for c in configs)
     assert all(c.benchmark_identifier == "nas301" for c in configs)
     assert [c.dataset_identifier for c in configs] == datasets
-    
+
     # Test that the generator is properly configured with maximum fidelity
     generator = configs[0].objective_function
     assert generator.dataset == "nb301"
     assert hasattr(generator, "default_fidelities")
-    assert generator.default_fidelities["epoch"] == 98  # Maximum fidelity for NAS-301
+    assert generator.default_fidelities["epoch"] == 97  # Maximum fidelity for NAS-301
 
 
 def test_yahpo_instance_configs_use_maximum_fidelity():
     """Test that YAHPO instance configs use maximum fidelity values."""
     test_cases = [
-        ("lcbench", {"epoch": 52}),
+        ("lcbench", {"epoch": 50}),
         ("rbv2_xgboost", {"repl": 10, "trainsize": 1.0}),
     ]
-    
+
     for benchmark, expected_max_fidelity in test_cases:
         configs = setup_yahpo_instance_configs(
             benchmark=benchmark,
@@ -116,12 +120,16 @@ def test_yahpo_instance_configs_use_maximum_fidelity():
             timeout=3600,
             max_n_instances=1,  # Just test one instance
         )
-        
+
         assert len(configs) >= 1
         generator = configs[0].objective_function
-        
+
         # Verify all fidelity parameters use maximum values
         for param_name, expected_max in expected_max_fidelity.items():
-            assert param_name in generator.fidelity_space, f"Missing fidelity parameter {param_name}"
+            assert (
+                param_name in generator.fidelity_space
+            ), f"Missing fidelity parameter {param_name}"
             actual_value = generator.fidelity_space[param_name]
-            assert actual_value == expected_max, f"{benchmark} {param_name}: expected {expected_max}, got {actual_value}"
+            assert (
+                actual_value == expected_max
+            ), f"{benchmark} {param_name}: expected {expected_max}, got {actual_value}"

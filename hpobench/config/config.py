@@ -196,17 +196,20 @@ LIMITED_ARCHITECTURE_N_QUANTILES = 4
 LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurations(
     architectures=[
         # "qrf",
-        # "qgp",
+        "qgp",
         # "ql",
-        "qgbm",
-        "qens3",
-        "qens4",
+        # "qgbm",
+        # "qens1",
+        # "qens2",
+        # "qens3",
+        # "qens4",
+        # "qens5",
     ],
     samplers=[
         ThompsonSampler(
-            n_quantiles=SAMPLER_VARIATION_N_DEFAULT_QUANTILES,
+            n_quantiles=LIMITED_ARCHITECTURE_N_QUANTILES,
             enable_optimistic_sampling=True,
-            adapter=SAMPLER_VARIATION_DEFAULT_ADAPTER,
+            adapter=LIMITED_ARCHITECTURE_ADAPTER,
         )
     ],
     n_pre_conformal_trials=32,

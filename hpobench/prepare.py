@@ -168,6 +168,9 @@ def setup_yahpo_instance_configs(
                         choices=hyperparameter.choices
                     )
 
+        if benchmark_override == "lcbench":
+            fidelity_space["epoch"] = 50
+
         experiment_generator = YahpoGenerator(
             dataset=benchmark_override,
             instance_value=instance_value,

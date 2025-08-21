@@ -2,10 +2,11 @@ import matplotlib
 import matplotlib.pyplot as plt
 from datetime import datetime
 import pandas as pd
-from typing import Optional
+from typing import Optional, Dict
 import time
 import os
 import logging
+import numpy as np
 from hpobench.utils import AnalysisPathManager
 
 logger = logging.getLogger(__name__)
@@ -368,4 +369,280 @@ def plot_and_save(
     logger.debug(f"Plots saved in {output_path} with prefix {filename_prefix}")
 
 
+def plot_critical_difference_diagram(
+    ax,
+    mean_ranks: Dict[str, float],
+    significance_results: pd.DataFrame,
+    alpha: float = 0.05,
+    title: Optional[str] = None,
+) -> None:
+    """Plot a critical difference diagram using scikit-posthocs."""
+    try:
+        import scikit_posthocs as sp
+    except ImportError:
+        logger.error("scikit-posthocs is required for critical difference diagrams")
+        return
 
+    # Convert to format expected by scikit-posthocs
+    ranks_series = pd.Series(mean_ranks)
+    algorithms = list(mean_ranks.keys())
+
+    # Create significance matrix
+    sig_matrix = pd.DataFrame(1.0, index=algorithms, columns=algorithms)
+    np.fill_diagonal(sig_matrix.values, 1.0)
+
+    for _, row in significance_results.iterrows():
+        alg1, alg2 = row["entity1"], row["entity2"]
+        if alg1 in algorithms and alg2 in algorithms:
+            p_val = row.get("p_value_corrected", row.get("p_value", 1.0))
+            sig_matrix.loc[alg1, alg2] = p_val
+            sig_matrix.loc[alg2, alg1] = p_val
+
+    # Clear and setup axis
+    ax.clear()
+
+    # Generate the diagram
+    sp.critical_difference_diagram(
+        ranks=ranks_series,
+        sig_matrix=sig_matrix,
+        ax=ax,
+        label_fmt_left="{label} [{rank:.2f}]  ",
+        label_fmt_right="  [{rank:.2f}] {label}",
+    )
+
+    # Apply formatting to remove circles, colors, and vertical grid lines
+    _apply_cd_formatting(ax)
+
+    if title:
+        ax.set_title(title, fontsize=13)
+
+
+def _apply_cd_formatting(ax):
+    """Remove colored elements, circles, and vertical grid lines from critical difference diagram."""
+    # Remove all collections (this removes colored areas and circles)
+    while ax.collections:
+        ax.collections[0].remove()
+
+    # Set all lines to black
+    for line in ax.get_lines():
+        line.set_color("black")
+        line.set_linewidth(1)
+
+    # Set all text to black
+    for text in ax.findobj(match=matplotlib.text.Text):
+        text.set_color("black")
+        text.set_fontsize(10)
+
+    # Remove any patches (circles, rectangles, etc.)
+    while ax.patches:
+        ax.patches[0].remove()
+
+    # Turn off grid completely to remove vertical lines
+    ax.grid(False)
+
+    # Clean up axis appearance
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_visible(False)
+    ax.set_yticks([])
+
+
+def plot_paired_rank_and_cd(
+    data: pd.DataFrame,
+    significance_data: pd.DataFrame,
+    x_col: str,
+    entity_col: str,
+    cache_path: str,
+    run_start_str: str,
+    filename_prefix: str,
+    analysis_type: str,
+    subfolder: str,
+    row_measure: str,
+    cd_budget: int = 100,
+    alpha: float = 0.05,
+    x_label: Optional[str] = None,
+    row_measure_label: Optional[str] = None,
+) -> None:
+    """Plot paired visualizations: rank evolution and critical difference diagrams.
+
+    Creates a two-column plot where:
+    - Left column: Rank evolution over budget (existing functionality)
+    - Right column: Critical difference diagram at specified budget
+    - Shared legend at the bottom center
+
+    Args:
+        data: Aggregated rank data with budget information
+        significance_data: Pairwise significance test results
+        x_col: Column for x-axis (budget)
+        entity_col: Column for algorithms/entities
+        cache_path: Base cache path
+        run_start_str: Run identifier
+        filename_prefix: Prefix for saved files
+        analysis_type: Analysis type for path organization
+        subfolder: Subfolder for saving plots
+        row_measure: Column for row grouping (e.g., benchmark)
+        cd_budget: Budget value to use for critical difference diagram
+        alpha: Significance level
+        x_label: Custom x-axis label
+        row_measure_label: Custom row measure label
+    """
+    path_manager = AnalysisPathManager(cache_path, run_start_str)
+    output_path = path_manager.get_analysis_path(analysis_type, "plots", subfolder)
+    plot_path = os.path.join(output_path, f"{filename_prefix}_paired")
+
+    # Get unique row values
+    row_values = data[row_measure].unique()
+
+    # Create figure with 2 columns for each row, match sizing logic from plot_benchmark_data
+    base_width = 4.0
+    base_height = 3.0
+    fig_width = base_width * 2  # 2 columns
+    fig_height = base_height * len(row_values)
+
+    fig, axes = plt.subplots(
+        nrows=len(row_values),
+        ncols=2,
+        figsize=(fig_width, fig_height),
+        sharex=False,
+        sharey=False,
+        constrained_layout=True,
+    )
+
+    # Ensure axes is always 2D for easier iteration
+    if len(row_values) == 1:
+        axes = (
+            [[axes[0], axes[1]]]
+            if hasattr(axes, "__len__") and not isinstance(axes[0], list)
+            else [axes]
+        )
+
+    # Collect legend information from first plot
+    legend_handles = []
+    legend_labels = []
+
+    for i, row_value in enumerate(row_values):
+        # Filter data for this row
+        row_data = data[data[row_measure] == row_value]
+        row_sig_data = significance_data[significance_data[row_measure] == row_value]
+
+        # Left plot: Rank evolution
+        ax_rank = axes[i][0]
+
+        # Plot rank evolution for each algorithm
+        for entity_idx, (entity, entity_data) in enumerate(
+            row_data.groupby(entity_col)
+        ):
+            color = DEFAULT_COLOR_PALETTE[entity_idx % len(DEFAULT_COLOR_PALETTE)]
+            line = ax_rank.plot(
+                entity_data[x_col],
+                entity_data["rank"],
+                label=entity,
+                alpha=0.8,
+                color=color,
+                marker=None,
+                markersize=4,
+            )[0]
+
+            # Collect legend information from first row only
+            if i == 0:
+                legend_handles.append(line)
+                legend_labels.append(entity)
+
+            # Add confidence intervals if available
+            if (
+                "rank_lower" in entity_data.columns
+                and "rank_upper" in entity_data.columns
+            ):
+                ax_rank.fill_between(
+                    entity_data[x_col],
+                    entity_data["rank_lower"],
+                    entity_data["rank_upper"],
+                    alpha=0.2,
+                    color=color,
+                )
+
+        # Format left plot consistent with plot_benchmark_data
+        ax_rank.set_xlabel(_get_label(x_label, x_col), fontsize=13)
+        ax_rank.set_ylabel("Mean Rank (lower is better)", fontsize=13)
+        ax_rank.set_title(
+            f"{_get_label(row_measure_label, row_measure)}: {row_value}\nRank Evolution",
+            fontsize=13,
+        )
+        ax_rank.grid(True, which="both", linestyle="--", linewidth=0.5, alpha=0.7)
+
+        # Thicker axis lines for academic style (match plot_benchmark_data)
+        for spine in ["top", "right", "bottom", "left"]:
+            ax_rank.spines[spine].set_linewidth(1.2)
+
+        # Set tick parameters for readability (match plot_benchmark_data)
+        ax_rank.tick_params(
+            axis="both", which="major", labelsize=11, length=6, width=1.2
+        )
+        ax_rank.tick_params(
+            axis="both", which="minor", labelsize=9, length=3, width=1.0
+        )
+
+        # Right plot: Critical difference diagram
+        ax_cd = axes[i][1]
+
+        # Get mean ranks at the specified budget
+        cd_data = row_data[row_data[x_col] == cd_budget]
+        if not cd_data.empty:
+            mean_ranks = dict(zip(cd_data[entity_col], cd_data["rank"]))
+
+            plot_critical_difference_diagram(
+                ax=ax_cd,
+                mean_ranks=mean_ranks,
+                significance_results=row_sig_data,
+                alpha=alpha,
+                title=f"{_get_label(row_measure_label, row_measure)}: {row_value}\nCritical Difference (Budget={cd_budget})",
+            )
+        else:
+            ax_cd.text(
+                0.5,
+                0.5,
+                f"No data available\nfor budget={cd_budget}",
+                ha="center",
+                va="center",
+                transform=ax_cd.transAxes,
+                fontsize=10,
+            )
+            ax_cd.set_title(
+                f"{_get_label(row_measure_label, row_measure)}: {row_value}\nCritical Difference (Budget={cd_budget})",
+                fontsize=13,
+            )
+
+        # Clean up CD axis appearance to match overall style
+        for spine in ["top", "right", "bottom", "left"]:
+            if spine in ax_cd.spines:
+                ax_cd.spines[spine].set_linewidth(1.2)
+        ax_cd.tick_params(axis="both", which="major", labelsize=11, length=6, width=1.2)
+        ax_cd.tick_params(axis="both", which="minor", labelsize=9, length=3, width=1.0)
+
+    # Add shared legend at the bottom center (consistent with plot_benchmark_data)
+    handles, labels = (legend_handles, legend_labels)
+    if handles:
+        fig.legend(
+            handles,
+            labels,
+            loc="lower center",
+            ncol=min(4, len(labels)),
+            fontsize=12,
+            bbox_to_anchor=(0.5, -0.16),
+            frameon=False,
+        )
+
+    # Tight layout for academic papers with extra bottom space for legend (match plot_benchmark_data)
+    fig.subplots_adjust(
+        wspace=0.15, hspace=0.18, bottom=0.20, top=0.93, left=0.09, right=0.98
+    )
+
+    # Save the plot using same format handling
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    for fmt in PLOT_FORMATS:
+        full_path = f"{plot_path}_{timestamp}.{fmt}"
+        fig.savefig(full_path, dpi=PLOT_DPI, bbox_inches="tight", format=fmt)
+
+    plt.close(fig)
+    logger.debug(
+        f"Paired plots saved in {output_path} with prefix {filename_prefix}_paired"
+    )

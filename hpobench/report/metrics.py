@@ -7,7 +7,8 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 
 from hpobench.utils import get_group_dict
-from scipy.stats import friedmanchisquare
+from scipy.stats import friedmanchisquare, wilcoxon
+from statsmodels.stats.multitest import multipletests
 
 
 logger = logging.getLogger(__name__)
@@ -180,6 +181,294 @@ def nemenyi_pairwise_test(
                             "better_entity": e1 if rank1 < rank2 else e2,
                         }
                     )
+
+    return pd.DataFrame(results)
+
+
+def wilcoxon_pairwise_test(
+    data: pd.DataFrame,
+    across_col: str,
+    entity_col: str,
+    rank_col: str,
+    breakout_col: Optional[List[str]] = None,
+    alpha: float = 0.05,
+) -> pd.DataFrame:
+    """Performs Wilcoxon signed-rank pairwise tests with Holm-Bonferroni correction.
+
+    For each algorithm pair, computes mean rank per dataset, then applies
+    Wilcoxon signed-rank test across datasets. Uses Holm-Bonferroni correction
+    to control for multiple comparisons.
+
+    Args:
+        data: DataFrame with `across_col`, `entity_col`, `rank_col`,
+            and any `breakout_col` columns.
+        across_col: Column for datasets (e.g., 'dataset').
+        entity_col: Column for algorithms/entities (e.g., 'tuner').
+        rank_col: Column with ranks (lower is better).
+        breakout_col: Optional list of columns for grouping data.
+        alpha: Significance level for determining statistical significance.
+
+    Returns:
+        DataFrame with pairwise comparison results including:
+        - Group identifiers (if breakout_col provided)
+        - entity1, entity2: The two entities being compared
+        - mean_rank_1, mean_rank_2: Mean ranks for each entity
+        - mean_rank_difference: Difference in mean ranks (entity1 - entity2)
+        - p_value: Raw p-value from Wilcoxon test
+        - p_value_corrected: Holm-Bonferroni corrected p-value
+        - significant: Boolean indicator if corrected p_value < alpha
+        - better_entity: Entity with lower (better) mean rank
+    """
+    results = []
+    group_iter = (
+        data.groupby(breakout_col) if breakout_col is not None else [(None, data)]
+    )
+
+    for within_group, group_df in group_iter:
+        if group_df[entity_col].nunique() < 2:
+            logger.info(
+                f"Skipping {within_group}: Need at least 2 entities for Wilcoxon test"
+            )
+            continue
+
+        if group_df[across_col].nunique() < 2:
+            logger.info(
+                f"Skipping {within_group}: Need at least 2 datasets for Wilcoxon test"
+            )
+            continue
+
+        # Collapse repetitions into mean rank per algorithm per dataset
+        mean_ranks_df = (
+            group_df.groupby([across_col, entity_col])[rank_col].mean().reset_index()
+        )
+
+        # Pivot to get algorithms as columns
+        pivot_df = mean_ranks_df.pivot(
+            index=across_col, columns=entity_col, values=rank_col
+        )
+
+        # Get all entities
+        entities = pivot_df.columns.tolist()
+        group_dict = get_group_dict(breakout_col, within_group)
+
+        # Store pairwise results for this group
+        pairwise_results = []
+
+        # Compute all pairwise comparisons
+        for i, e1 in enumerate(entities):
+            for j, e2 in enumerate(entities):
+                if i < j:
+                    # Get paired observations (one per dataset)
+                    e1_ranks = pivot_df[e1].dropna()
+                    e2_ranks = pivot_df[e2].dropna()
+
+                    # Find common datasets
+                    common_datasets = e1_ranks.index.intersection(e2_ranks.index)
+                    if len(common_datasets) < 2:
+                        logger.info(
+                            f"Skipping {e1} vs {e2} in {within_group}: Need at least 2 common datasets"
+                        )
+                        continue
+
+                    e1_common = e1_ranks.loc[common_datasets]
+                    e2_common = e2_ranks.loc[common_datasets]
+
+                    # Compute Wilcoxon signed-rank test
+                    try:
+                        # Test if distributions are different
+                        stat, p_value = wilcoxon(
+                            e1_common, e2_common, alternative="two-sided"
+                        )
+                    except ValueError as e:
+                        # Handle case where differences are all zero
+                        logger.warning(f"Wilcoxon test failed for {e1} vs {e2}: {e}")
+                        p_value = 1.0
+
+                    mean_rank_1 = e1_common.mean()
+                    mean_rank_2 = e2_common.mean()
+                    mean_rank_diff = mean_rank_1 - mean_rank_2
+
+                    pairwise_results.append(
+                        {
+                            **group_dict,
+                            "entity1": e1,
+                            "entity2": e2,
+                            "mean_rank_1": mean_rank_1,
+                            "mean_rank_2": mean_rank_2,
+                            "mean_rank_difference": mean_rank_diff,
+                            "p_value": p_value,
+                            "better_entity": e1 if mean_rank_1 < mean_rank_2 else e2,
+                        }
+                    )
+
+        # Apply Holm-Bonferroni correction within this group
+        if pairwise_results:
+            p_values = [result["p_value"] for result in pairwise_results]
+            reject, p_corrected, _, _ = multipletests(
+                p_values, alpha=alpha, method="holm"
+            )
+
+            for i, result in enumerate(pairwise_results):
+                result["p_value_corrected"] = p_corrected[i]
+                result["significant"] = reject[i]
+
+            results.extend(pairwise_results)
+
+    return pd.DataFrame(results)
+
+
+def permutation_pairwise_test(
+    data: pd.DataFrame,
+    across_col: str,
+    entity_col: str,
+    rank_col: str,
+    breakout_col: Optional[List[str]] = None,
+    alpha: float = 0.05,
+    n_permutations: int = 10000,
+    random_state: Optional[int] = None,
+) -> pd.DataFrame:
+    """Performs permutation tests for pairwise comparisons with Holm-Bonferroni correction.
+
+    For each dataset, computes mean rank difference between algorithms.
+    Uses permutation test by randomly flipping signs of differences to build
+    null distribution. Applies Holm-Bonferroni correction across all pairs.
+
+    Args:
+        data: DataFrame with `across_col`, `entity_col`, `rank_col`,
+            and any `breakout_col` columns.
+        across_col: Column for datasets (e.g., 'dataset').
+        entity_col: Column for algorithms/entities (e.g., 'tuner').
+        rank_col: Column with ranks (lower is better).
+        breakout_col: Optional list of columns for grouping data.
+        alpha: Significance level for determining statistical significance.
+        n_permutations: Number of permutations for the test.
+        random_state: Random seed for reproducible results.
+
+    Returns:
+        DataFrame with pairwise comparison results including:
+        - Group identifiers (if breakout_col provided)
+        - entity1, entity2: The two entities being compared
+        - mean_rank_1, mean_rank_2: Mean ranks for each entity
+        - mean_rank_difference: Difference in mean ranks (entity1 - entity2)
+        - p_value: Two-sided p-value from permutation test
+        - p_value_corrected: Holm-Bonferroni corrected p-value
+        - significant: Boolean indicator if corrected p_value < alpha
+        - better_entity: Entity with lower (better) mean rank
+        - ci_lower, ci_upper: Confidence interval from permutation distribution
+    """
+    if random_state is not None:
+        np.random.seed(random_state)
+
+    results = []
+    group_iter = (
+        data.groupby(breakout_col) if breakout_col is not None else [(None, data)]
+    )
+
+    for within_group, group_df in group_iter:
+        if group_df[entity_col].nunique() < 2:
+            logger.info(
+                f"Skipping {within_group}: Need at least 2 entities for permutation test"
+            )
+            continue
+
+        if group_df[across_col].nunique() < 2:
+            logger.info(
+                f"Skipping {within_group}: Need at least 2 datasets for permutation test"
+            )
+            continue
+
+        # Collapse repetitions into mean rank per algorithm per dataset
+        mean_ranks_df = (
+            group_df.groupby([across_col, entity_col])[rank_col].mean().reset_index()
+        )
+
+        # Pivot to get algorithms as columns
+        pivot_df = mean_ranks_df.pivot(
+            index=across_col, columns=entity_col, values=rank_col
+        )
+
+        # Get all entities
+        entities = pivot_df.columns.tolist()
+        group_dict = get_group_dict(breakout_col, within_group)
+
+        # Store pairwise results for this group
+        pairwise_results = []
+
+        # Compute all pairwise comparisons
+        for i, e1 in enumerate(entities):
+            for j, e2 in enumerate(entities):
+                if i < j:
+                    # Get paired observations (one per dataset)
+                    e1_ranks = pivot_df[e1].dropna()
+                    e2_ranks = pivot_df[e2].dropna()
+
+                    # Find common datasets
+                    common_datasets = e1_ranks.index.intersection(e2_ranks.index)
+                    if len(common_datasets) < 2:
+                        logger.info(
+                            f"Skipping {e1} vs {e2} in {within_group}: Need at least 2 common datasets"
+                        )
+                        continue
+
+                    e1_common = e1_ranks.loc[common_datasets]
+                    e2_common = e2_ranks.loc[common_datasets]
+
+                    # Compute observed differences per dataset
+                    differences = e1_common.values - e2_common.values
+                    observed_mean_diff = np.mean(differences)
+
+                    # Permutation test: randomly flip signs
+                    null_distribution = []
+                    for _ in range(n_permutations):
+                        # Randomly flip signs of differences
+                        signs = np.random.choice([-1, 1], size=len(differences))
+                        permuted_diff = np.mean(differences * signs)
+                        null_distribution.append(permuted_diff)
+
+                    null_distribution = np.array(null_distribution)
+
+                    # Compute two-sided p-value
+                    p_value = np.mean(
+                        np.abs(null_distribution) >= np.abs(observed_mean_diff)
+                    )
+
+                    # Compute confidence interval (95% by default)
+                    ci_alpha = 1 - 0.95  # 95% CI
+                    ci_lower = np.percentile(null_distribution, 100 * ci_alpha / 2)
+                    ci_upper = np.percentile(
+                        null_distribution, 100 * (1 - ci_alpha / 2)
+                    )
+
+                    mean_rank_1 = e1_common.mean()
+                    mean_rank_2 = e2_common.mean()
+
+                    pairwise_results.append(
+                        {
+                            **group_dict,
+                            "entity1": e1,
+                            "entity2": e2,
+                            "mean_rank_1": mean_rank_1,
+                            "mean_rank_2": mean_rank_2,
+                            "mean_rank_difference": observed_mean_diff,
+                            "p_value": p_value,
+                            "ci_lower": ci_lower,
+                            "ci_upper": ci_upper,
+                            "better_entity": e1 if mean_rank_1 < mean_rank_2 else e2,
+                        }
+                    )
+
+        # Apply Holm-Bonferroni correction within this group
+        if pairwise_results:
+            p_values = [result["p_value"] for result in pairwise_results]
+            reject, p_corrected, _, _ = multipletests(
+                p_values, alpha=alpha, method="holm"
+            )
+
+            for i, result in enumerate(pairwise_results):
+                result["p_value_corrected"] = p_corrected[i]
+                result["significant"] = reject[i]
+
+            results.extend(pairwise_results)
 
     return pd.DataFrame(results)
 

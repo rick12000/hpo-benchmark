@@ -31,22 +31,22 @@ run_sections = {
     "run_coverage_analysis": False,
     "run_sampler_variation_analysis": False,
     "run_architecture_variation_analysis": False,
-    "run_external_tuning_analysis": False,
+    "run_external_tuning_analysis": True,
     "run_preconformal_comparison_analysis": False,
     "run_static_analysis": False,
     "run_quantile_count_comparison": False,
-    "run_search_tuning_effect_comparison": True,
+    "run_search_tuning_effect_comparison": False,
 }
 
 CACHE_PATH = "cache/"
 run_start_str, logger = setup_environment(cache_path=CACHE_PATH)
-DEFAULT_MAX_N_INSTANCES = 20
+DEFAULT_MAX_N_INSTANCES = 5
 STATIC_DATA_SIZES = [50, 100, 500]
 TUNING_ITERATIONS = [0, 20]
 N_COVERAGE_TRIALS = 100
-SMALL_N_REPETITIONS_PER_TUNER_CONFIG = 10
-MEDIUM_N_REPETITIONS_PER_TUNER_CONFIG = 10
-LARGE_N_REPETITIONS_PER_TUNER_CONFIG = 10
+SMALL_N_REPETITIONS_PER_TUNER_CONFIG = 3
+MEDIUM_N_REPETITIONS_PER_TUNER_CONFIG = 3
+LARGE_N_REPETITIONS_PER_TUNER_CONFIG = 3
 
 if __name__ == "__main__":
     # Coverage Analysis
@@ -128,7 +128,8 @@ if __name__ == "__main__":
             max_n_instances_per_benchmark=DEFAULT_MAX_N_INSTANCES,
             n_repetitions=SMALL_N_REPETITIONS_PER_TUNER_CONFIG,
             analysis_components=[
-                "friedman",
+                "wilcoxon",
+                "permutation_test",
                 "nemenyi",
                 "rank_analysis",
                 "dataset_performances",

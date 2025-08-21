@@ -6,6 +6,7 @@ from hpobench.utils import AnalysisPathManager
 from hpobench.utils import save_analysis_results
 from hpobench.plot import (
     plot_and_save,
+    plot_paired_rank_and_cd,
 )
 from hpobench.process import (
     process_performance_records,
@@ -16,6 +17,8 @@ from hpobench.process import (
 from hpobench.report.utils import (
     run_and_save_friedman,
     run_and_save_nemenyi,
+    run_and_save_wilcoxon,
+    run_and_save_permutation_test,
     aggregate_and_save,
     run_and_save_calibration_statistics,
 )
@@ -32,6 +35,8 @@ def analyze_main_benchmark(
         Literal[
             "friedman",
             "nemenyi",
+            "wilcoxon",
+            "permutation_test",
             "coverage",
             "dataset_performances",
             "rank_analysis",
@@ -44,6 +49,9 @@ def analyze_main_benchmark(
     ],
     alpha: float = 0.05,
     starting_coverage_trial: Optional[int] = None,
+    cd_significance_method: Literal[
+        "nemenyi", "wilcoxon", "permutation_test"
+    ] = "nemenyi",
 ):
     """Analyze HPO benchmark results with comprehensive statistical and visual analysis.
 
@@ -74,9 +82,14 @@ def analyze_main_benchmark(
         cache_path: Root directory path for saving analysis outputs and plots.
         run_start_str: Timestamp string identifying this experimental run for file organization.
         analysis_type: Category label for analysis (e.g., "coverage_analysis", "sampler_variation").
+        alpha: Significance level for statistical tests. Defaults to 0.05.
+        starting_coverage_trial: Optional starting trial for coverage analysis.
+        cd_significance_method: Method for critical difference diagrams ("nemenyi", "wilcoxon", or "permutation_test").
         analysis_components: List of analysis types to execute. Valid options:
             - "friedman": Friedman test for overall statistical significance
             - "nemenyi": Nemenyi post-hoc test for pairwise comparisons
+            - "wilcoxon": Wilcoxon signed-rank test with Holm-Bonferroni correction for pairwise comparisons
+            - "permutation_test": Permutation test with Holm-Bonferroni correction for pairwise comparisons
             - "coverage": Coverage breach rate analysis for conformal prediction
             - "dataset_performances": Per-dataset performance trajectory plots
             - "rank_analysis": Ranking evolution across runtime and iteration budgets
@@ -150,12 +163,15 @@ def analyze_main_benchmark(
     )
     cross_repetition_relative_runtime_results = collapse_per_budget(
         data=cleaned_relative_runtime_results,
-        aggregators=[col for col in grouping_cols if col != rep_col],
+        aggregators=[
+            col for col in grouping_cols + [norm_runtime_unit] if col != rep_col
+        ],
         metrics=["rank", "best_performance"],
-        budget_unit=norm_runtime_unit,
     )
 
-    # Run stratified analysis:
+    # Run stratified analysis and store significance results for critical difference diagrams
+    significance_results_for_cd = {}
+
     for budget in budget_cross_sections:
         budget_data = cross_repetition_relative_runtime_results[
             cross_repetition_relative_runtime_results[norm_runtime_unit] == budget
@@ -190,6 +206,43 @@ def analyze_main_benchmark(
                 analysis_type=analysis_type,
             )
             nemenyi_df[norm_runtime_unit] = budget
+            if cd_significance_method == "nemenyi":
+                significance_results_for_cd[budget] = nemenyi_df
+
+        if "wilcoxon" in analysis_components:
+            wilcoxon_df = run_and_save_wilcoxon(
+                data=budget_data,
+                breakout_col=[bench_col],
+                across_col=data_col,
+                entity_col=tuner_col,
+                rank_col="rank",
+                alpha=alpha,
+                cache_path=cache_path,
+                run_start_str=run_start_str,
+                filename=f"wilcoxon_pairwise_budget_{budget}.csv",
+                analysis_type=analysis_type,
+            )
+            wilcoxon_df[norm_runtime_unit] = budget
+            if cd_significance_method == "wilcoxon":
+                significance_results_for_cd[budget] = wilcoxon_df
+
+        if "permutation_test" in analysis_components:
+            permutation_df = run_and_save_permutation_test(
+                data=budget_data,
+                breakout_col=[bench_col],
+                across_col=data_col,
+                entity_col=tuner_col,
+                rank_col="rank",
+                alpha=alpha,
+                cache_path=cache_path,
+                run_start_str=run_start_str,
+                filename=f"permutation_pairwise_budget_{budget}.csv",
+                analysis_type=analysis_type,
+                random_state=42,  # For reproducibility
+            )
+            permutation_df[norm_runtime_unit] = budget
+            if cd_significance_method == "permutation_test":
+                significance_results_for_cd[budget] = permutation_df
 
         # 2. Win rates:
 
@@ -250,14 +303,8 @@ def analyze_main_benchmark(
             filename_prefix="coverage_per_dataset",
             analysis_type=analysis_type,
             subfolder="coverage_breach_rates",
-            y_cols_lower=[
-                "cumulative_coverage_error_lower",
-                "rolling_coverage_error_lower",
-            ],
-            y_cols_upper=[
-                "cumulative_coverage_error_upper",
-                "rolling_coverage_error_upper",
-            ],
+            y_cols_lower=None,
+            y_cols_upper=None,
             share_y_axis=False,
         )
 
@@ -326,7 +373,7 @@ def analyze_main_benchmark(
                 tuner_col,
             ],
             breakout_cols=[bench_col],
-            block_cols=[data_col, rep_col],
+            block_cols=[data_col],
             metrics=["rank"],
             cache_path=cache_path,
             run_start_str=run_start_str,
@@ -351,6 +398,30 @@ def analyze_main_benchmark(
             share_y_axis=False,
         )
 
+        # Add paired plotting with critical difference diagrams if significance results are available
+        cd_budget = 100  # Default budget for critical difference diagrams
+        if (
+            cd_budget in significance_results_for_cd
+            and cd_significance_method in analysis_components
+        ):
+
+            plot_paired_rank_and_cd(
+                data=relativized_runtime_aggregated_results,
+                significance_data=significance_results_for_cd[cd_budget],
+                x_col=norm_runtime_unit,
+                entity_col=tuner_col,
+                cache_path=cache_path,
+                run_start_str=run_start_str,
+                filename_prefix=f"rank_vs_norm_runtime_with_cd_{cd_significance_method}",
+                analysis_type=analysis_type,
+                subfolder="rank_analysis",
+                row_measure=bench_col,
+                cd_budget=cd_budget,
+                alpha=alpha,
+                x_label="Normalized Runtime",
+                row_measure_label="Benchmark",
+            )
+
         # Group at benchmark level:
         iteration_aggregated_results = aggregate_and_save(
             data=cleaned_iterative_results,
@@ -360,7 +431,7 @@ def analyze_main_benchmark(
                 tuner_col,
             ],
             breakout_cols=[bench_col],
-            block_cols=[data_col, rep_col],
+            block_cols=[data_col],
             metrics=["rank"],
             cache_path=cache_path,
             run_start_str=run_start_str,
@@ -480,7 +551,7 @@ def analyze_main_benchmark(
                 sampler_col,
             ],
             breakout_cols=[bench_col],
-            block_cols=[data_col, rep_col],
+            block_cols=[data_col],
             metrics=["rank"],
             cache_path=cache_path,
             run_start_str=run_start_str,
@@ -549,7 +620,7 @@ def analyze_main_benchmark(
                 sampler_col,
             ],
             breakout_cols=[bench_col],
-            block_cols=[data_col, rep_col],
+            block_cols=[data_col],
             metrics=["rank"],
             cache_path=cache_path,
             run_start_str=run_start_str,
@@ -622,7 +693,7 @@ def analyze_main_benchmark(
                 sampler_col,
             ],
             breakout_cols=[bench_col],
-            block_cols=[data_col, rep_col],
+            block_cols=[data_col],
             metrics=["rank"],
             cache_path=cache_path,
             run_start_str=run_start_str,
@@ -771,7 +842,7 @@ def analyze_searcher_tuning_effect(
         data=filtered_df,
         grouping_cols=aggregation_columns,
         breakout_cols=[bench_col, data_size_col, tuning_iterations_column],
-        block_cols=[data_col, repetition_column],
+        block_cols=[data_col],
         metrics=["rank"],
         cache_path=cache_path,
         run_start_str=run_start_str,
@@ -926,7 +997,7 @@ def analyze_searcher_estimator_comparison(
         data=filtered_df,
         grouping_cols=aggregation_columns,
         breakout_cols=[bench_col, data_size_col],
-        block_cols=[data_col, repetition_column],
+        block_cols=[data_col],
         metrics=["rank"],
         cache_path=cache_path,
         run_start_str=run_start_str,

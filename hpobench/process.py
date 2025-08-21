@@ -42,7 +42,6 @@ def collapse_per_budget(
     data: pd.DataFrame,
     aggregators: List[str],
     metrics: List[str],
-    budget_unit: str,
 ) -> pd.DataFrame:
     """
     Collapses HPO benchmark data by computing statistical summaries across repetitions.
@@ -60,16 +59,15 @@ def collapse_per_budget(
     Returns:
         Collapsed data with mean values and confidence intervals for each metric.
     """
-    groupby_columns = aggregators + [budget_unit]
-    data_cleaned = validate_groupby_columns(data, groupby_columns)
+    data_cleaned = validate_groupby_columns(data, aggregators)
 
     aggregations = {}
     for metric in metrics:
         aggregations[metric] = "mean"
 
-    processed_benchmark_data = data_cleaned.groupby(
-        groupby_columns, as_index=False
-    ).agg(aggregations)
+    processed_benchmark_data = data_cleaned.groupby(aggregators, as_index=False).agg(
+        aggregations
+    )
 
     # Remove '_mean' suffix from aggregated metric columns
     rename_dict = {

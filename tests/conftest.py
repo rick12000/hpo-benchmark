@@ -646,3 +646,197 @@ def warm_start_configs(performance_generator):
 
     # Get actual performances from the generator instead of hardcoding
     return [(config, performance_generator.predict(config)) for config in configs]
+
+
+# Fixtures for metrics testing
+
+
+@pytest.fixture
+def extreme_significant_data():
+    """Data where entities have extremely significant differences (zero variance)."""
+    data = []
+    # Use more datasets to get extremely small p-values in Wilcoxon test
+    datasets = [f"dataset{i}" for i in range(1, 21)]  # 20 datasets
+
+    # Entity A always ranks 1, B always ranks 2, C always ranks 3
+    for dataset in datasets:
+        data.extend(
+            [
+                {"dataset": dataset, "entity": "entity_A", "rank": 1.0},
+                {"dataset": dataset, "entity": "entity_B", "rank": 2.0},
+                {"dataset": dataset, "entity": "entity_C", "rank": 3.0},
+            ]
+        )
+
+    return pd.DataFrame(data)
+
+
+@pytest.fixture
+def identical_ranks_data():
+    """Data where all entities have identical ranks (no differences)."""
+    data = []
+    datasets = [f"dataset{i}" for i in range(1, 21)]  # 20 datasets
+    entities = ["entity_A", "entity_B", "entity_C"]
+
+    # All entities always get the same rank
+    for dataset in datasets:
+        for entity in entities:
+            data.append({"dataset": dataset, "entity": entity, "rank": 2.0})
+
+    return pd.DataFrame(data)
+
+
+@pytest.fixture
+def realistic_significant_data():
+    """Realistic data with significant but variable differences."""
+    np.random.seed(42)
+    data = []
+    datasets = [f"dataset{i}" for i in range(1, 21)]  # 20 datasets
+
+    for dataset in datasets:
+        # Entity A is consistently better (lower ranks) but with some variance
+        rank_A = np.random.normal(1.2, 0.2)
+        # Entity B is consistently middle
+        rank_B = np.random.normal(2.5, 0.3)
+        # Entity C is consistently worse
+        rank_C = np.random.normal(3.8, 0.2)
+
+        data.extend(
+            [
+                {"dataset": dataset, "entity": "entity_A", "rank": max(1.0, rank_A)},
+                {"dataset": dataset, "entity": "entity_B", "rank": rank_B},
+                {"dataset": dataset, "entity": "entity_C", "rank": max(1.0, rank_C)},
+            ]
+        )
+
+    return pd.DataFrame(data)
+
+
+@pytest.fixture
+def realistic_insignificant_data():
+    """Realistic data with small, insignificant differences."""
+    np.random.seed(123)
+    data = []
+    datasets = [f"dataset{i}" for i in range(1, 21)]  # 20 datasets
+
+    for dataset in datasets:
+        # All entities have similar performance with high variance
+        base_rank = np.random.normal(2.0, 0.1)
+        data.extend(
+            [
+                {
+                    "dataset": dataset,
+                    "entity": "entity_A",
+                    "rank": max(1.0, base_rank + np.random.normal(0, 0.4)),
+                },
+                {
+                    "dataset": dataset,
+                    "entity": "entity_B",
+                    "rank": max(1.0, base_rank + np.random.normal(0, 0.4)),
+                },
+                {
+                    "dataset": dataset,
+                    "entity": "entity_C",
+                    "rank": max(1.0, base_rank + np.random.normal(0, 0.4)),
+                },
+            ]
+        )
+
+    return pd.DataFrame(data)
+
+
+@pytest.fixture
+def grouped_test_data():
+    """Data with breakout groups for testing grouped statistical tests."""
+    data = []
+    datasets = [f"dataset{i}" for i in range(1, 21)]  # 20 datasets
+    entities = ["entity_A", "entity_B", "entity_C"]
+    groups = ["group1", "group2"]
+
+    for group in groups:
+        for dataset in datasets:
+            if group == "group1":
+                # Group 1: significant differences
+                ranks = {"entity_A": 1.0, "entity_B": 2.0, "entity_C": 3.0}
+            else:
+                # Group 2: no differences
+                ranks = {"entity_A": 2.0, "entity_B": 2.0, "entity_C": 2.0}
+
+            for entity in entities:
+                data.append(
+                    {
+                        "dataset": dataset,
+                        "entity": entity,
+                        "rank": ranks[entity],
+                        "group": group,
+                    }
+                )
+
+    return pd.DataFrame(data)
+
+
+@pytest.fixture
+def insufficient_data():
+    """Data with insufficient samples for statistical tests."""
+    return pd.DataFrame(
+        [
+            {"dataset": "dataset1", "entity": "entity_A", "rank": 1.0},
+            {"dataset": "dataset1", "entity": "entity_B", "rank": 2.0},
+        ]
+    )
+
+
+@pytest.fixture
+def independent_X_y_data():
+    """X features completely independent of y outcome for likelihood ratio testing."""
+    np.random.seed(42)
+    n_samples = 100
+    n_features = 3
+
+    # Independent random features
+    X = pd.DataFrame(
+        np.random.randn(n_samples, n_features),
+        columns=["feature1", "feature2", "feature3"],
+    )
+    # Random binary outcome
+    y = pd.Series(np.random.binomial(1, 0.5, n_samples))
+
+    return X, y
+
+
+@pytest.fixture
+def dependent_X_y_data():
+    """X features with functional relationship to y outcome for likelihood ratio testing."""
+    np.random.seed(42)
+    n_samples = 100
+
+    # Create features with relationship to outcome
+    feature1 = np.random.randn(n_samples)
+    feature2 = np.random.randn(n_samples)
+    feature3 = np.random.randn(n_samples)
+
+    # Create y with strong relationship to features
+    linear_combination = 2 * feature1 + 1.5 * feature2 - 0.8 * feature3
+    probabilities = 1 / (1 + np.exp(-linear_combination))  # sigmoid
+    y = pd.Series(np.random.binomial(1, probabilities))
+
+    X = pd.DataFrame({"feature1": feature1, "feature2": feature2, "feature3": feature3})
+
+    return X, y
+
+
+@pytest.fixture
+def single_class_y_data():
+    """Data with only one class in y for testing edge cases."""
+    np.random.seed(42)
+    n_samples = 50
+    n_features = 3
+
+    X = pd.DataFrame(
+        np.random.randn(n_samples, n_features),
+        columns=["feature1", "feature2", "feature3"],
+    )
+    # All outcomes are the same class
+    y = pd.Series(np.ones(n_samples, dtype=int))
+
+    return X, y

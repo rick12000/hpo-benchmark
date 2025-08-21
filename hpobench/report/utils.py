@@ -1,6 +1,8 @@
 from hpobench.report.metrics import (
     friedman_test_runner,
     nemenyi_pairwise_test,
+    wilcoxon_pairwise_test,
+    permutation_pairwise_test,
 )
 from hpobench.utils import generate_hyperparameter_combinations
 import pandas as pd
@@ -10,7 +12,6 @@ from typing import List, Optional
 
 from hpobench.utils import save_analysis_results, AnalysisPathManager, block_bootstrap
 from hpobench.report.latex import (
-    format_nemenyi_results_to_latex,
     format_calibration_metrics_to_latex,
 )
 
@@ -126,10 +127,8 @@ def run_and_save_nemenyi(
     filename: str,
     analysis_type: str,
     subfolder: str = "statistical_tests",
-    latex_vertical_breakout_col: Optional[str] = None,
-    latex_layout_breakout_col: Optional[str] = None,
 ) -> pd.DataFrame:
-    logger = logging.getLogger(__name__)
+    logging.getLogger(__name__)
     results_df = nemenyi_pairwise_test(
         data=data,
         breakout_col=breakout_col,
@@ -146,23 +145,111 @@ def run_and_save_nemenyi(
         analysis_type,
         subfolder,
     )
-    # Optionally generate LaTeX code for results
-    if latex_vertical_breakout_col and latex_layout_breakout_col:
-        latex_str = format_nemenyi_results_to_latex(
-            results_df, latex_vertical_breakout_col, latex_layout_breakout_col
-        )
-        logger.info("Generated LaTeX for Nemenyi tests:\n%s", latex_str)
 
-        # Save LaTeX output to file
-        latex_filename = f"{filename.replace('.csv', '')}_latex.tex"
-        _save_text_content(
-            latex_str,
-            cache_path,
-            run_start_str,
-            latex_filename,
-            analysis_type,
-            "latex_outputs",
-        )
+
+def run_and_save_wilcoxon(
+    data: pd.DataFrame,
+    breakout_col: List[str],
+    across_col: str,
+    entity_col: str,
+    rank_col: str,
+    alpha: float,
+    cache_path: str,
+    run_start_str: str,
+    filename: str,
+    analysis_type: str,
+    subfolder: str = "statistical_tests",
+) -> pd.DataFrame:
+    """Run Wilcoxon signed-rank pairwise tests with Holm-Bonferroni correction and save results.
+
+    Args:
+        data: DataFrame with rank data
+        breakout_col: List of columns for grouping data
+        across_col: Column for datasets (e.g., 'dataset')
+        entity_col: Column for algorithms/entities (e.g., 'tuner')
+        rank_col: Column with ranks (lower is better)
+        alpha: Significance level
+        cache_path: Base cache path
+        run_start_str: Run identifier
+        filename: CSV filename to save
+        analysis_type: Analysis type for path organization
+        subfolder: Subfolder for saving results
+
+    Returns:
+        DataFrame with pairwise comparison results
+    """
+    results_df = wilcoxon_pairwise_test(
+        data=data,
+        breakout_col=breakout_col,
+        across_col=across_col,
+        entity_col=entity_col,
+        rank_col=rank_col,
+        alpha=alpha,
+    )
+    save_analysis_results(
+        results_df,
+        cache_path,
+        run_start_str,
+        filename,
+        analysis_type,
+        subfolder,
+    )
+    return results_df
+
+
+def run_and_save_permutation_test(
+    data: pd.DataFrame,
+    breakout_col: List[str],
+    across_col: str,
+    entity_col: str,
+    rank_col: str,
+    alpha: float,
+    cache_path: str,
+    run_start_str: str,
+    filename: str,
+    analysis_type: str,
+    subfolder: str = "statistical_tests",
+    n_permutations: int = 10000,
+    random_state: Optional[int] = None,
+) -> pd.DataFrame:
+    """Run permutation tests with Holm-Bonferroni correction and save results.
+
+    Args:
+        data: DataFrame with rank data
+        breakout_col: List of columns for grouping data
+        across_col: Column for datasets (e.g., 'dataset')
+        entity_col: Column for algorithms/entities (e.g., 'tuner')
+        rank_col: Column with ranks (lower is better)
+        alpha: Significance level
+        cache_path: Base cache path
+        run_start_str: Run identifier
+        filename: CSV filename to save
+        analysis_type: Analysis type for path organization
+        subfolder: Subfolder for saving results
+        n_permutations: Number of permutations for the test
+        random_state: Random seed for reproducible results
+
+    Returns:
+        DataFrame with pairwise comparison results
+    """
+    results_df = permutation_pairwise_test(
+        data=data,
+        breakout_col=breakout_col,
+        across_col=across_col,
+        entity_col=entity_col,
+        rank_col=rank_col,
+        alpha=alpha,
+        n_permutations=n_permutations,
+        random_state=random_state,
+    )
+    save_analysis_results(
+        results_df,
+        cache_path,
+        run_start_str,
+        filename,
+        analysis_type,
+        subfolder,
+    )
     return results_df
 
 
@@ -258,7 +345,7 @@ def run_and_save_calibration_statistics(
     collapsed_calibration_stats = block_bootstrap(
         data=calibration_stats,
         breakout_cols=[benchmark_col],
-        block_cols=[confidence_column, dataset_column],
+        block_cols=[dataset_column],
         aggregators=[benchmark_col, tuner_column],
         metric_cols=metric_columns,
         n_bootstraps=1000,
