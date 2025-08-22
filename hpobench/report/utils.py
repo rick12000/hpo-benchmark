@@ -146,6 +146,7 @@ def run_and_save_nemenyi(
         analysis_type,
         subfolder,
     )
+    return results_df
 
 
 def run_and_save_wilcoxon(
@@ -295,8 +296,6 @@ def run_statistical_tests_for_budget(
             subfolder=subfolder,
         )
 
-    # Pairwise tests: keep consistent behaviour and optionally collect
-    # the results used for CD diagrams.
     if "nemenyi" in analysis_components:
         results_df = run_and_save_nemenyi(
             data=data,

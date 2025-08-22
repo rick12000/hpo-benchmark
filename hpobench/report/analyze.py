@@ -9,9 +9,8 @@ from hpobench.plot import (
     plot_paired_rank_and_cd,
 )
 from hpobench.process import (
-    process_performance_records,
+    BenchmarkDataProcessor,
     rank_and_collapse_data,
-    collapse_per_budget,
 )
 
 from hpobench.report.utils import (
@@ -111,7 +110,6 @@ def analyze_main_benchmark(
         coverage components with a warning message.
     """
     rep_col = schema.rep_col
-    perf_col = schema.perf_col
     tuner_col = schema.tuner_col
     bench_col = schema.bench_col
     data_col = schema.data_col
@@ -132,56 +130,63 @@ def analyze_main_benchmark(
         estimator_architecture_col,
     ]
 
+    processor = BenchmarkDataProcessor(schema=schema)
+
     # 1. Create broad use processed data:
-    # 1.1 Relativized runtime results:
-    cleaned_relative_runtime_results = process_performance_records(
+    # 1.1 Dataset-level relativized runtime results:
+    dataset_relative_runtime_results = processor.process_performance_records(
         raw_benchmark_data=raw_benchmark_data,
-        aggregators=default_aggregators,
-        performance_column=perf_col,
         budget_unit=runtime_unit,
-        repetition_column=rep_col,
-        tuner_column=tuner_col,
         relativize_budget=True,
-        comparison_columns=[
-            tuner_col,
-            sampler_col,
-            confidence_level_col,
-            estimator_architecture_col,
-        ],
+        collapse_repetitions=True,
+        collapse_datasets=False,
+        extra_ranking_cols=None,
     )
 
-    # 1.2 Absolute iteration results:
-    cleaned_iterative_results = process_performance_records(
+    # 1.2 Dataset-level iterative results:
+    dataset_iterative_results = processor.process_performance_records(
         raw_benchmark_data=raw_benchmark_data,
-        aggregators=default_aggregators,
-        performance_column=perf_col,
         budget_unit=iter_unit,
-        repetition_column=rep_col,
-        tuner_column=tuner_col,
         relativize_budget=False,
-        comparison_columns=[
-            tuner_col,
-            sampler_col,
-            confidence_level_col,
-            estimator_architecture_col,
-        ],
+        collapse_repetitions=True,
+        collapse_datasets=False,
+        extra_ranking_cols=None,
+    )
+
+    # 1.3 Benchmark-level relativized runtime results:
+    bench_relative_runtime_results = processor.process_performance_records(
+        raw_benchmark_data=raw_benchmark_data,
+        budget_unit=runtime_unit,
+        relativize_budget=True,
+        collapse_repetitions=True,
+        collapse_datasets=True,
+        extra_ranking_cols=None,
+    )
+
+    # 1.4 Benchmark-level iterative results:
+    bench_iterative_results = processor.process_performance_records(
+        raw_benchmark_data=raw_benchmark_data,
+        budget_unit=iter_unit,
+        relativize_budget=False,
+        collapse_repetitions=True,
+        collapse_datasets=False,
+        extra_ranking_cols=None,
     )
 
     # 2. Carry out component analysis:
     # 2.1 Significance Analysis:
-    cross_repetition_relative_runtime_results = collapse_per_budget(
-        data=cleaned_relative_runtime_results,
-        aggregators=[
-            col for col in default_aggregators + [norm_runtime_unit] if col != rep_col
-        ],
-        metrics=["rank"],
-    )
-
     significance_results_for_cd = {}
     for budget in [50, 100]:
-        budget_data = cross_repetition_relative_runtime_results[
-            cross_repetition_relative_runtime_results[norm_runtime_unit] == budget
+        budget_data = dataset_relative_runtime_results[
+            dataset_relative_runtime_results[norm_runtime_unit] == budget
         ]
+
+        # Only run statistical tests when we have at least 3 unique datasets
+        if budget_data[data_col].nunique() < 3:
+            logger.info(
+                f"Skipping statistical tests for budget={budget}: need at least 3 unique datasets, found {budget_data[data_col].nunique()}"
+            )
+            continue
 
         cd_df = run_statistical_tests_for_budget(
             data=budget_data,
@@ -210,47 +215,16 @@ def analyze_main_benchmark(
         else:
             raw_benchmark_data_adj = raw_benchmark_data.copy()
 
-        absolute_iteration_results_adj = process_performance_records(
-            raw_benchmark_data=raw_benchmark_data_adj,
-            aggregators=[
-                bench_col,
-                data_col,
-                tuner_col,
-                rep_col,
-                confidence_level_col,
-            ],
-            performance_column=perf_col,
+        bench_iterative_results_adj = processor.process_performance_records(
+            raw_benchmark_data=raw_benchmark_data,
             budget_unit=iter_unit,
-            repetition_column=rep_col,
-            tuner_column=tuner_col,
             relativize_budget=False,
-            comparison_columns=[
-                tuner_col,
-                sampler_col,
-                confidence_level_col,
-                estimator_architecture_col,
-            ],
+            collapse_repetitions=True,
+            collapse_datasets=True,
+            extra_ranking_cols=[confidence_level_col],
         )
-        data_conf_aggregated_results = aggregate_and_save(
-            data=absolute_iteration_results_adj,
-            grouping_cols=[
-                bench_col,
-                data_col,
-                iter_unit,
-                tuner_col,
-                confidence_level_col,
-            ],
-            breakout_cols=[bench_col, data_col, confidence_level_col],
-            block_cols=[rep_col],
-            metrics=["cumulative_coverage_error", "rolling_coverage_error"],
-            cache_path=cache_path,
-            run_start_str=run_start_str,
-            filename="runtime_aggregated_results.csv",
-            analysis_type=analysis_type,
-        )
-
         plot_and_save(
-            data=data_conf_aggregated_results,
+            data=bench_iterative_results_adj,
             x_col=iter_unit,
             y_cols=["cumulative_coverage_error", "rolling_coverage_error"],
             entity_col=tuner_col,
@@ -287,24 +261,8 @@ def analyze_main_benchmark(
 
     # Dataset level analysis:
     if "dataset_performances" in analysis_components:
-        data_aggregated_results = aggregate_and_save(
-            data=cleaned_iterative_results,
-            grouping_cols=[
-                bench_col,
-                data_col,
-                iter_unit,
-                tuner_col,
-            ],
-            breakout_cols=[bench_col, data_col],
-            block_cols=[rep_col],
-            metrics=["rank", "best_performance"],
-            cache_path=cache_path,
-            run_start_str=run_start_str,
-            filename="runtime_aggregated_results.csv",
-            analysis_type=analysis_type,
-        )
         plot_and_save(
-            data=data_aggregated_results,
+            data=dataset_iterative_results,
             x_col=iter_unit,
             y_cols=["best_performance", "rank"],
             entity_col=tuner_col,
@@ -315,32 +273,15 @@ def analyze_main_benchmark(
             filename_prefix="perf_vs_iter",
             analysis_type=analysis_type,
             subfolder="dataset_performances",
-            y_cols_lower=["best_performance_lower", "rank_lower"],
-            y_cols_upper=["best_performance_upper", "rank_upper"],
+            y_cols_lower=None,
+            y_cols_upper=None,
             share_y_axis=False,
         )
 
     # Rank analysis:
     if "rank_analysis" in analysis_components:
-        # Group at benchmark level:
-        relativized_runtime_aggregated_results = aggregate_and_save(
-            data=cleaned_relative_runtime_results,
-            grouping_cols=[
-                bench_col,
-                norm_runtime_unit,
-                tuner_col,
-            ],
-            breakout_cols=[bench_col],
-            block_cols=[data_col],
-            metrics=["rank"],
-            cache_path=cache_path,
-            run_start_str=run_start_str,
-            filename="runtime_aggregated_results.csv",
-            analysis_type=analysis_type,
-        )
-
         plot_and_save(
-            data=relativized_runtime_aggregated_results,
+            data=bench_relative_runtime_results,
             x_col=norm_runtime_unit,
             y_cols=["rank"],
             entity_col=tuner_col,
@@ -355,50 +296,8 @@ def analyze_main_benchmark(
             y_cols_upper=["rank_upper"],
             share_y_axis=False,
         )
-
-        # Add paired plotting with critical difference diagrams if significance results are available
-        cd_budget = 100
-        if (
-            cd_budget in significance_results_for_cd
-            and cd_significance_method in analysis_components
-        ):
-
-            plot_paired_rank_and_cd(
-                data=relativized_runtime_aggregated_results,
-                significance_data=significance_results_for_cd[cd_budget],
-                x_col=norm_runtime_unit,
-                entity_col=tuner_col,
-                cache_path=cache_path,
-                run_start_str=run_start_str,
-                filename_prefix=f"rank_vs_norm_runtime_with_cd_{cd_significance_method}",
-                analysis_type=analysis_type,
-                subfolder="rank_analysis",
-                row_measure=bench_col,
-                cd_budget=cd_budget,
-                alpha=alpha,
-                x_label="Normalized Runtime",
-                row_measure_label="Benchmark",
-            )
-
-        # Group at benchmark level:
-        iteration_aggregated_results = aggregate_and_save(
-            data=cleaned_iterative_results,
-            grouping_cols=[
-                bench_col,
-                iter_unit,
-                tuner_col,
-            ],
-            breakout_cols=[bench_col],
-            block_cols=[data_col],
-            metrics=["rank"],
-            cache_path=cache_path,
-            run_start_str=run_start_str,
-            filename="iteration_aggregated_results.csv",
-            analysis_type=analysis_type,
-        )
-
         plot_and_save(
-            data=iteration_aggregated_results,
+            data=bench_iterative_results,
             x_col=iter_unit,
             y_cols=["rank"],
             entity_col=tuner_col,
@@ -414,6 +313,35 @@ def analyze_main_benchmark(
             share_y_axis=False,
         )
 
+        if cd_significance_method in analysis_components:
+            cd_budget = 100
+            # Ensure we have computed significance results for this budget and
+            # we have at least 3 datasets overall before plotting CD diagrams
+            if (
+                cd_budget in significance_results_for_cd
+                and bench_relative_runtime_results[data_col].nunique() >= 3
+            ):
+                plot_paired_rank_and_cd(
+                    data=bench_relative_runtime_results,
+                    significance_data=significance_results_for_cd[cd_budget],
+                    x_col=norm_runtime_unit,
+                    entity_col=tuner_col,
+                    cache_path=cache_path,
+                    run_start_str=run_start_str,
+                    filename_prefix=f"rank_vs_norm_runtime_with_cd_{cd_significance_method}",
+                    analysis_type=analysis_type,
+                    subfolder="rank_analysis",
+                    row_measure=bench_col,
+                    cd_budget=cd_budget,
+                    alpha=alpha,
+                    x_label="Normalized Runtime",
+                    row_measure_label="Benchmark",
+                )
+            else:
+                logger.info(
+                    f"Skipping CD plot for budget={cd_budget}: no significance results or fewer than 3 datasets ({bench_relative_runtime_results[data_col].nunique()})"
+                )
+
     # NOTE: For next two breakout plots, values are first ranked by benchmark
     # and then split by sampler or architecture on column axis of plots, but
     # the rank is not only between the lines on a given plot, it's global, and
@@ -421,7 +349,7 @@ def analyze_main_benchmark(
     # Sampler comparison plots:
     if "sampler_comparison" in analysis_components:
         plot_and_save(
-            data=relativized_runtime_aggregated_results,
+            data=bench_relative_runtime_results,
             x_col=norm_runtime_unit,
             y_cols=["rank"],
             entity_col=tuner_col,
@@ -434,13 +362,13 @@ def analyze_main_benchmark(
             subfolder="sampler_comparison",
             y_cols_lower=["rank_lower"],
             y_cols_upper=["rank_upper"],
-            share_y_axis=False,
+            share_y_axis=True,
         )
 
     # Architecture comparison plots:
     if "architecture_comparison" in analysis_components:
         plot_and_save(
-            data=relativized_runtime_aggregated_results,
+            data=bench_relative_runtime_results,
             x_col=norm_runtime_unit,
             y_cols=["rank"],
             entity_col=tuner_col,
@@ -453,45 +381,23 @@ def analyze_main_benchmark(
             subfolder="architecture_comparison",
             y_cols_lower=["rank_lower"],
             y_cols_upper=["rank_upper"],
-            share_y_axis=False,
+            share_y_axis=True,
         )
 
     # Conformalization effect analysis:
     if "conformalization_effect" in analysis_components:
-        conformalized_vs_nonconformalized_results = process_performance_records(
-            raw_benchmark_data=raw_benchmark_data,
-            aggregators=default_aggregators,
-            performance_column=perf_col,
-            budget_unit=runtime_unit,
-            repetition_column=rep_col,
-            tuner_column=tuner_col,
-            relativize_budget=True,
-            comparison_columns=[
-                tuner_col,
-                confidence_level_col,
-            ],
+        conformalized_vs_nonconformalized_results = (
+            processor.process_performance_records(
+                raw_benchmark_data=raw_benchmark_data,
+                budget_unit=runtime_unit,
+                relativize_budget=True,
+                collapse_repetitions=True,
+                collapse_datasets=True,
+                extra_ranking_cols=[estimator_architecture_col, sampler_col],
+            )
         )
-        aggregated_conformalized_vs_nonconformalized_results = aggregate_and_save(
-            data=conformalized_vs_nonconformalized_results,
-            grouping_cols=[
-                bench_col,
-                norm_runtime_unit,
-                tuner_col,
-                estimator_architecture_col,
-                sampler_col,
-            ],
-            breakout_cols=[bench_col],
-            block_cols=[data_col],
-            metrics=["rank"],
-            cache_path=cache_path,
-            run_start_str=run_start_str,
-            filename="placeholder.csv",
-            analysis_type=analysis_type,
-        )
-
-        # Architecture partitioned plots (each ranking conf vs. unconf):
         plot_and_save(
-            data=aggregated_conformalized_vs_nonconformalized_results,
+            data=conformalized_vs_nonconformalized_results,
             x_col=norm_runtime_unit,
             y_cols=["rank"],
             entity_col=tuner_col,
@@ -509,47 +415,20 @@ def analyze_main_benchmark(
 
     # Quantile count comparison analysis:
     if "quantile_count_comparison" in analysis_components:
-        quantile_count_comparison_results = pd.DataFrame()
         if len(raw_benchmark_data[estimator_architecture_col].unique()) > 1:
             raise ValueError(
                 "Quantile count comparison analysis requires only one architecture."
             )
-
-        quantile_count_comparison_results = process_performance_records(
+        quantile_count_comparison_results = processor.process_performance_records(
             raw_benchmark_data=raw_benchmark_data,
-            aggregators=default_aggregators,
-            performance_column=perf_col,
             budget_unit=runtime_unit,
-            repetition_column=rep_col,
-            tuner_column=tuner_col,
             relativize_budget=True,
-            comparison_columns=[
-                tuner_col,
-                confidence_level_col,
-                estimator_architecture_col,
-            ],
+            collapse_repetitions=True,
+            collapse_datasets=True,
+            extra_ranking_cols=[sampler_col],
         )
-        aggregated_quantile_count_comparison_results = aggregate_and_save(
-            data=quantile_count_comparison_results,
-            grouping_cols=[
-                bench_col,
-                norm_runtime_unit,
-                tuner_col,
-                estimator_architecture_col,
-                sampler_col,
-            ],
-            breakout_cols=[bench_col],
-            block_cols=[data_col],
-            metrics=["rank"],
-            cache_path=cache_path,
-            run_start_str=run_start_str,
-            filename="quantile_count_comparison_results.csv",
-            analysis_type=analysis_type,
-        )
-
-        # Sampler partitioned plots (each column showing different samplers with quantile variations):
         plot_and_save(
-            data=aggregated_quantile_count_comparison_results,
+            data=quantile_count_comparison_results,
             x_col=norm_runtime_unit,
             y_cols=["rank"],
             entity_col=tuner_col,
@@ -567,48 +446,21 @@ def analyze_main_benchmark(
 
     # Search tuning effect comparison analysis:
     if "search_tuning_effect_comparison" in analysis_components:
-        search_tuning_effect_comparison_results = pd.DataFrame()
         # Enforce only one sampler type for this analysis
         if len(raw_benchmark_data[sampler_col].unique()) > 1:
             raise ValueError(
                 "Search tuning effect comparison analysis requires only one sampler."
             )
-        search_tuning_effect_comparison_results = process_performance_records(
+        search_tuning_effect_comparison_results = processor.process_performance_records(
             raw_benchmark_data=raw_benchmark_data,
-            aggregators=default_aggregators,
-            performance_column=perf_col,
             budget_unit=runtime_unit,
-            repetition_column=rep_col,
-            tuner_column=tuner_col,
             relativize_budget=True,
-            comparison_columns=[
-                tuner_col,
-                sampler_col,
-                confidence_level_col,
-            ],
+            collapse_repetitions=True,
+            collapse_datasets=True,
+            extra_ranking_cols=[estimator_architecture_col],
         )
-
-        aggregated_search_tuning_effect_comparison_results = aggregate_and_save(
-            data=search_tuning_effect_comparison_results,
-            grouping_cols=[
-                bench_col,
-                norm_runtime_unit,
-                tuner_col,
-                estimator_architecture_col,
-                sampler_col,
-            ],
-            breakout_cols=[bench_col],
-            block_cols=[data_col],
-            metrics=["rank"],
-            cache_path=cache_path,
-            run_start_str=run_start_str,
-            filename="search_tuning_effect_comparison_results.csv",
-            analysis_type=analysis_type,
-        )
-
-        # Architecture partitioned plots (each column showing different architectures with tuning framework variations):
         plot_and_save(
-            data=aggregated_search_tuning_effect_comparison_results,
+            data=search_tuning_effect_comparison_results,
             x_col=norm_runtime_unit,
             y_cols=["rank"],
             entity_col=tuner_col,

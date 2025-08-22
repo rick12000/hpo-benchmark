@@ -61,10 +61,9 @@ def friedman_test_runner(
     for within_group, group_df in group_iter:
         pivot_df = group_df.pivot(index=across_col, columns=entity_col, values=rank_col)
         if pivot_df.shape[0] < 2 or pivot_df.shape[1] < 3:
-            logger.info(
-                f"Skipping {within_group}: Need at least 3 entities (columns) for Friedman test. Skipped."
+            raise ValueError(
+                f"Friedman test requires at least 2 blocks and 3 entities; group {within_group} has {pivot_df.shape[0]} blocks and {pivot_df.shape[1]} entities"
             )
-            continue
         stat, p = friedmanchisquare(
             *[pivot_df[col].dropna() for col in pivot_df.columns]
         )
@@ -132,16 +131,14 @@ def nemenyi_pairwise_test(
 
     for within_group, group_df in group_iter:
         if group_df[entity_col].nunique() < 2:
-            logger.info(
-                f"Skipping {within_group}: Need at least 2 entities for Nemenyi test"
+            raise ValueError(
+                f"Nemenyi test requires at least 2 entities; group {within_group} has {group_df[entity_col].nunique()}"
             )
-            continue
 
         if group_df[across_col].nunique() < 2:
-            logger.info(
-                f"Skipping {within_group}: Need at least 2 blocks/datasets for Nemenyi test"
+            raise ValueError(
+                f"Nemenyi test requires at least 2 blocks/datasets; group {within_group} has {group_df[across_col].nunique()}"
             )
-            continue
 
         # Create a unique block identifier to handle duplicated entries in block_col
         # The block_id should map each unique block (across_col value) to a unique integer
@@ -226,16 +223,14 @@ def wilcoxon_pairwise_test(
 
     for within_group, group_df in group_iter:
         if group_df[entity_col].nunique() < 2:
-            logger.info(
-                f"Skipping {within_group}: Need at least 2 entities for Wilcoxon test"
+            raise ValueError(
+                f"Wilcoxon test requires at least 2 entities; group {within_group} has {group_df[entity_col].nunique()}"
             )
-            continue
 
         if group_df[across_col].nunique() < 2:
-            logger.info(
-                f"Skipping {within_group}: Need at least 2 datasets for Wilcoxon test"
+            raise ValueError(
+                f"Wilcoxon test requires at least 2 datasets; group {within_group} has {group_df[across_col].nunique()}"
             )
-            continue
 
         # Collapse repetitions into mean rank per algorithm per dataset
         mean_ranks_df = (
@@ -265,10 +260,9 @@ def wilcoxon_pairwise_test(
                     # Find common datasets
                     common_datasets = e1_ranks.index.intersection(e2_ranks.index)
                     if len(common_datasets) < 2:
-                        logger.info(
-                            f"Skipping {e1} vs {e2} in {within_group}: Need at least 2 common datasets"
+                        raise ValueError(
+                            f"Wilcoxon test requires at least 2 common datasets between {e1} and {e2} in {within_group}; found {len(common_datasets)}"
                         )
-                        continue
 
                     e1_common = e1_ranks.loc[common_datasets]
                     e2_common = e2_ranks.loc[common_datasets]
@@ -366,16 +360,14 @@ def permutation_pairwise_test(
 
     for within_group, group_df in group_iter:
         if group_df[entity_col].nunique() < 2:
-            logger.info(
-                f"Skipping {within_group}: Need at least 2 entities for permutation test"
+            raise ValueError(
+                f"Permutation test requires at least 2 entities; group {within_group} has {group_df[entity_col].nunique()}"
             )
-            continue
 
         if group_df[across_col].nunique() < 2:
-            logger.info(
-                f"Skipping {within_group}: Need at least 2 datasets for permutation test"
+            raise ValueError(
+                f"Permutation test requires at least 2 datasets; group {within_group} has {group_df[across_col].nunique()}"
             )
-            continue
 
         # Collapse repetitions into mean rank per algorithm per dataset
         mean_ranks_df = (
@@ -405,10 +397,9 @@ def permutation_pairwise_test(
                     # Find common datasets
                     common_datasets = e1_ranks.index.intersection(e2_ranks.index)
                     if len(common_datasets) < 2:
-                        logger.info(
-                            f"Skipping {e1} vs {e2} in {within_group}: Need at least 2 common datasets"
+                        raise ValueError(
+                            f"Permutation test requires at least 2 common datasets between {e1} and {e2} in {within_group}; found {len(common_datasets)}"
                         )
-                        continue
 
                     e1_common = e1_ranks.loc[common_datasets]
                     e2_common = e2_ranks.loc[common_datasets]

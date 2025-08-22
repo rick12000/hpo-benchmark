@@ -434,9 +434,9 @@ def confopt_tune(
     searcher = ConformalTuner(
         objective_function=objective_fn,
         search_space=confopt_params,
-        metric_optimization="minimize",
-        n_candidate_configurations=N_CANDIDATES,
-        warm_start_configurations=warm_start_configs,
+        minimize=True,
+        n_candidates=N_CANDIDATES,
+        warm_starts=warm_start_configs,
         dynamic_sampling=CONFOPT_USE_DYNAMIC_SAMPLING,
     )
 

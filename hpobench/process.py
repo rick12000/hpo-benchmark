@@ -1,583 +1,538 @@
 import pandas as pd
 import numpy as np
 import logging
-from copy import deepcopy
 from typing import List, Optional
+from hpobench.config.schema import BenchmarkDataSchema
 
 
 logger = logging.getLogger(__name__)
 
 
-def validate_groupby_columns(data: pd.DataFrame, columns: List[str]) -> pd.DataFrame:
+class BenchmarkDataProcessor:
     """
-    Validates and cleans groupby columns by filling NaN or None values with empty strings.
+    Class-based HPO benchmark data processor that eliminates column aggregator confusion.
 
-    Args:
-        data: DataFrame to validate and clean
-        columns: List of column names to check and clean
-
-    Returns:
-        DataFrame with NaN/None values in specified columns filled with empty strings
+    Centralizes column management through BenchmarkDataSchema and provides clear
+    methods for each processing step without passing column lists around.
     """
-    data_copy = data.copy()
 
-    # Check if any of the specified columns contain NaN or None values
-    for col in columns:
-        if col in data_copy.columns:
-            null_count = data_copy[col].isnull().sum()
-            none_count = (
-                (data_copy[col] == None).sum()
-                if data_copy[col].dtype == "object"
-                else 0
-            )
-            if null_count > 0 or none_count > 0:
-                pass
-                # Fill NaN/None values with empty strings
-                data_copy[col] = data_copy[col].fillna("")
+    def __init__(self, schema: BenchmarkDataSchema = None):
+        if schema is None:
+            schema = BenchmarkDataSchema()
+        self.schema = schema
 
-    return data_copy
+        # Extract all column names from schema
+        self.rep_col = schema.rep_col
+        self.perf_col = schema.perf_col
+        self.tuner_col = schema.tuner_col
+        self.bench_col = schema.bench_col
+        self.data_col = schema.data_col
+        self.sampler_col = schema.sampler_col
+        self.confidence_level_col = schema.confidence_level_col
+        self.estimator_architecture_col = schema.estimator_architecture_col
+        self.sampler_n_quantiles = schema.sampler_n_quantiles
+        self.sampler_adapter = schema.sampler_adapter
+        self.tuner_searcher_tuning_framework = schema.tuner_searcher_tuning_framework
+        self.n_pre_conformal_trials = schema.n_pre_conformal_trials
+        self.runtime_unit = schema.runtime_unit
+        self.iter_unit = schema.iter_unit
+        self.breach_column = schema.breach_column
 
+        self.tuner_cols = [
+            self.tuner_col,
+            self.sampler_col,
+            self.confidence_level_col,
+            self.estimator_architecture_col,
+            self.sampler_n_quantiles,
+            self.sampler_adapter,
+            self.tuner_searcher_tuning_framework,
+            self.n_pre_conformal_trials,
+        ]
+        self.benchmark_and_data_cols = [self.bench_col, self.data_col]
+        self.tuner_level = self.benchmark_and_data_cols + self.tuner_cols
+        self.repetition_level = self.tuner_level + [self.rep_col]
 
-def collapse_per_budget(
-    data: pd.DataFrame,
-    aggregators: List[str],
-    metrics: List[str],
-) -> pd.DataFrame:
-    """
-    Collapses HPO benchmark data by computing statistical summaries across repetitions.
+        self.dataset_level = [self.bench_col, self.data_col]
 
-    Groups data by specified aggregators and budget unit, then calculates mean, 10th, and 90th
-    percentiles for each metric. This reduces multiple repetitions to summary statistics for
-    downstream analysis and visualization.
+        self.all_relevant_cols = [
+            self.rep_col,
+            self.perf_col,
+            self.tuner_col,
+            self.bench_col,
+            self.data_col,
+            self.sampler_col,
+            self.confidence_level_col,
+            self.estimator_architecture_col,
+            self.sampler_n_quantiles,
+            self.sampler_adapter,
+            self.tuner_searcher_tuning_framework,
+            self.n_pre_conformal_trials,
+            self.runtime_unit,
+            self.iter_unit,
+            self.breach_column,
+        ]
 
-    Args:
-        data: HPO benchmark data with multiple repetitions per configuration.
-        aggregators: Columns to group by (e.g., ['dataset', 'tuner', 'algorithm']).
-        metrics: Performance metrics to aggregate (e.g., ['accuracy', 'f1_score']).
-        budget_unit: Budget column name ('iteration' or 'runtime').
+    def _validate_and_clean_data(self, data: pd.DataFrame) -> pd.DataFrame:
+        """
+        Validates and cleans data by filling NaN or None values with empty strings.
+        """
+        data_copy = data.copy()
 
-    Returns:
-        Collapsed data with mean values and confidence intervals for each metric.
-    """
-    data_cleaned = validate_groupby_columns(data, aggregators)
+        for col in self.all_relevant_cols:
+            if col not in data_copy.columns:
+                raise ValueError(f"Missing column in input data: {col}")
+            else:
+                data_copy[self.tuner_cols] = data_copy[self.tuner_cols].fillna("")
+            # else:
+            #     null_count = data_copy[col].isnull().sum()
+            #     none_count = (
+            #         (data_copy[col] == None).sum()
+            #         if data_copy[col].dtype == "object"
+            #         else 0
+            #     )
+            #     if null_count > 0 or none_count > 0:
+            #         data_copy[col] = data_copy[col].fillna("")
 
-    aggregations = {}
-    for metric in metrics:
-        aggregations[metric] = "mean"
+        return data_copy
 
-    processed_benchmark_data = data_cleaned.groupby(aggregators, as_index=False).agg(
-        aggregations
-    )
-
-    # Remove '_mean' suffix from aggregated metric columns
-    rename_dict = {
-        f"{metric}_mean": metric
-        for metric in metrics
-        if f"{metric}_mean" in processed_benchmark_data.columns
-    }
-    processed_benchmark_data = processed_benchmark_data.rename(columns=rename_dict)
-
-    return processed_benchmark_data
-
-
-def accumulate_breaches(
-    data: pd.DataFrame,
-    aggregators: List[str],
-    budget_unit: str,
-    breach_column: str,
-    confidence_column: str,
-    rolling_breach_count: int,
-) -> pd.DataFrame:
-    """
-    Tracks cumulative and rolling breach rates for HPO constraint violations.
-
-    Computes breach statistics over the budget progression to monitor when tuners
-    violate constraints (e.g., memory limits, time bounds). Used for analyzing
-    tuner reliability and identifying problematic configurations.
-
-    Args:
-        data: HPO experiment data with breach indicators.
-        aggregators: Grouping columns (e.g., ['dataset', 'tuner', 'repetition']).
-        budget_unit: Budget progression column ('iteration' or 'runtime').
-        breach_column: Boolean column indicating constraint violations.
-        rolling_breach_count: Window size for rolling breach rate calculation.
-        confidence_column: Column containing confidence level values.
-
-    Returns:
-        Data with cumulative, rolling breach rate, and coverage error columns added.
-    """
-    data_cleaned = validate_groupby_columns(data, aggregators)
-
-    sorted_experiment_log = data_cleaned.sort_values(
-        by=aggregators + [budget_unit],
-        ascending=True,
-    ).reset_index(drop=True)
-    sorted_experiment_log["cumulative_breach_rate"] = (
-        sorted_experiment_log.groupby(aggregators)[breach_column]
-        .expanding()
-        .mean()
-        .reset_index(level=aggregators, drop=True)
-    )
-    sorted_experiment_log["rolling_breach_rate"] = (
-        sorted_experiment_log.groupby(aggregators)[breach_column]
-        .rolling(window=rolling_breach_count, min_periods=rolling_breach_count)
-        .mean()
-        .reset_index(level=aggregators, drop=True)
-    )
-
-    if (~sorted_experiment_log[confidence_column].isin([None, ""])).all():
-        # Calculate coverage errors
-        sorted_experiment_log["cumulative_coverage_error"] = abs(
-            (1 - sorted_experiment_log["cumulative_breach_rate"])
-            - sorted_experiment_log[confidence_column].astype(float)
-        )
-        sorted_experiment_log["rolling_coverage_error"] = abs(
-            (1 - sorted_experiment_log["rolling_breach_rate"])
-            - sorted_experiment_log[confidence_column].astype(float)
-        )
-    else:
-        sorted_experiment_log["cumulative_coverage_error"] = np.nan
-        sorted_experiment_log["rolling_coverage_error"] = np.nan
-
-    return sorted_experiment_log
-
-
-def accumulate_performances(
-    data: pd.DataFrame,
-    aggregators: List[str],
-    budget_unit: str,
-    performance_column: str,
-) -> pd.DataFrame:
-    """
-    Tracks the best performance achieved so far during HPO progression.
-
-    Computes cumulative minimum (best) performance for each tuner configuration
-    as the budget increases. Essential for anytime performance analysis and
-    understanding tuner convergence behavior.
-
-    Args:
-        data: HPO experiment data sorted by budget progression.
-        aggregators: Grouping columns (e.g., ['dataset', 'tuner', 'repetition']).
-        budget_unit: Budget progression column ('iteration' or 'runtime').
-        performance_column: Metric to track (lower values assumed better).
-
-    Returns:
-        Data with 'best_performance' column showing cumulative minimum.
-    """
-    data_cleaned = validate_groupby_columns(data, aggregators)
-
-    sorted_experiment_log = data_cleaned.sort_values(
-        by=aggregators + [budget_unit],
-        ascending=True,
-    ).reset_index(drop=True)
-    sorted_experiment_log["best_performance"] = sorted_experiment_log.groupby(
-        aggregators
-    )[performance_column].transform("cummin")
-    return sorted_experiment_log
-
-
-def calculate_ranks(
-    data: pd.DataFrame,
-    aggregators: List[str],
-    rank_ascending: bool,
-    metric_column: str,
-) -> pd.DataFrame:
-    """
-    Computes performance ranks for tuner comparison across datasets.
-
-    Assigns ranks within each group based on metric values, enabling fair
-    comparison across different datasets and experimental conditions.
-    Supports both ascending (lower is better) and descending ranking.
-
-    Args:
-        data: HPO benchmark data with performance metrics.
-        aggregators: Grouping columns for rank computation context.
-        rank_ascending: True if lower metric values indicate better performance.
-        metric_column: Performance metric to rank by.
-
-    Returns:
-        Data with 'rank' column added for comparative analysis.
-    """
-    data_cleaned = validate_groupby_columns(data, aggregators)
-
-    data_cleaned["rank"] = data_cleaned.groupby(aggregators)[metric_column].rank(
-        method="average", ascending=rank_ascending
-    )
-    return data_cleaned
-
-
-def time_discretize_benchmark_data(
-    data: pd.DataFrame,
-    entity_columns: List[str],
-    tuner_columns: List[str],
-    repetition_column: str,
-    budget_unit: str,
-    performance_column: str,
-) -> pd.DataFrame:
-    """
-    Discretizes continuous runtime data into uniform time intervals for comparison.
-
-    Converts variable-length runtime experiments into fixed time grids, enabling
-    fair comparison of tuner performance at specific time points. Handles different
-    experiment durations by interpolating performance values.
-
-    Args:
-        data: Raw HPO data with continuous runtime measurements.
-        entity_columns: Experiment identifier columns (dataset, tuner, etc.).
-        tuner_columns: List of tuner-related columns to exclude from grouping.
-        repetition_column: Column identifying experiment repetitions.
-        budget_unit: Time budget column name ('runtime').
-        performance_column: Performance metric to interpolate.
-
-    Returns:
-        Time-discretized data with uniform sampling intervals and filled values.
-    """
-    # Create entity_columns_excluding_tuner_columns by removing tuner columns
-    entity_columns_excluding_tuner_columns = [
-        col for col in entity_columns if col not in tuner_columns
-    ]
-
-    # Create superset of all groupby columns used in this function
-    all_groupby_columns = list(
-        set(
-            entity_columns_excluding_tuner_columns
-            + entity_columns
-            + [repetition_column]
-        )
-    )
-    data_cleaned = validate_groupby_columns(data, all_groupby_columns)
-
-    discretized_slices = []
-    for _, group_df in data_cleaned.groupby(entity_columns_excluding_tuner_columns):
-        max_runtime = max(group_df[budget_unit])
-        rounding_increment = -(len(str(int(max_runtime))) - 3)
-        runtime_values = np.arange(0, max_runtime, max(1, 10 ** (-rounding_increment)))
-        expanded_df = pd.DataFrame({budget_unit: runtime_values}).astype(int)
-        for _, subgroup_df in group_df.groupby(entity_columns + [repetition_column]):
-            subgroup_df[budget_unit] = (
-                subgroup_df[budget_unit].round(rounding_increment).astype(int)
-            )
-            subgroup_df = subgroup_df.groupby(
-                entity_columns + [repetition_column] + [budget_unit], as_index=False
-            ).agg({performance_column: "min"})
-            subgroup_max_runtime = max(subgroup_df[budget_unit])
-            subgroup_min_runtime = min(subgroup_df[budget_unit])
-            subgroup_df = accumulate_performances(
-                data=subgroup_df,
-                aggregators=entity_columns + [repetition_column],
-                budget_unit=budget_unit,
-                performance_column=performance_column,
-            )
-            subgroup_df = pd.merge(
-                expanded_df,
-                subgroup_df,
-                how="left",
-                on=budget_unit,
-            )
-            subgroup_df = subgroup_df.sort_values(by=budget_unit).reset_index(drop=True)
-            subgroup_df = subgroup_df.ffill()
-            subgroup_df[entity_columns + [repetition_column]] = subgroup_df[
-                entity_columns + [repetition_column]
-            ].bfill()
-            subgroup_df.loc[
-                subgroup_df[budget_unit] < subgroup_min_runtime, "best_performance"
-            ] = np.nan
-            subgroup_df.loc[
-                subgroup_df[budget_unit] > subgroup_max_runtime, "best_performance"
-            ] = np.nan
-            discretized_slices.append(subgroup_df)
-    df_discretized_slices = pd.concat(discretized_slices, ignore_index=True)
-    df_discretized_slices["observation_fill_rate"] = df_discretized_slices.groupby(
-        entity_columns + [budget_unit]
-    )["best_performance"].transform(lambda x: (x.notna().sum()) / len(x))
-    df_discretized_slices = df_discretized_slices[
-        df_discretized_slices["observation_fill_rate"] == 1
-    ]
-    return df_discretized_slices
-
-
-def standardize_budget_unit(
-    data: pd.DataFrame,
-    aggregators: List[str],
-    budget_unit: str,
-    metrics_to_keep: List[str],
-) -> pd.DataFrame:
-    """
-    Normalizes budget units to 0-100 scale for cross-experiment comparison.
-
-    Standardizes different budget ranges (iterations, runtime) to a common scale,
-    enabling fair comparison between experiments with varying durations.
-    Forward-fills missing values to create complete progression curves.
-
-    Args:
-        data: HPO data with varying budget ranges.
-        aggregators: Grouping columns for normalization context.
-        budget_unit: Budget column to normalize ('iteration' or 'runtime').
-        metrics_to_keep: Performance metrics to retain in output.
-
-    Returns:
-        Data with normalized budget unit and complete metric progressions.
-    """
-    data_cleaned = validate_groupby_columns(data, aggregators)
-
-    if metrics_to_keep is None:
-        metrics_to_keep = []
-    if budget_unit not in data_cleaned.columns:
-        raise ValueError(f"Budget unit '{budget_unit}' not found in the dataframe")
-    missing_metrics = [m for m in metrics_to_keep if m not in data_cleaned.columns]
-    if missing_metrics:
-        raise ValueError(f"Metrics {missing_metrics} not found in the dataframe")
-    for _, group in data_cleaned.groupby(aggregators):
-        if group[budget_unit].min() == group[budget_unit].max() and len(group) > 0:
-            data_cleaned.loc[group.index, f"normalized_{budget_unit}"] = 0
-    data_cleaned[f"normalized_{budget_unit}"] = data_cleaned.groupby(aggregators)[
-        budget_unit
-    ].transform(
-        lambda x: 100 * (x - x.min()) / (x.max() - x.min()) if x.max() > x.min() else 0
-    )
-    data_cleaned[f"normalized_{budget_unit}"] = (
-        data_cleaned[f"normalized_{budget_unit}"].round().astype(int)
-    )
-    results = []
-    for _, group in data_cleaned.groupby(aggregators):
-        runtime_spacings = pd.DataFrame(
-            {f"normalized_{budget_unit}": np.arange(0, 101)}
-        )
-        columns_to_keep = (
-            aggregators + [f"normalized_{budget_unit}", budget_unit] + metrics_to_keep
-        )
-        group_subset = group[columns_to_keep].drop_duplicates(
-            subset=[f"normalized_{budget_unit}"]
-        )
-        merged_group = pd.merge(
-            runtime_spacings,
-            group_subset,
-            how="left",
-            on=f"normalized_{budget_unit}",
-        )
-        merged_group = merged_group.sort_values(
-            by=f"normalized_{budget_unit}"
+    def accumulate_best_performances(
+        self, data: pd.DataFrame, budget_unit: str
+    ) -> pd.DataFrame:
+        """
+        Tracks the best performance achieved so far during progression.
+        """
+        data_cleaned = data.copy()
+        sorted_data = data_cleaned.sort_values(
+            by=self.repetition_level + [budget_unit],
+            ascending=True,
         ).reset_index(drop=True)
-        columns_to_fill = aggregators + metrics_to_keep
-        merged_group[columns_to_fill] = merged_group[columns_to_fill].ffill()
-        results.append(merged_group)
-    if not results:
-        return pd.DataFrame()
-    standardized_benchmark_data = pd.concat(results, ignore_index=True)
-    return standardized_benchmark_data
 
+        sorted_data["best_performance"] = sorted_data.groupby(self.repetition_level)[
+            self.perf_col
+        ].transform("cummin")
 
-def align_tuners(
-    data: pd.DataFrame,
-    aggregators: List[str],
-    tuner_column: str,
-    repetition_column: str,
-    budget_unit: str,
-) -> pd.DataFrame:
-    """
-    Aligns tuner experiments to common budget intervals for fair comparison.
+        return sorted_data
 
-    Restricts analysis to budget ranges where all tuners have data, ensuring
-    comparisons are made over equivalent experimental conditions. Critical
-    for eliminating bias from incomplete experiments.
+    def align_tuners_to_shared_budget(
+        self, data: pd.DataFrame, budget_unit: str
+    ) -> pd.DataFrame:
+        """
+        Aligns tuner experiments to common budget intervals for fair comparison.
 
-    Args:
-        data: HPO benchmark data with varying experiment durations.
-        aggregators: Dataset-level grouping columns.
-        tuner_column: Column identifying different tuning algorithms.
-        repetition_column: Column for experimental repetitions.
-        budget_unit: Budget progression column ('iteration' or 'runtime').
+        Restricts analysis to budget ranges where all tuners have data.
+        """
+        data_cleaned = data.copy()
 
-    Returns:
-        Data filtered to shared budget intervals across all tuners.
-    """
-    # Create superset of all groupby columns used in this function
-    all_groupby_columns = list(set(aggregators + [tuner_column] + [repetition_column]))
-    data_cleaned = validate_groupby_columns(data, all_groupby_columns)
+        # Calculate budget ranges per experiment run
+        data_cleaned["max_budget_per_run"] = data_cleaned.groupby(
+            self.repetition_level
+        )[budget_unit].transform("max")
 
-    data_cleaned["max_budget_per_repetition"] = data_cleaned.groupby(
-        aggregators + [tuner_column] + [repetition_column]
-    )[budget_unit].transform(max)
-    data_cleaned["min_budget_per_repetition"] = data_cleaned.groupby(
-        aggregators + [tuner_column] + [repetition_column]
-    )[budget_unit].transform(min)
-    data_cleaned["max_shared_budget_per_dataset"] = data_cleaned.groupby(aggregators)[
-        "max_budget_per_repetition"
-    ].transform(min)
-    data_cleaned["min_shared_budget_per_dataset"] = data_cleaned.groupby(aggregators)[
-        "min_budget_per_repetition"
-    ].transform(max)
-    data_cleaned = data_cleaned[
-        data_cleaned[budget_unit] >= data_cleaned["min_shared_budget_per_dataset"]
-    ]
-    data_cleaned = data_cleaned[
-        data_cleaned[budget_unit] <= data_cleaned["max_shared_budget_per_dataset"]
-    ]
-    return data_cleaned
+        data_cleaned["min_budget_per_run"] = data_cleaned.groupby(
+            self.repetition_level
+        )[budget_unit].transform("min")
 
+        # Find shared budget range per dataset
+        data_cleaned["max_shared_budget_per_dataset"] = data_cleaned.groupby(
+            self.dataset_level
+        )["max_budget_per_run"].transform("min")
 
-def process_performance_records(
-    raw_benchmark_data: pd.DataFrame,
-    aggregators: List[str],
-    performance_column: str,
-    budget_unit: str,
-    repetition_column: str,
-    tuner_column: str,
-    relativize_budget: bool,
-    comparison_columns: List[str],
-) -> pd.DataFrame:
-    """
-    Orchestrates the complete HPO benchmark data processing pipeline.
+        data_cleaned["min_shared_budget_per_dataset"] = data_cleaned.groupby(
+            self.dataset_level
+        )["min_budget_per_run"].transform("max")
 
-    Transforms raw experimental logs into analysis-ready performance records through
-    performance accumulation, tuner alignment, ranking, and statistical aggregation.
-    Handles both iteration-based and runtime-based budgets with optional normalization.
+        # Filter to shared budget range
+        aligned_data = data_cleaned[
+            (data_cleaned[budget_unit] >= data_cleaned["min_shared_budget_per_dataset"])
+            & (
+                data_cleaned[budget_unit]
+                <= data_cleaned["max_shared_budget_per_dataset"]
+            )
+        ].copy()
 
-    Args:
-        raw_benchmark_data: Raw HPO experiment logs from tuning runs.
-        aggregators: Grouping columns defining experimental context.
-        performance_column: Primary performance metric to analyze.
-        budget_unit: Budget type - 'iteration' for discrete steps, 'runtime' for time.
-        repetition_column: Column identifying independent experimental runs.
-        tuner_column: Column identifying different HPO algorithms.
-        relativize_budget: Whether to normalize budget to 0-100 scale.
-        sampler_column: Column identifying sampler types.
-        confidence_level_column: Column identifying confidence levels.
-        estimator_architecture_column: Column identifying estimator architectures.
-
-    Returns:
-        Processed performance data ready for statistical analysis and visualization.
-    """
-    alignment_columns = deepcopy(aggregators)
-    alignment_columns.remove(repetition_column)
-
-    ranking_columns = deepcopy(aggregators) + [budget_unit]
-    for col in comparison_columns:
-        if col in ranking_columns:
-            ranking_columns.remove(col)
-
-    dataset_columns = deepcopy(aggregators)
-    for col in comparison_columns + [repetition_column]:
-        if col in dataset_columns:
-            dataset_columns.remove(col)
-
-    # Create superset of all possible groupby columns used throughout this function
-    all_possible_groupby_columns = list(
-        set(
-            aggregators
-            + alignment_columns
-            + ranking_columns
-            + dataset_columns
-            + comparison_columns
-            + [repetition_column]
+        # Clean up temporary columns
+        aligned_data = aligned_data.drop(
+            columns=[
+                "max_budget_per_run",
+                "min_budget_per_run",
+                "max_shared_budget_per_dataset",
+                "min_shared_budget_per_dataset",
+            ]
         )
-    )
 
-    # Validate and clean all groupby columns at once
-    data_cleaned = validate_groupby_columns(
-        raw_benchmark_data, all_possible_groupby_columns
-    )
+        return aligned_data
 
-    if budget_unit == "iteration":
-        accumulated_performance_data = accumulate_performances(
-            data=data_cleaned,
-            aggregators=aggregators,
-            budget_unit=budget_unit,
-            performance_column=performance_column,
+    def calculate_ranks(
+        self,
+        data: pd.DataFrame,
+        budget_unit: str,
+        extra_ranking_cols: List[str] = None,
+        rank_ascending: bool = True,
+        metric_column: str = "best_performance",
+    ) -> pd.DataFrame:
+        """
+        Computes performance ranks for tuner comparison.
+
+        Ranks are calculated within each dataset/budget combination,
+        excluding comparison factors to enable fair comparison.
+        """
+        data_cleaned = data.copy()
+
+        ranking_cols = self.repetition_level + [budget_unit]
+        ranking_cols = [col for col in ranking_cols if col not in self.tuner_cols]
+        if extra_ranking_cols:
+            ranking_cols = list(set(ranking_cols + extra_ranking_cols))
+
+        data_cleaned["rank"] = data_cleaned.groupby(ranking_cols)[metric_column].rank(
+            method="average", ascending=rank_ascending
         )
-        aligned_performance_data = align_tuners(
-            data=accumulated_performance_data,
-            aggregators=alignment_columns,
-            tuner_column=tuner_column,
-            repetition_column=repetition_column,
-            budget_unit=budget_unit,
+        return data_cleaned
+
+    def accumulate_breaches(
+        self, data: pd.DataFrame, budget_unit: str, rolling_window: int = 20
+    ) -> pd.DataFrame:
+        """
+        Tracks cumulative and rolling breach rates for constraint violations.
+        """
+        data_cleaned = data.copy()
+        data_cleaned[self.breach_column] = data_cleaned[self.breach_column].replace(
+            {None: np.nan}
         )
-        ranked_performance_data = calculate_ranks(
-            data=aligned_performance_data,
-            aggregators=ranking_columns,
+
+        sorted_data = data_cleaned.sort_values(
+            by=self.repetition_level + [budget_unit],
+            ascending=True,
+        ).reset_index(drop=True)
+
+        sorted_data["cumulative_breach_rate"] = (
+            sorted_data.groupby(self.repetition_level)[self.breach_column]
+            .expanding()
+            .mean()
+            .reset_index(level=self.repetition_level, drop=True)
+        )
+
+        sorted_data["rolling_breach_rate"] = (
+            sorted_data.groupby(self.repetition_level)[self.breach_column]
+            .rolling(window=rolling_window, min_periods=rolling_window)
+            .mean()
+            .reset_index(level=self.repetition_level, drop=True)
+        )
+
+        # Calculate coverage errors if confidence levels are available
+        if (~sorted_data[self.confidence_level_col].isin([None, ""])).all():
+            sorted_data["cumulative_coverage_error"] = abs(
+                (1 - sorted_data["cumulative_breach_rate"])
+                - sorted_data[self.confidence_level_col].astype(float)
+            )
+            sorted_data["rolling_coverage_error"] = abs(
+                (1 - sorted_data["rolling_breach_rate"])
+                - sorted_data[self.confidence_level_col].astype(float)
+            )
+        else:
+            sorted_data["cumulative_coverage_error"] = np.nan
+            sorted_data["rolling_coverage_error"] = np.nan
+
+        return sorted_data
+
+    def time_discretize_data(
+        self, data: pd.DataFrame, budget_unit: str = "runtime"
+    ) -> pd.DataFrame:
+        """
+        Discretizes continuous runtime data into uniform time intervals.
+        """
+        data_cleaned = data.copy()
+
+        discretized_slices = []
+
+        # Group by dataset level to discretize within each dataset
+        for _, dataset_group in data_cleaned.groupby(self.dataset_level):
+            max_runtime = dataset_group[budget_unit].max()
+            rounding_increment = -(len(str(int(max_runtime))) - 3)
+            runtime_values = np.arange(
+                0, max_runtime, max(1, 10 ** (-rounding_increment))
+            )
+            expanded_df = pd.DataFrame({budget_unit: runtime_values}).astype(int)
+
+            # Process each individual experiment run
+            for _, run_group in dataset_group.groupby(self.repetition_level):
+                run_group = run_group.copy()
+                run_group[budget_unit] = (
+                    run_group[budget_unit].round(rounding_increment).astype(int)
+                )
+
+                # Aggregate duplicates and accumulate performance
+                run_group = run_group.groupby(
+                    self.repetition_level + [budget_unit], as_index=False
+                ).agg({self.perf_col: "min"})
+                run_max_time = max(run_group[budget_unit])
+                run_min_time = min(run_group[budget_unit])
+                run_group = self.accumulate_best_performances(run_group, budget_unit)
+
+                # Merge with full time grid and forward fill
+                run_group = pd.merge(expanded_df, run_group, how="left", on=budget_unit)
+                run_group = run_group.sort_values(by=budget_unit).reset_index(drop=True)
+                run_group = run_group.ffill()
+                run_group[self.repetition_level] = run_group[
+                    self.repetition_level
+                ].bfill()
+
+                run_group.loc[
+                    run_group[budget_unit] < run_min_time, "best_performance"
+                ] = np.nan
+                run_group.loc[
+                    run_group[budget_unit] > run_max_time, "best_performance"
+                ] = np.nan
+
+                discretized_slices.append(run_group)
+
+        discretized_data = pd.concat(discretized_slices, ignore_index=True)
+
+        # Calculate observation fill rate and filter
+        discretized_data["observation_fill_rate"] = discretized_data.groupby(
+            self.tuner_level + [budget_unit]
+        )["best_performance"].transform(lambda x: (x.notna().sum()) / len(x))
+
+        discretized_data = discretized_data[
+            discretized_data["observation_fill_rate"] == 1
+        ].drop(columns=["observation_fill_rate"])
+
+        return discretized_data
+
+    def standardize_budget_to_percentage(
+        self, data: pd.DataFrame, budget_unit: str, metrics_to_keep: List[str]
+    ) -> pd.DataFrame:
+        """
+        Normalizes budget units to 0-100 scale for cross-experiment comparison.
+        """
+        data_cleaned = data.copy()
+
+        # Normalize budget within each experiment run
+        normalized_col = f"normalized_{budget_unit}"
+        data_cleaned[normalized_col] = data_cleaned.groupby(self.repetition_level)[
+            budget_unit
+        ].transform(
+            lambda x: 100 * (x - x.min()) / (x.max() - x.min())
+            if x.max() > x.min()
+            else 0
+        )
+        data_cleaned[normalized_col] = data_cleaned[normalized_col].round().astype(int)
+
+        # Create standardized results
+        results = []
+        for _, group in data_cleaned.groupby(self.repetition_level):
+            # Create 0-100 percentage grid
+            percentage_grid = pd.DataFrame({normalized_col: np.arange(0, 101)})
+
+            columns_to_keep = (
+                self.repetition_level + [normalized_col, budget_unit] + metrics_to_keep
+            )
+            group_subset = group[columns_to_keep].drop_duplicates(
+                subset=[normalized_col]
+            )
+
+            # Merge and forward fill
+            merged_group = pd.merge(
+                percentage_grid, group_subset, how="left", on=normalized_col
+            )
+            merged_group = merged_group.sort_values(by=normalized_col).reset_index(
+                drop=True
+            )
+
+            columns_to_fill = self.repetition_level + metrics_to_keep
+            merged_group[columns_to_fill] = merged_group[columns_to_fill].ffill()
+
+            results.append(merged_group)
+
+        if not results:
+            return pd.DataFrame()
+
+        return pd.concat(results, ignore_index=True)
+
+    def collapse_across_repetitions(
+        self, data: pd.DataFrame, metrics: List[str], budget_unit: str
+    ) -> pd.DataFrame:
+        """
+        Collapses HPO benchmark data by computing means across repetitions.
+
+        Groups data without repetition column and calculates mean for each metric.
+        """
+        data_cleaned = data.copy()
+
+        aggregations = {metric: "mean" for metric in metrics}
+        processed_data = data_cleaned.groupby(
+            self.tuner_level + [budget_unit], as_index=False
+        ).agg(aggregations)
+
+        # Remove '_mean' suffix from aggregated metric columns if present
+        rename_dict = {
+            f"{metric}_mean": metric
+            for metric in metrics
+            if f"{metric}_mean" in processed_data.columns
+        }
+        if rename_dict:
+            processed_data = processed_data.rename(columns=rename_dict)
+
+        return processed_data
+
+    def process_iteration_budget_data(
+        self,
+        data: pd.DataFrame,
+        additional_tuner_breakout_cols: List[str] = None,
+        relativize_budget: bool = False,
+        collapse_repetitions: bool = False,
+        collapse_datasets: bool = False,
+    ) -> pd.DataFrame:
+        """
+        Process data with iteration-based budget.
+        """
+        # Step 1: Accumulate best performances
+        accumulated_data = self.accumulate_best_performances(data, self.iter_unit)
+
+        # Step 2: Align tuners to shared budget ranges
+        aligned_data = self.align_tuners_to_shared_budget(
+            accumulated_data, self.iter_unit
+        )
+
+        # Step 3: Calculate ranks
+        ranked_data = self.calculate_ranks(
+            aligned_data,
+            self.iter_unit,
+            extra_ranking_cols=additional_tuner_breakout_cols,
             rank_ascending=True,
             metric_column="best_performance",
         )
-        aggregated_data = accumulate_breaches(
-            data=ranked_performance_data,
-            aggregators=aggregators,
-            budget_unit=budget_unit,
-            breach_column="breach_status",
-            rolling_breach_count=30,
-            confidence_column="confidence_level",
+
+        final_data = self.accumulate_breaches(ranked_data, self.iter_unit)
+
+        # Step 5: Relativize budget if requested
+        budget_unit = self.iter_unit
+        if relativize_budget:
+            final_data = self.standardize_budget_to_percentage(
+                final_data, budget_unit, ["rank", "best_performance"]
+            )
+            budget_unit = f"normalized_{self.iter_unit}"
+
+        if collapse_repetitions:
+            final_data = self.collapse_across_repetitions(
+                final_data, ["rank", "best_performance"], budget_unit=budget_unit
+            )
+
+        if collapse_datasets:
+            if relativize_budget:
+                metrics = ["rank", "best_performance"]
+            else:
+                metrics = [
+                    "rank",
+                    "best_performance",
+                    "cumulative_coverage_error",
+                    "rolling_coverage_error",
+                ]
+            final_data = block_bootstrap(
+                final_data,
+                breakout_cols=[self.bench_col],
+                block_cols=[self.data_col],
+                aggregators=[
+                    col
+                    for col in self.tuner_level + [budget_unit]
+                    if col != self.data_col
+                ],
+                metric_cols=metrics,
+                n_bootstraps=1000,
+            )
+
+        return final_data
+
+    def process_runtime_budget_data(
+        self,
+        data: pd.DataFrame,
+        additional_tuner_breakout_cols: List[str] = None,
+        relativize_budget: bool = False,
+        collapse_repetitions: bool = False,
+        collapse_datasets: bool = False,
+    ) -> pd.DataFrame:
+        """
+        Process data with runtime-based budget.
+        """
+        # Step 1: Discretize time data
+        discretized_data = self.time_discretize_data(data, self.runtime_unit)
+
+        # Step 2: Align tuners to shared budget ranges
+        aligned_data = self.align_tuners_to_shared_budget(
+            discretized_data, self.runtime_unit
         )
-    elif budget_unit == "runtime":
-        discretized_benchmark_data_time = time_discretize_benchmark_data(
-            data=data_cleaned,
-            entity_columns=alignment_columns,
-            tuner_columns=comparison_columns,
-            repetition_column=repetition_column,
-            budget_unit=budget_unit,
-            performance_column=performance_column,
-        )
-        aligned_benchmark_data_time = align_tuners(
-            data=discretized_benchmark_data_time,
-            aggregators=dataset_columns,
-            tuner_column=tuner_column,
-            repetition_column=repetition_column,
-            budget_unit=budget_unit,
-        )
-        aggregated_data = calculate_ranks(
-            data=aligned_benchmark_data_time,
-            aggregators=ranking_columns,
+
+        # Step 3: Calculate ranks
+        final_data = self.calculate_ranks(
+            aligned_data,
+            self.runtime_unit,
+            extra_ranking_cols=additional_tuner_breakout_cols,
             rank_ascending=True,
             metric_column="best_performance",
         )
-    if relativize_budget:
-        aggregated_data = standardize_budget_unit(
-            data=aggregated_data,
-            aggregators=aggregators,
-            budget_unit=budget_unit,
-            metrics_to_keep=["rank", "best_performance"],
-        )
 
-    return aggregated_data
+        budget_unit = self.runtime_unit
+        # Step 4: Relativize budget if requested
+        if relativize_budget:
+            final_data = self.standardize_budget_to_percentage(
+                final_data, self.runtime_unit, ["rank", "best_performance"]
+            )
+            budget_unit = f"normalized_{self.runtime_unit}"
 
+        if collapse_repetitions:
+            final_data = self.collapse_across_repetitions(
+                final_data, ["rank", "best_performance"], budget_unit=budget_unit
+            )
 
-def rank_and_collapse_data(
-    data: pd.DataFrame,
-    grouping_cols: list[str],
-    comparison_col: str,
-    value_col: str,
-    repetition_col: str,
-) -> pd.DataFrame:
-    """
-    Ranks data within groups and collapses the results by averaging ranks across repetitions.
+        if collapse_datasets:
+            final_data = block_bootstrap(
+                final_data,
+                breakout_cols=[self.bench_col],
+                block_cols=[self.data_col],
+                aggregators=[
+                    col
+                    for col in self.tuner_level + [budget_unit]
+                    if col != self.data_col
+                ],
+                metric_cols=["rank", "best_performance"],
+                n_bootstraps=1000,
+            )
 
-    Args:
-        data: Input DataFrame containing the data to be ranked and collapsed.
-        grouping_cols: Total identifiers for grouping, may be inclusive of other cols in below inputs.
-        comparison_col: Column containing the entities to rank over (eg. tuners).
-        value_col: Column containing the values to be ranked.
-        repetition_col: Column containing experiment repetition values.
+        return final_data
 
-    Returns:
-        pd.DataFrame: DataFrame with mean ranks collapsed across repetitions for each group and comparison.
-    """
-    df = data.copy()
-    # Get the columns to group by during ranking (all grouping columns, except the thing to rank over):
-    ranking_aggregators = [col for col in grouping_cols if col != comparison_col]
-    ranked_df = calculate_ranks(
-        data=df,
-        aggregators=ranking_aggregators,
-        rank_ascending=True,
-        metric_column=value_col,
-    )
+    def process_performance_records(
+        self,
+        raw_benchmark_data: pd.DataFrame,
+        budget_unit: str,
+        extra_ranking_cols: List[str] = None,
+        relativize_budget: bool = False,
+        collapse_repetitions: bool = False,
+        collapse_datasets: bool = False,
+    ) -> pd.DataFrame:
+        """
+        Main entry point for processing HPO benchmark data.
 
-    # Collapse ranks by averaging across repetitions:
-    collapsing_aggregators = [col for col in grouping_cols if col != repetition_col]
-    collapsed_df = (
-        ranked_df.groupby(collapsing_aggregators, observed=True)["rank"]
-        .mean()
-        .reset_index()
-    )
+        Orchestrates the complete processing pipeline based on budget type.
+        """
+        data_cleaned = self._validate_and_clean_data(raw_benchmark_data)
 
-    return collapsed_df
+        if budget_unit == self.iter_unit:
+            return self.process_iteration_budget_data(
+                data_cleaned,
+                extra_ranking_cols,
+                relativize_budget,
+                collapse_repetitions,
+                collapse_datasets,
+            )
+        elif budget_unit == self.runtime_unit:
+            return self.process_runtime_budget_data(
+                data_cleaned,
+                additional_tuner_breakout_cols=extra_ranking_cols,
+                relativize_budget=relativize_budget,
+                collapse_repetitions=collapse_repetitions,
+                collapse_datasets=collapse_datasets,
+            )
+        else:
+            raise ValueError(f"Unsupported budget unit: {budget_unit}")
 
 
 def block_bootstrap(
@@ -621,9 +576,7 @@ def block_bootstrap(
     if random_state is not None:
         np.random.seed(random_state)
 
-    # Create unique key column from nesting_cols (work with copy for key creation only)
-    all_cols = list(set(block_cols + aggregators + metric_cols + breakout_cols))
-    data_with_key = data[all_cols].copy()
+    data_with_key = data.copy()
     data_with_key["_bootstrap_key"] = (
         data_with_key[block_cols].astype(str).agg("_".join, axis=1)
     )
@@ -707,3 +660,43 @@ def block_bootstrap(
     )
 
     return final_results
+
+
+def rank_and_collapse_data(
+    data: pd.DataFrame,
+    grouping_cols: list[str],
+    comparison_col: str,
+    value_col: str,
+    repetition_col: str,
+) -> pd.DataFrame:
+    """
+    Ranks data within groups and collapses the results by averaging ranks across repetitions.
+
+    Args:
+        data: Input DataFrame containing the data to be ranked and collapsed.
+        grouping_cols: Total identifiers for grouping, may be inclusive of other cols in below inputs.
+        comparison_col: Column containing the entities to rank over (eg. tuners).
+        value_col: Column containing the values to be ranked.
+        repetition_col: Column containing experiment repetition values.
+
+    Returns:
+        pd.DataFrame: DataFrame with mean ranks collapsed across repetitions for each group and comparison.
+    """
+    data.copy()
+    # Get the columns to group by during ranking (all grouping columns, except the thing to rank over):
+    ranking_aggregators = [col for col in grouping_cols if col != comparison_col]
+
+    ranked_df = data.copy()
+    ranked_df["rank"] = ranked_df.groupby(ranking_aggregators)[value_col].rank(
+        method="average", ascending=True
+    )
+
+    # Collapse ranks by averaging across repetitions:
+    collapsing_aggregators = [col for col in grouping_cols if col != repetition_col]
+    collapsed_df = (
+        ranked_df.groupby(collapsing_aggregators, observed=True)["rank"]
+        .mean()
+        .reset_index()
+    )
+
+    return collapsed_df
