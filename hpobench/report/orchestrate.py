@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 os.environ["SYNETUNE_FOLDER"] = "cache/syne-tune"
 
 
-def load_benchmark_configs(
+def load_experiment_configs(
     benchmarks: list[
         Literal[
             "jahs201",
@@ -470,7 +470,7 @@ def run_and_analyze_main_benchmark(
         metrics, metadata, and derived features needed for analysis. This data serves
         as input to the analysis functions and can be used for custom analysis.
     """
-    experiment_configs = load_benchmark_configs(
+    experiment_configs = load_experiment_configs(
         benchmarks=benchmarks,
         tuning_configurations=tuning_configurations,
         n_warm_starts=n_warm_starts,

@@ -50,7 +50,7 @@ def analyze_main_benchmark(
     starting_coverage_trial: Optional[int] = None,
     cd_significance_method: Literal[
         "nemenyi", "wilcoxon", "permutation_test"
-    ] = "nemenyi",
+    ] = "permutation_test",
 ):
     """Analyze HPO benchmark results with comprehensive statistical and visual analysis.
 
@@ -245,11 +245,9 @@ def analyze_main_benchmark(
             aggregators=default_aggregators,
             benchmark_col=bench_col,
             tuner_column=tuner_col,
-            repetition_column=rep_col,
             breach_column="breach_status",
             dataset_column=data_col,
             entity_column=tuner_col,
-            confidence_column=confidence_level_col,
             budget_unit=iter_unit,
             cache_path=cache_path,
             run_start_str=run_start_str,
@@ -527,7 +525,7 @@ def analyze_searcher_tuning_effect(
     data_size_col = "data_size"
 
     filtered_df = rank_and_collapse_data(
-        data=results_df,
+        static_raw_benchmark_data=results_df,
         grouping_cols=grouping_columns,
         comparison_col=tuning_iterations_column,
         value_col=estimator_error_column,
@@ -694,7 +692,7 @@ def analyze_searcher_estimator_comparison(
     non_tuned_results_df = results_df[results_df["tuning_iterations"] == 0]
     # Rank and collapse the data:
     filtered_df = rank_and_collapse_data(
-        data=non_tuned_results_df,
+        static_raw_benchmark_data=non_tuned_results_df,
         grouping_cols=grouping_columns,
         comparison_col=estimator_architecture_col,
         value_col=estimator_error_column,

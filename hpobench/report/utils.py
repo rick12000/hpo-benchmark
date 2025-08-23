@@ -15,6 +15,7 @@ from hpobench.process import block_bootstrap
 from hpobench.report.latex import (
     format_calibration_metrics_to_latex,
 )
+from hpobench.report.metrics import calculate_calibration_statistics_per_repetition
 
 
 def _save_text_content(
@@ -393,13 +394,11 @@ def aggregate_and_save(
 def run_and_save_calibration_statistics(
     raw_benchmark_data: pd.DataFrame,
     aggregators: List[str],
-    repetition_column: str,
     benchmark_col: str,
     tuner_column: str,
     breach_column: str,
     dataset_column: str,
     entity_column: str,
-    confidence_column: str,
     budget_unit: str,
     cache_path: str,
     run_start_str: str,
@@ -426,8 +425,6 @@ def run_and_save_calibration_statistics(
     Returns:
         DataFrame with calibration statistics
     """
-    from hpobench.report.metrics import calculate_calibration_statistics_per_repetition
-
     metric_columns = [
         "winkler_score",
         "width",

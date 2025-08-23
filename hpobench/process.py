@@ -666,7 +666,7 @@ def block_bootstrap(
 
 
 def rank_and_collapse_data(
-    data: pd.DataFrame,
+    static_raw_benchmark_data: pd.DataFrame,
     grouping_cols: list[str],
     comparison_col: str,
     value_col: str,
@@ -685,11 +685,11 @@ def rank_and_collapse_data(
     Returns:
         pd.DataFrame: DataFrame with mean ranks collapsed across repetitions for each group and comparison.
     """
-    data.copy()
+    static_raw_benchmark_data.copy()
     # Get the columns to group by during ranking (all grouping columns, except the thing to rank over):
     ranking_aggregators = [col for col in grouping_cols if col != comparison_col]
 
-    ranked_df = data.copy()
+    ranked_df = static_raw_benchmark_data.copy()
     ranked_df["rank"] = ranked_df.groupby(ranking_aggregators)[value_col].rank(
         method="average", ascending=True
     )

@@ -1,4 +1,3 @@
-import ast
 from hpobench.config.config_types import IntRange, CategoricalRange, FloatRange
 import random
 from typing import Optional, Union
@@ -37,14 +36,6 @@ class AnalysisPathManager:
         return path
 
 
-def q10(x):
-    return x.quantile(0.1)
-
-
-def q90(x):
-    return x.quantile(0.9)
-
-
 def get_group_dict(breakout_col, within_group):
     if breakout_col is None:
         return {}
@@ -80,80 +71,6 @@ def generate_hyperparameter_combinations(
                 raise ValueError()
         combinations.append(combination)
     return combinations
-
-
-def parse_config_space(s, openml_id: str):
-    config_dict = {}
-    for line in s.split("\n"):
-        line = line.strip()
-        if not line or line in {"Configuration space object:", "Hyperparameters:"}:
-            continue
-
-        # Custom parser to handle commas inside brackets/braces
-        parts = []
-        current = []
-        in_bracket = False
-        bracket_chars = {"[", "{"}
-
-        for char in line:
-            if char in bracket_chars:
-                in_bracket = True
-            elif char in {"]", "}"}:
-                in_bracket = False
-
-            if char == "," and not in_bracket:
-                parts.append("".join(current).strip())
-                current = []
-            else:
-                current.append(char)
-        if current:
-            parts.append("".join(current).strip())
-
-        if not parts:
-            continue
-
-        name = parts[0]
-        param_type = None
-        choices = None
-        range_values = None
-        value = None
-
-        for part in parts[1:]:
-            if part.startswith("Type: "):
-                param_type = part.split(": ")[1]
-            elif part.startswith("Choices: "):
-                choices_str = part.split(": ")[1].strip()
-                # Convert curly braces to list format
-                if choices_str.startswith("{"):
-                    choices_str = f"[{choices_str[1:-1]}]"
-                choices = ast.literal_eval(choices_str) if choices_str else []
-            elif part.startswith("Range: "):
-                range_str = part.split(": ")[1].strip("[]")
-                range_values = (
-                    [x.strip() for x in range_str.split(",")] if range_str else []
-                )
-            elif part.startswith("Value: "):
-                value = (
-                    ast.literal_eval(part.split(": ")[1])
-                    if part.split(": ")[1]
-                    else None
-                )
-
-        # Handle parameter types
-        if param_type == "Categorical" and choices is not None:
-            config_dict[name] = CategoricalRange(choices=choices)
-        elif param_type == "UniformInteger" and range_values:
-            values = [int(x) for x in range_values]
-            config_dict[name] = IntRange(lower=values[0], upper=values[1])
-        elif param_type == "UniformFloat" and range_values:
-            values = [float(x) for x in range_values]
-            config_dict[name] = FloatRange(lower=values[0], upper=values[1])
-        elif param_type == "Constant" and value is not None:
-            config_dict[name] = CategoricalRange(choices=[value])
-
-    config_dict["OpenML_task_id"] = CategoricalRange(choices=[openml_id])
-
-    return config_dict
 
 
 def save_analysis_results(

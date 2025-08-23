@@ -24,11 +24,9 @@ def test_run_and_save_calibration_statistics_toy(dummy_calibration_raw_data):
         "repetition",
         "confidence_level",
     ]
-    rep_col = "repetition"
     tuner_col = "tuner"
     bench_col = "benchmark_identifier"
     data_col = "dataset"
-    confidence_level_col = "confidence_level"
     runtime_unit = "runtime"
     iter_unit = "iteration"
     f"normalized_{runtime_unit}"
@@ -41,13 +39,11 @@ def test_run_and_save_calibration_statistics_toy(dummy_calibration_raw_data):
     run_and_save_calibration_statistics(
         raw_benchmark_data=raw_benchmark_data,
         aggregators=grouping_cols,
-        repetition_column=rep_col,
         benchmark_col=bench_col,
         tuner_column=tuner_col,
         breach_column="breach_status",
         dataset_column=data_col,
         entity_column=tuner_col,
-        confidence_column=confidence_level_col,
         budget_unit=iter_unit,
         cache_path=cache_path,
         run_start_str=run_start_str,

@@ -7,8 +7,8 @@ from hpobench.config.config_types import IntRange, FloatRange, CategoricalRange
 from typing import Union, Optional, Literal, Any
 from optuna.samplers import TPESampler, RandomSampler, CmaEsSampler, GPSampler
 from hpobench.optuna_gp_integration import (
-    CONFOPTGPSampler,
-    CONFOPTAcquisitionFunction,
+    StrippedGPSampler,
+    ExpandedAcquisitionFunction,
 )
 from skopt import forest_minimize, gbrt_minimize, gp_minimize
 from skopt.space import Real, Integer as SKInteger, Categorical as SKCategorical
@@ -49,19 +49,7 @@ SKOPT_GP_ACQ_FUNC = "EI"
 SKOPT_GP_ACQ_OPTIMIZER = "sampling"
 CONFOPT_USE_DYNAMIC_SAMPLING = True
 CONFOPT_RETRAINING_FREQUENCY = 1
-N_CANDIDATES = 2000  # 10000
-
-# SMAC3 Sampler Variants (Vanilla Configuration):
-# - "smac_rf_ei": Random Forest surrogate with Expected Improvement acquisition
-# - "smac_rf_ts": Random Forest surrogate with Thompson Sampling acquisition
-#
-# Vanilla settings ensure fair comparison with other tuners:
-# - No racing (max_config_calls=1)
-# - No random interleaving (probability=0.0)
-# - No parallelization (n_workers=1)
-# - Single incumbent tracking (max_incumbents=1)
-# - No local search (RandomSearch acquisition maximizer only)
-# - Deterministic scenario
+N_CANDIDATES = 2000  # 1000
 
 
 def calculate_breach_status(
@@ -291,21 +279,18 @@ def optuna_tune(
     elif sampler == "gp":
         initialized_sampler = GPSampler(seed=random_state, n_startup_trials=0)
     elif sampler.startswith("confopt_gp_"):
-        # Extract acquisition function from sampler name
         acq_func_name = sampler.replace("confopt_gp_", "")
         try:
-            acq_func = CONFOPTAcquisitionFunction(acq_func_name)
+            acq_func = ExpandedAcquisitionFunction(acq_func_name)
         except ValueError:
             raise ValueError(f"Unknown CONFOPT acquisition function: {acq_func_name}")
 
-        # Note: HPO Bench typically deals with minimization problems
-        # If you need maximization, this should be configured based on the study direction
-        initialized_sampler = CONFOPTGPSampler(
+        initialized_sampler = StrippedGPSampler(
             acquisition_function=acq_func,
             n_candidates=N_CANDIDATES,
             seed=random_state,
             n_startup_trials=0,
-            maximize=False,  # Default to minimize for HPO Bench
+            maximize=False,
         )
     else:
         raise ValueError(f"Unknown optuna sampler: {sampler}")
@@ -443,6 +428,7 @@ def confopt_tune(
     adj_n_trials = n_trials
 
     sampler_copy = deepcopy(sampler)
+    # NOTE: We take the original sampler's alpha, to avoid mutation later on:
     if isinstance(sampler.sampler, (LowerBoundSampler, PessimisticLowerBoundSampler)):
         alpha = sampler.sampler.alpha
     # NOTE: Zero random searches because this benchmark repository uses warm-starting:

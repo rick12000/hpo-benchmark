@@ -62,7 +62,7 @@ logger = logging.getLogger(__name__)
 EPS = 1e-10
 
 
-class CONFOPTAcquisitionFunction(Enum):
+class ExpandedAcquisitionFunction(Enum):
     """Supported CONFOPT acquisition functions."""
 
     EXPECTED_IMPROVEMENT = "expected_improvement"
@@ -85,7 +85,7 @@ def _standardize_values(
     return standardized_values, means, stds
 
 
-class CONFOPTGPSampler(BaseSampler):
+class StrippedGPSampler(BaseSampler):
     """
     Gaussian Process sampler with CONFOPT acquisition functions.
 
@@ -109,7 +109,7 @@ class CONFOPTGPSampler(BaseSampler):
     def __init__(
         self,
         *,
-        acquisition_function: CONFOPTAcquisitionFunction = CONFOPTAcquisitionFunction.LOG_EXPECTED_IMPROVEMENT,
+        acquisition_function: ExpandedAcquisitionFunction = ExpandedAcquisitionFunction.LOG_EXPECTED_IMPROVEMENT,
         n_candidates: int = 2048,  # Match Optuna's n_preliminary_samples default
         seed: int | None = None,
         independent_sampler: BaseSampler | None = None,
@@ -354,28 +354,30 @@ class CONFOPTGPSampler(BaseSampler):
         # Compute acquisition function based on selected method
         if (
             self._acquisition_function
-            == CONFOPTAcquisitionFunction.EXPECTED_IMPROVEMENT
+            == ExpandedAcquisitionFunction.EXPECTED_IMPROVEMENT
         ):
             f_best = torch.max(Y_train).item() if len(Y_train) > 0 else 0.0
             return self._expected_improvement_acquisition(mean, var, f_best)
 
         elif (
             self._acquisition_function
-            == CONFOPTAcquisitionFunction.LOG_EXPECTED_IMPROVEMENT
+            == ExpandedAcquisitionFunction.LOG_EXPECTED_IMPROVEMENT
         ):
             # Use Optuna's approach: f_best is max of standardized values (which are already maximization-oriented)
             f_best = torch.max(Y_train).item() if len(Y_train) > 0 else 0.0
             return self._log_expected_improvement_acquisition(mean, var, f_best)
 
-        elif self._acquisition_function == CONFOPTAcquisitionFunction.CONFIDENCE_BOUND:
+        elif self._acquisition_function == ExpandedAcquisitionFunction.CONFIDENCE_BOUND:
             return self._confidence_bound_acquisition(mean, var)
 
-        elif self._acquisition_function == CONFOPTAcquisitionFunction.THOMPSON_SAMPLING:
+        elif (
+            self._acquisition_function == ExpandedAcquisitionFunction.THOMPSON_SAMPLING
+        ):
             return self._thompson_sampling_acquisition(mean, var)
 
         elif (
             self._acquisition_function
-            == CONFOPTAcquisitionFunction.OPTIMISTIC_THOMPSON_SAMPLING
+            == ExpandedAcquisitionFunction.OPTIMISTIC_THOMPSON_SAMPLING
         ):
             return self._optimistic_thompson_sampling_acquisition(mean, var)
 
@@ -508,7 +510,7 @@ class CONFOPTGPSampler(BaseSampler):
         # Create acquisition function parameters using Optuna's approach
         if (
             self._acquisition_function
-            == CONFOPTAcquisitionFunction.LOG_EXPECTED_IMPROVEMENT
+            == ExpandedAcquisitionFunction.LOG_EXPECTED_IMPROVEMENT
         ):
             acqf_params = acqf.create_acqf_params(
                 acqf_type=acqf.AcquisitionFunctionType.LOG_EI,

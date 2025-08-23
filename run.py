@@ -30,11 +30,11 @@ run_sections = {
     "run_coverage_analysis": False,
     "run_sampler_variation_analysis": False,
     "run_architecture_variation_analysis": False,
-    "run_external_tuning_analysis": True,
+    "run_external_tuning_analysis": False,
     "run_preconformal_comparison_analysis": False,
     "run_static_analysis": False,
     "run_quantile_count_comparison": False,
-    "run_search_tuning_effect_comparison": False,
+    "run_search_tuning_effect_comparison": True,
 }
 
 
@@ -108,11 +108,12 @@ if __name__ == "__main__":
     if run_sections["run_external_tuning_analysis"]:
         raw_benchmark_data = run_and_analyze_main_benchmark(
             benchmarks=[
-                # "jahs201",
+                "jahs201",
                 "lcbench_large",
                 # "lcbench_heteroscedastic",
-                # "nas301",  # Uncomment to include NAS-301 benchmark
-                # "rbv2_xgboost_large",
+                "nas301",  # Uncomment to include NAS-301 benchmark
+                "rbv2_xgboost_large",
+                # "rbv2_xgboost_heteroscedastic"
             ],  # , "lcbench_large", "lcbench_heteroscedastic"],
             tuning_configurations=LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS
             + EXTERNAL_TUNING_CONFIGURATIONS,
@@ -127,12 +128,13 @@ if __name__ == "__main__":
             schema=schema,
             n_repetitions=experiment_params.small_n_repetitions_per_tuner_config,
             analysis_components=[
-                "wilcoxon",
+                # "wilcoxon",
                 "permutation_test",
-                "nemenyi",
+                # "nemenyi",
                 "rank_analysis",
                 "dataset_performances",
             ],
+            # cd_significance_method="permutation_test"
         )
 
     # Preconformal Comparison Analysis
