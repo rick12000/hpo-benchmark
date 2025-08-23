@@ -3,6 +3,7 @@ from confopt.selection.acquisition import (
 )
 from confopt.selection.sampling.bound_samplers import (
     LowerBoundSampler,
+    PessimisticLowerBoundSampler,
 )
 from confopt.selection.sampling.entropy_samplers import MaxValueEntropySearchSampler
 from confopt.selection.sampling.expected_improvement_samplers import (
@@ -27,8 +28,11 @@ STATIC_ANALYSIS_ESTIMATOR_ARCHITECTURES = [
     "ql",
     "qrf",
     "qgbm",
+    "qens1",
+    "qens2",
     "qens3",
-    # "qens4",
+    "qens4",
+    "qens5",
 ]
 
 # 2. Create configurations feeding the coverage charts:
@@ -120,27 +124,27 @@ SAMPLER_VARIATION_CONFIGURATIONS = build_sampler_variation_configurations(
             n_y_candidates_per_x=100,  # Should be 1000, but too slow
             entropy_method="distance",
         ),
-        # LowerBoundSampler(
-        #     interval_width=DEFAULT_INTERVAL_WIDTH,
-        #     adapter=SAMPLER_VARIATION_DEFAULT_ADAPTER,
-        #     c=2,
-        #     beta_decay="logarithmic_decay",
-        # ),
-        # LowerBoundSampler(
-        #     interval_width=DEFAULT_INTERVAL_WIDTH,
-        #     adapter=SAMPLER_VARIATION_DEFAULT_ADAPTER,
-        #     c=1,
-        #     beta_decay="logarithmic_decay",
-        # ),
-        # PessimisticLowerBoundSampler(
-        #     interval_width=DEFAULT_INTERVAL_WIDTH,
-        #     adapter=SAMPLER_VARIATION_DEFAULT_ADAPTER,
-        # ),
-        # ExpectedImprovementSampler(
-        #     n_quantiles=SAMPLER_VARIATION_N_DEFAULT_QUANTILES,
-        #     num_ei_samples=1000,
-        #     adapter=SAMPLER_VARIATION_DEFAULT_ADAPTER,
-        # ),
+        LowerBoundSampler(
+            interval_width=DEFAULT_INTERVAL_WIDTH,
+            adapter=SAMPLER_VARIATION_DEFAULT_ADAPTER,
+            c=2,
+            beta_decay="logarithmic_decay",
+        ),
+        LowerBoundSampler(
+            interval_width=DEFAULT_INTERVAL_WIDTH,
+            adapter=SAMPLER_VARIATION_DEFAULT_ADAPTER,
+            c=1,
+            beta_decay="logarithmic_decay",
+        ),
+        PessimisticLowerBoundSampler(
+            interval_width=DEFAULT_INTERVAL_WIDTH,
+            adapter=SAMPLER_VARIATION_DEFAULT_ADAPTER,
+        ),
+        ExpectedImprovementSampler(
+            n_quantiles=SAMPLER_VARIATION_N_DEFAULT_QUANTILES,
+            num_ei_samples=1000,
+            adapter=SAMPLER_VARIATION_DEFAULT_ADAPTER,
+        ),
         ThompsonSampler(
             n_quantiles=SAMPLER_VARIATION_N_DEFAULT_QUANTILES,
             enable_optimistic_sampling=False,
@@ -159,11 +163,11 @@ ARCHITECTURE_VARIATION_ADAPTER = "DtACI"
 ARCHITECTURE_VARIATION_N_QUANTILES = 4
 ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurations(
     architectures=[
-        # "qgp",
+        "qgp",
         "ql",
-        # "qrf",
+        "qrf",
         "qgbm",
-        "qens3",
+        # "qens3",
         # "qens4",
     ],
     samplers=[
@@ -172,6 +176,12 @@ ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurati
         #     num_ei_samples=1000,
         #     adapter=ARCHITECTURE_VARIATION_ADAPTER,
         # ),
+        LowerBoundSampler(
+            interval_width=DEFAULT_INTERVAL_WIDTH,
+            adapter=ARCHITECTURE_VARIATION_ADAPTER,
+            c=1,
+            beta_decay="logarithmic_decay",
+        ),
         ThompsonSampler(
             n_quantiles=ARCHITECTURE_VARIATION_N_QUANTILES,
             enable_optimistic_sampling=True,
@@ -194,12 +204,12 @@ LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_con
         # "qrf",
         "qgp",
         # "ql",
-        # "qgbm",
+        "qgbm",
         # "qens1",
         # "qens2",
         # "qens3",
         # "qens4",
-        # "qens5",
+        "qens5",
     ],
     samplers=[
         ThompsonSampler(
@@ -221,6 +231,7 @@ for architecture in [
     "ql",
     # "qgbm",
     "qrf",
+    "qens5",
 ]:
     # Simulate normal pre-conformal cutoff vs. unreachable one:
     for pre_conformal_trials in [32, 10000]:
@@ -301,10 +312,10 @@ for searcher_tuning_framework in [None, "fixed"]:
     SEARCH_TUNING_EFFECT_CONFIGURATIONS.extend(
         build_architecture_variation_configurations(
             architectures=[
-                "ql",
+                # "ql",
                 "qrf",
                 "qgbm",
-                "qens3",
+                # "qens3",
             ],
             samplers=[
                 ThompsonSampler(

@@ -9,6 +9,7 @@ import logging
 import numpy as np
 from hpobench.utils import AnalysisPathManager
 
+matplotlib.use("Agg")  # Use non-GUI backend
 logger = logging.getLogger(__name__)
 
 matplotlib.rcParams["mathtext.fontset"] = "stix"

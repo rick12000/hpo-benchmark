@@ -37,6 +37,8 @@ class BenchmarkDataProcessor:
         self.runtime_unit = schema.runtime_unit
         self.iter_unit = schema.iter_unit
         self.breach_column = schema.breach_column
+        self.cumulative_coverage_error_col = schema.cumulative_coverage_error_col
+        self.rolling_coverage_error_col = schema.rolling_coverage_error_col
 
         self.tuner_cols = [
             self.tuner_col,
@@ -81,17 +83,9 @@ class BenchmarkDataProcessor:
         for col in self.all_relevant_cols:
             if col not in data_copy.columns:
                 raise ValueError(f"Missing column in input data: {col}")
-            else:
-                data_copy[self.tuner_cols] = data_copy[self.tuner_cols].fillna("")
-            # else:
-            #     null_count = data_copy[col].isnull().sum()
-            #     none_count = (
-            #         (data_copy[col] == None).sum()
-            #         if data_copy[col].dtype == "object"
-            #         else 0
-            #     )
-            #     if null_count > 0 or none_count > 0:
-            #         data_copy[col] = data_copy[col].fillna("")
+
+        # Only fill NaN values in tuner columns with empty strings
+        data_copy[self.tuner_cols] = data_copy[self.tuner_cols].fillna("")
 
         return data_copy
 
@@ -196,7 +190,11 @@ class BenchmarkDataProcessor:
         """
         data_cleaned = data.copy()
         data_cleaned[self.breach_column] = data_cleaned[self.breach_column].replace(
-            {None: np.nan}
+            {"": np.nan, None: np.nan}
+        )
+        # Convert to numeric, coercing errors to NaN
+        data_cleaned[self.breach_column] = pd.to_numeric(
+            data_cleaned[self.breach_column], errors="coerce"
         )
 
         sorted_data = data_cleaned.sort_values(
@@ -218,19 +216,24 @@ class BenchmarkDataProcessor:
             .reset_index(level=self.repetition_level, drop=True)
         )
 
-        # Calculate coverage errors if confidence levels are available
-        if (~sorted_data[self.confidence_level_col].isin([None, ""])).all():
-            sorted_data["cumulative_coverage_error"] = abs(
+        # Always create coverage error columns, fill with NaN if not available
+        confidence_vals = sorted_data[self.confidence_level_col]
+        has_valid_confidence = (~confidence_vals.isin([None, ""])).all()
+
+        if has_valid_confidence:
+            logger.debug("Creating coverage error columns with calculated values")
+            sorted_data[self.cumulative_coverage_error_col] = abs(
                 (1 - sorted_data["cumulative_breach_rate"])
                 - sorted_data[self.confidence_level_col].astype(float)
             )
-            sorted_data["rolling_coverage_error"] = abs(
+            sorted_data[self.rolling_coverage_error_col] = abs(
                 (1 - sorted_data["rolling_breach_rate"])
                 - sorted_data[self.confidence_level_col].astype(float)
             )
         else:
-            sorted_data["cumulative_coverage_error"] = np.nan
-            sorted_data["rolling_coverage_error"] = np.nan
+            logger.debug("Creating coverage error columns with NaN values")
+            sorted_data[self.cumulative_coverage_error_col] = np.nan
+            sorted_data[self.rolling_coverage_error_col] = np.nan
 
         return sorted_data
 
@@ -407,26 +410,26 @@ class BenchmarkDataProcessor:
         # Step 5: Relativize budget if requested
         budget_unit = self.iter_unit
         if relativize_budget:
+            metrics = ["rank", "best_performance"]
+        else:
+            metrics = [
+                "rank",
+                "best_performance",
+                self.cumulative_coverage_error_col,
+                self.rolling_coverage_error_col,
+            ]
+        if relativize_budget:
             final_data = self.standardize_budget_to_percentage(
-                final_data, budget_unit, ["rank", "best_performance"]
+                final_data, budget_unit, metrics
             )
             budget_unit = f"normalized_{self.iter_unit}"
 
         if collapse_repetitions:
             final_data = self.collapse_across_repetitions(
-                final_data, ["rank", "best_performance"], budget_unit=budget_unit
+                final_data, metrics, budget_unit=budget_unit
             )
 
         if collapse_datasets:
-            if relativize_budget:
-                metrics = ["rank", "best_performance"]
-            else:
-                metrics = [
-                    "rank",
-                    "best_performance",
-                    "cumulative_coverage_error",
-                    "rolling_coverage_error",
-                ]
             final_data = block_bootstrap(
                 final_data,
                 breakout_cols=[self.bench_col],

@@ -1,0 +1,13 @@
+benchmark_identifier,dataset,tuner,sampler,confidence_level,estimator_architecture,sampler_n_quantiles,sampler_adapter,tuner_searcher_tuning_framework,n_pre_conformal_trials,runtime,rank,best_performance
+lcbench,3945.0,QGBM tuner 1,gbrt,,QGBM,4.0,DtACI,,32.0,257,2.0,-81.8201
+lcbench,3945.0,QGBM tuner 1,gbrt,,QGBM,4.0,DtACI,,32.0,258,1.25,-89.4253
+lcbench,3945.0,QGBM tuner 1,gbrt,,QGBM,4.0,DtACI,,32.0,259,1.25,-89.4253
+lcbench,3945.0,QGBM tuner 2,tpe,,QGBM,4.0,DtACI,,10000.0,257,1.0,-88.70935
+lcbench,3945.0,QGBM tuner 2,tpe,,QGBM,4.0,DtACI,,10000.0,258,1.75,-88.70935
+lcbench,3945.0,QGBM tuner 2,tpe,,QGBM,4.0,DtACI,,10000.0,259,1.75,-88.70935
+lcbench,7593.0,QGBM tuner 1,gbrt,,QGBM,4.0,DtACI,,32.0,250,1.75,-88.1104
+lcbench,7593.0,QGBM tuner 2,tpe,,QGBM,4.0,DtACI,,10000.0,250,1.25,-88.8356
+nahs201,cifar10,QGBM tuner 1,gbrt,,QGBM,4.0,DtACI,,32.0,50,1.0,-86.9951
+nahs201,cifar10,QGBM tuner 2,tpe,,QGBM,4.0,DtACI,,10000.0,50,2.0,-81.41995
+nahs201,imagenet,QGBM tuner 1,gbrt,,QGBM,4.0,DtACI,,32.0,47,1.0,-87.06275
+nahs201,imagenet,QGBM tuner 2,tpe,,QGBM,4.0,DtACI,,10000.0,47,2.0,-77.4891

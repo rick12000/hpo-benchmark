@@ -11,7 +11,7 @@ class ExperimentParameters(BaseModel):
 
     default_max_n_instances: int = 4
     static_data_sizes: List[int] = [50, 100, 500]
-    tuning_iterations: List[int] = [0, 20]
-    small_n_repetitions_per_tuner_config: int = 1
-    medium_n_repetitions_per_tuner_config: int = 1
-    large_n_repetitions_per_tuner_config: int = 1
+    tuning_iterations: List[int] = [0, 10]
+    small_n_repetitions_per_tuner_config: int = 5
+    medium_n_repetitions_per_tuner_config: int = 5
+    large_n_repetitions_per_tuner_config: int = 5

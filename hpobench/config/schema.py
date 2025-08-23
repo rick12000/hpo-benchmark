@@ -3,6 +3,9 @@ from typing import Any, Dict, List
 
 
 class BenchmarkDataSchema(BaseModel):
+    # Coverage error columns
+    cumulative_coverage_error_col: str = "cumulative_coverage_error"
+    rolling_coverage_error_col: str = "rolling_coverage_error"
     rep_col: str = "repetition"
     perf_col: str = "performance"
     tuner_col: str = "tuner"

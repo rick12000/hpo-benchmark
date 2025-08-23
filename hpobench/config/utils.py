@@ -272,11 +272,11 @@ def get_external_tuning_configurations() -> List[TunerConfig]:
         #     searcher="gp",
         #     config_identifier="GP1",
         # ),
-        # TunerConfig(
-        #     tuner="optuna",
-        #     searcher="tpe",
-        #     config_identifier="TPE",
-        # ),
+        TunerConfig(
+            tuner="optuna",
+            searcher="tpe",
+            config_identifier="TPE",
+        ),
         # TunerConfig(
         #     tuner="optuna",
         #     searcher="gp",
@@ -288,11 +288,11 @@ def get_external_tuning_configurations() -> List[TunerConfig]:
         #     searcher="cqr_thompson",
         #     config_identifier="CQR-THOMPSON",
         # ),
-        # TunerConfig(
-        #     tuner="optuna",
-        #     searcher="random",
-        #     config_identifier="RS",
-        # ),
+        TunerConfig(
+            tuner="optuna",
+            searcher="random",
+            config_identifier="RS",
+        ),
         # TunerConfig(
         #     tuner="skopt",
         #     searcher="gbrt",
