@@ -35,8 +35,10 @@ STATIC_ANALYSIS_ESTIMATOR_ARCHITECTURES = [
     "qens5",
 ]
 
+
 # 2. Create configurations feeding the coverage charts:
 COVERAGE_ANALYSIS_CONFIGURATIONS = []
+COVERAGE_PLOT_CONFIGURATIONS = []
 COVERAGE_INTERVAL_WIDTHS = [0.25, 0.5, 0.75]  # 0.25, 0.5, 0.75
 ADAPTERS = ["ACI", "DtACI", None]
 
@@ -60,6 +62,28 @@ for interval_width in COVERAGE_INTERVAL_WIDTHS:
             config_identifier = f"Conformalized + {adapter}"
         else:
             raise ValueError(f"Unknown adapter: {adapter}")
+        config = TunerConfig(
+            tuner="confopt",
+            searcher=SEARCHER,
+            config_identifier=config_identifier,
+            searcher_tuning_framework=None,
+        )
+        COVERAGE_ANALYSIS_CONFIGURATIONS.append(config)
+        COVERAGE_PLOT_CONFIGURATIONS.append(config)
+
+        SEARCHER = QuantileConformalSearcher(
+            quantile_estimator_architecture="qgbm",
+            sampler=SAMPLER,
+            n_calibration_folds=5,
+            calibration_split_strategy="cv",
+            symmetric_adjustment=True,
+        )
+        if adapter is None:
+            config_identifier = "Cross Validated"
+        elif adapter in ["ACI", "DtACI"]:
+            config_identifier = f"Cross Validated + {adapter}"
+        else:
+            raise ValueError(f"Unknown adapter: {adapter}")
         COVERAGE_ANALYSIS_CONFIGURATIONS.append(
             TunerConfig(
                 tuner="confopt",
@@ -69,48 +93,27 @@ for interval_width in COVERAGE_INTERVAL_WIDTHS:
             )
         )
 
-        # SEARCHER = QuantileConformalSearcher(
-        #     quantile_estimator_architecture="qgbm",
-        #     sampler=SAMPLER,
-        #     n_calibration_folds=5,
-        #     calibration_split_strategy="cv",
-        #     symmetric_adjustment=True,
-        # )
-        # if adapter is None:
-        #     config_identifier = "Cross Validated"
-        # elif adapter in ["ACI", "DtACI"]:
-        #     config_identifier = f"Cross Validated + {adapter}"
-        # else:
-        #     raise ValueError(f"Unknown adapter: {adapter}")
-        # COVERAGE_ANALYSIS_CONFIGURATIONS.append(
-        #     TunerConfig(
-        #         tuner="confopt",
-        #         searcher=SEARCHER,
-        #         config_identifier=config_identifier,
-        #         searcher_tuning_framework=None,
-        #     )
-        # )
-
     # Manually add the unconformalized configuration for each interval width:
-    COVERAGE_ANALYSIS_CONFIGURATIONS.append(
-        TunerConfig(
-            tuner="confopt",
-            searcher=QuantileConformalSearcher(
-                quantile_estimator_architecture="qgbm",
-                sampler=LowerBoundSampler(
-                    interval_width=interval_width,
-                    adapter=None,
-                    c=0,
-                ),
-                n_pre_conformal_trials=10000,
-                n_calibration_folds=3,
-                calibration_split_strategy="train_test_split",
-                symmetric_adjustment=True,
+    config = TunerConfig(
+        tuner="confopt",
+        searcher=QuantileConformalSearcher(
+            quantile_estimator_architecture="qgbm",
+            sampler=LowerBoundSampler(
+                interval_width=interval_width,
+                adapter=None,
+                c=0,
             ),
-            config_identifier="Unconformalized",
-            searcher_tuning_framework=None,
-        )
+            n_pre_conformal_trials=10000,
+            n_calibration_folds=3,
+            calibration_split_strategy="train_test_split",
+            symmetric_adjustment=True,
+        ),
+        config_identifier="Unconformalized",
+        searcher_tuning_framework=None,
     )
+    COVERAGE_ANALYSIS_CONFIGURATIONS.append(config)
+    COVERAGE_PLOT_CONFIGURATIONS.append(config)
+
 
 # 3. Create configurations feeding the comparative tuner rank plots:
 SAMPLER_VARIATION_N_DEFAULT_QUANTILES = 4
@@ -167,8 +170,8 @@ ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurati
         "ql",
         "qrf",
         "qgbm",
-        # "qens3",
-        # "qens4",
+        "qens3",
+        "qens5",
     ],
     samplers=[
         # ExpectedImprovementSampler(
@@ -199,27 +202,23 @@ ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurati
 
 LIMITED_ARCHITECTURE_ADAPTER = "DtACI"
 LIMITED_ARCHITECTURE_N_QUANTILES = 4
-LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurations(
-    architectures=[
-        # "qrf",
-        "qgp",
-        # "ql",
-        "qgbm",
-        # "qens1",
-        # "qens2",
-        # "qens3",
-        # "qens4",
-        "qens5",
-    ],
-    samplers=[
-        ThompsonSampler(
-            n_quantiles=LIMITED_ARCHITECTURE_N_QUANTILES,
-            enable_optimistic_sampling=True,
-            adapter=LIMITED_ARCHITECTURE_ADAPTER,
-        )
-    ],
-    n_pre_conformal_trials=32,
-    searcher_tuning_framework=None,
+LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS = (
+    build_architecture_variation_configurations(
+        architectures=[
+            "qgp",
+            "qgbm",
+            "qens5",
+        ],
+        samplers=[
+            ThompsonSampler(
+                n_quantiles=LIMITED_ARCHITECTURE_N_QUANTILES,
+                enable_optimistic_sampling=True,
+                adapter=LIMITED_ARCHITECTURE_ADAPTER,
+            )
+        ],
+        n_pre_conformal_trials=32,
+        searcher_tuning_framework=None,
+    )
 )
 
 
@@ -259,6 +258,12 @@ for architecture in [
                         n_quantiles=PRECONFORMAL_N_QUANTILES,
                         enable_optimistic_sampling=True,
                         adapter=adapter,
+                    ),
+                    LowerBoundSampler(
+                        interval_width=DEFAULT_INTERVAL_WIDTH,
+                        adapter=adapter,
+                        c=1,
+                        beta_decay="logarithmic_decay",
                     ),
                 ],
                 n_pre_conformal_trials=pre_conformal_trials,
@@ -312,10 +317,8 @@ for searcher_tuning_framework in [None, "fixed"]:
     SEARCH_TUNING_EFFECT_CONFIGURATIONS.extend(
         build_architecture_variation_configurations(
             architectures=[
-                # "ql",
                 "qrf",
                 "qgbm",
-                # "qens3",
             ],
             samplers=[
                 ThompsonSampler(

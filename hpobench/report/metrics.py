@@ -566,7 +566,7 @@ def calculate_calibration_statistics_per_repetition(
     metric_columns: List[str],
     budget_unit: str,
     random_state: Optional[int] = None,
-    rank_metrics: bool = False,
+    rank_metrics: bool = True,
 ) -> pd.DataFrame:
     """Calculate calibration statistics for conformal prediction methods.
 
@@ -585,7 +585,6 @@ def calculate_calibration_statistics_per_repetition(
         by=aggregators + [budget_unit],
         ascending=True,
     ).reset_index(drop=True)
-
     sorted_experiment_log["chunked_target_coverage_deviation"] = (
         sorted_experiment_log.groupby(aggregators)
         .apply(
@@ -596,7 +595,6 @@ def calculate_calibration_statistics_per_repetition(
         .reset_index(drop=True)
     )
 
-    # Compute simple statistics:
     score_columns = [col for col in metric_columns if col != "llr_statistic"]
 
     avg_scores_per_repetition = (
@@ -606,7 +604,6 @@ def calculate_calibration_statistics_per_repetition(
     )
 
     if "llr_statistic" in metric_columns:
-        # Compute likelihood ratio statistic:
         tabularized_features = np.vstack(
             sorted_experiment_log["tabularized_configuration"].values
         )

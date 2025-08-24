@@ -18,6 +18,10 @@ class BenchmarkDataSchema(BaseModel):
     sampler_adapter: str = "sampler_adapter"
     tuner_searcher_tuning_framework: str = "tuner_searcher_tuning_framework"
     n_pre_conformal_trials: str = "n_pre_conformal_trials"
+    # Additional domain-specific columns used in static analyses
+    data_size_col: str = "data_size"
+    tuning_iterations_col: str = "tuning_iterations"
+    estimator_error_col: str = "mean_pinball_loss"
     runtime_unit: str = "runtime"
     iter_unit: str = "iteration"
     norm_runtime_unit: str = f"normalized_{runtime_unit}"

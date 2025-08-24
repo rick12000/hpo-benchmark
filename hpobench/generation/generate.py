@@ -6,7 +6,6 @@ from ConfigSpace import Configuration
 from jahs_bench import Benchmark
 from abc import ABC, abstractmethod
 
-from yahpo_gym import local_config
 from yahpo_gym import BenchmarkSet
 
 from hpobench.generation.black_box_functions import (
@@ -18,8 +17,17 @@ from hpobench.generation.black_box_functions import (
     hartmann6,
 )
 
-local_config.init_config()
-local_config.set_data_path("yahpo_bench_data")
+
+# Delay YAHPO initialization to avoid multiprocessing conflicts
+# The initialization function is in utils.py to avoid circular imports
+
+# Import the initialization function - this may create a circular import
+# that needs to be resolved by late import
+def _ensure_yahpo_initialized():
+    """Wrapper to avoid circular imports."""
+    from hpobench.utils import ensure_yahpo_initialized
+
+    ensure_yahpo_initialized()
 
 
 class ObjectiveMetricGenerator(ABC):
@@ -203,9 +211,14 @@ class YahpoGenerator(ObjectiveMetricGenerator):
         fidelity_space: Dict,
         config_space,
     ):
+        # Ensure YAHPO is initialized before creating BenchmarkSet
+        _ensure_yahpo_initialized()
+
         self.dataset = dataset
         self.instance_name = instance_name
-        self.generator = BenchmarkSet(dataset, instance=instance_value)
+        self.generator = BenchmarkSet(
+            dataset, instance=instance_value, active_session=False
+        )
 
         self.config_space = config_space
         # Store maximum fidelity values (passed from setup functions)
@@ -267,7 +280,9 @@ class YahpoGenerator(ObjectiveMetricGenerator):
         filtered_configuration = self._get_filtered_configuration(configuration)
 
         # Call the objective function
-        results = self.generator.objective_function(filtered_configuration)[0]
+        results = self.generator.objective_function(filtered_configuration, seed=1234)[
+            0
+        ]
         if "val_accuracy" in results:
             return -results["val_accuracy"]
         elif "acc" in results:
@@ -292,7 +307,9 @@ class YahpoGenerator(ObjectiveMetricGenerator):
         """
         filtered_configuration = self._get_filtered_configuration(configuration)
 
-        results = self.generator.objective_function(filtered_configuration)[0]
+        results = self.generator.objective_function(filtered_configuration, seed=1234)[
+            0
+        ]
         if "time" in results:
             return results["time"]
         elif "runtime" in results:

@@ -8,6 +8,7 @@ from hpobench.config.tuner_configurations import (
     STATIC_ANALYSIS_ESTIMATOR_ARCHITECTURES,
     QUANTILE_COUNT_VARIATION_CONFIGURATIONS,
     SEARCH_TUNING_EFFECT_CONFIGURATIONS,
+    COVERAGE_PLOT_CONFIGURATIONS,
 )
 from hpobench.config.constants import ExperimentParameters
 from hpobench.report.analyze import (
@@ -28,13 +29,15 @@ experiment_params = ExperimentParameters()
 # Granular run section control
 run_sections = {
     "run_coverage_analysis": False,
+    "run_coverage_plot": False,
     "run_sampler_variation_analysis": False,
     "run_architecture_variation_analysis": False,
-    "run_external_tuning_analysis": False,
-    "run_preconformal_comparison_analysis": False,
-    "run_static_analysis": False,
+    "run_external_tuning_analysis": True,
+    "run_heteroscedastic_external_tuning_analysis": True,
+    "run_preconformal_comparison_analysis": True,
+    "run_static_analysis": True,
     "run_quantile_count_comparison": False,
-    "run_search_tuning_effect_comparison": True,
+    "run_search_tuning_effect_comparison": False,
 }
 
 
@@ -43,205 +46,287 @@ run_start_str, logger = setup_environment(cache_path=CACHE_PATH)
 
 schema = BenchmarkDataSchema()
 
-if __name__ == "__main__":
-    # Coverage Analysis
-    if run_sections["run_coverage_analysis"]:
-        raw_benchmark_data = run_and_analyze_main_benchmark(
-            benchmarks=["lcbench_large"],
-            tuning_configurations=COVERAGE_ANALYSIS_CONFIGURATIONS,
-            n_warm_starts=experiment_params.n_warm_starts,
-            n_trials=experiment_params.n_trials,
-            timeout=experiment_params.timeout,
-            base_random_state=BASE_RANDOM_STATE,
-            schema=schema,
-            cache_path=CACHE_PATH,
-            run_start_str=run_start_str,
-            analysis_type="01_coverage_analysis",
-            max_n_instances_per_benchmark=experiment_params.default_max_n_instances,
-            n_repetitions=experiment_params.large_n_repetitions_per_tuner_config,
-            starting_coverage_trial=32,
-            analysis_components=["coverage"],
-            # datasets_per_benchmark=[["cifar10"]],
-        )
 
-    # Sampler Variation Analysis
-    if run_sections["run_sampler_variation_analysis"]:
-        raw_benchmark_data = run_and_analyze_main_benchmark(
-            benchmarks=["lcbench_large"],
-            tuning_configurations=SAMPLER_VARIATION_CONFIGURATIONS,
-            n_warm_starts=experiment_params.n_warm_starts,
-            n_trials=experiment_params.n_trials,
-            timeout=experiment_params.timeout,
-            base_random_state=BASE_RANDOM_STATE,
-            cache_path=CACHE_PATH,
-            run_start_str=run_start_str,
-            analysis_type="02_sampler_variation",
-            max_n_instances_per_benchmark=experiment_params.default_max_n_instances,
-            n_repetitions=experiment_params.medium_n_repetitions_per_tuner_config,
-            analysis_components=["rank_analysis"],
-            schema=schema,
+def main():
+    """Main entry point for running benchmarks (task bodies inlined)."""
+    if not any(run_sections.values()):
+        logger.warning(
+            "No tasks to run. Please enable at least one section in run_sections."
         )
+        return
 
-    # Architecture Variation Analysis
-    if run_sections["run_architecture_variation_analysis"]:
-        raw_benchmark_data = run_and_analyze_main_benchmark(
-            benchmarks=["lcbench_large"],
-            tuning_configurations=ARCHITECTURE_VARIATION_CONFIGURATIONS,
-            n_warm_starts=experiment_params.n_warm_starts,
-            n_trials=experiment_params.n_trials,
-            timeout=experiment_params.timeout,
-            base_random_state=BASE_RANDOM_STATE,
-            cache_path=CACHE_PATH,
-            run_start_str=run_start_str,
-            analysis_type="03_architecture_variation",
-            max_n_instances_per_benchmark=experiment_params.default_max_n_instances,
-            n_repetitions=experiment_params.small_n_repetitions_per_tuner_config,
-            analysis_components=[
-                "architecture_comparison",
-                "rank_analysis",
-                "sampler_comparison",
-            ],
-            schema=schema,
-        )
+    logger.info("Starting sequential execution of enabled tasks")
 
-    # External Tuning Analysis
-    if run_sections["run_external_tuning_analysis"]:
-        raw_benchmark_data = run_and_analyze_main_benchmark(
-            benchmarks=[
-                "jahs201",
-                "lcbench_large",
-                # "lcbench_heteroscedastic",
-                "nas301",  # Uncomment to include NAS-301 benchmark
-                "rbv2_xgboost_large",
-                # "rbv2_xgboost_heteroscedastic"
-            ],  # , "lcbench_large", "lcbench_heteroscedastic"],
-            tuning_configurations=LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS
-            + EXTERNAL_TUNING_CONFIGURATIONS,
-            n_warm_starts=experiment_params.n_warm_starts,
-            n_trials=experiment_params.n_trials,
-            timeout=experiment_params.timeout,
-            base_random_state=BASE_RANDOM_STATE,
-            cache_path=CACHE_PATH,
-            run_start_str=run_start_str,
-            analysis_type="04_external_tuning",
-            max_n_instances_per_benchmark=experiment_params.default_max_n_instances,
-            schema=schema,
-            n_repetitions=experiment_params.small_n_repetitions_per_tuner_config,
-            analysis_components=[
-                # "wilcoxon",
-                "permutation_test",
-                # "nemenyi",
-                "rank_analysis",
-                "dataset_performances",
-            ],
-            # cd_significance_method="permutation_test"
-        )
+    # Coverage analysis
+    if run_sections.get("run_coverage_analysis", False):
+        name = "coverage_analysis"
+        logger.info("Starting coverage analysis")
+        try:
+            run_and_analyze_main_benchmark(
+                benchmarks=["lcbench_large"],
+                tuning_configurations=COVERAGE_ANALYSIS_CONFIGURATIONS,
+                n_warm_starts=experiment_params.n_warm_starts,
+                n_trials=experiment_params.n_trials,
+                timeout=experiment_params.timeout,
+                base_random_state=BASE_RANDOM_STATE,
+                schema=schema,
+                cache_path=CACHE_PATH,
+                run_start_str=run_start_str,
+                analysis_type="01_coverage_analysis",
+                max_n_instances_per_benchmark=experiment_params.default_max_n_instances,
+                n_repetitions=experiment_params.large_n_repetitions_per_tuner_config,
+                starting_coverage_trial=32,
+                analysis_components=["coverage"],
+            )
+            logger.info(f"Completed task: {name}")
+        except Exception as e:
+            logger.error(f"Error in task {name}: {e}", exc_info=True)
 
-    # Preconformal Comparison Analysis
-    if run_sections["run_preconformal_comparison_analysis"]:
-        raw_benchmark_data = run_and_analyze_main_benchmark(
-            benchmarks=[
-                # "jahs201",
-                "lcbench_large",
-                # "lcbench_heteroscedastic",
-            ],
-            tuning_configurations=PRECONFORMAL_COMPARISON_CONFIGURATIONS,
-            n_warm_starts=experiment_params.n_warm_starts,
-            n_trials=experiment_params.n_trials,
-            timeout=experiment_params.timeout,
-            base_random_state=BASE_RANDOM_STATE,
-            cache_path=CACHE_PATH,
-            run_start_str=run_start_str,
-            analysis_type="05_preconformal_comparison",
-            max_n_instances_per_benchmark=experiment_params.default_max_n_instances,
-            n_repetitions=experiment_params.medium_n_repetitions_per_tuner_config,
-            analysis_components=[
-                "friedman",
-                "nemenyi",
-                "conformalization_effect",
-            ],
-            schema=schema,
-        )
+    # Coverage plot
+    if run_sections.get("run_coverage_plot", False):
+        name = "coverage_plot"
+        logger.info("Starting coverage plot")
+        try:
+            max_n_coverage_plot_instances = 1
+            run_and_analyze_main_benchmark(
+                benchmarks=["lcbench_large"],
+                tuning_configurations=COVERAGE_PLOT_CONFIGURATIONS,
+                n_warm_starts=experiment_params.n_warm_starts,
+                n_trials=experiment_params.n_trials,
+                timeout=experiment_params.timeout,
+                base_random_state=BASE_RANDOM_STATE,
+                schema=schema,
+                cache_path=CACHE_PATH,
+                run_start_str=run_start_str,
+                analysis_type="01_coverage_plot",
+                max_n_instances_per_benchmark=max_n_coverage_plot_instances,
+                n_repetitions=experiment_params.large_n_repetitions_per_tuner_config,
+                starting_coverage_trial=32,
+                analysis_components=["coverage"],
+            )
+            logger.info(f"Completed task: {name}")
+        except Exception as e:
+            logger.error(f"Error in task {name}: {e}", exc_info=True)
 
-    if run_sections["run_quantile_count_comparison"]:
-        raw_benchmark_data = run_and_analyze_main_benchmark(
-            benchmarks=[
-                # "jahs201",
-                "lcbench_large",
-                # "lcbench_heteroscedastic",
-            ],
-            tuning_configurations=QUANTILE_COUNT_VARIATION_CONFIGURATIONS,
-            n_warm_starts=experiment_params.n_warm_starts,
-            n_trials=experiment_params.n_trials,
-            timeout=experiment_params.timeout,
-            base_random_state=BASE_RANDOM_STATE,
-            cache_path=CACHE_PATH,
-            run_start_str=run_start_str,
-            analysis_type="06_quantile_count_comparison",
-            max_n_instances_per_benchmark=experiment_params.default_max_n_instances,
-            n_repetitions=experiment_params.medium_n_repetitions_per_tuner_config,
-            analysis_components=[
-                "quantile_count_comparison",
-            ],
-            schema=schema,
-        )
+    # Sampler variation
+    if run_sections.get("run_sampler_variation_analysis", False):
+        name = "sampler_variation"
+        logger.info("Starting sampler variation analysis")
+        try:
+            run_and_analyze_main_benchmark(
+                benchmarks=["lcbench_large"],
+                tuning_configurations=SAMPLER_VARIATION_CONFIGURATIONS,
+                n_warm_starts=experiment_params.n_warm_starts,
+                n_trials=experiment_params.n_trials,
+                timeout=experiment_params.timeout,
+                base_random_state=BASE_RANDOM_STATE,
+                cache_path=CACHE_PATH,
+                run_start_str=run_start_str,
+                analysis_type="02_sampler_variation",
+                max_n_instances_per_benchmark=experiment_params.default_max_n_instances,
+                n_repetitions=experiment_params.medium_n_repetitions_per_tuner_config,
+                analysis_components=["rank_analysis"],
+                schema=schema,
+            )
+            logger.info(f"Completed task: {name}")
+        except Exception as e:
+            logger.error(f"Error in task {name}: {e}", exc_info=True)
 
-    if run_sections["run_search_tuning_effect_comparison"]:
-        raw_benchmark_data = run_and_analyze_main_benchmark(
-            benchmarks=[
-                # "jahs201",
-                "lcbench_large",
-                # "lcbench_heteroscedastic",
-            ],
-            tuning_configurations=SEARCH_TUNING_EFFECT_CONFIGURATIONS,
-            n_warm_starts=experiment_params.n_warm_starts,
-            n_trials=experiment_params.n_trials,
-            timeout=experiment_params.timeout,
-            base_random_state=BASE_RANDOM_STATE,
-            cache_path=CACHE_PATH,
-            run_start_str=run_start_str,
-            analysis_type="07_search_tuning_effect_comparison",
-            max_n_instances_per_benchmark=experiment_params.default_max_n_instances,
-            n_repetitions=experiment_params.medium_n_repetitions_per_tuner_config,
-            analysis_components=[
-                "search_tuning_effectsearch_tuning_effect_comparison",
-            ],
-            schema=schema,
-        )
+    # Architecture variation
+    if run_sections.get("run_architecture_variation_analysis", False):
+        name = "architecture_variation"
+        logger.info("Starting architecture variation analysis")
+        try:
+            run_and_analyze_main_benchmark(
+                benchmarks=["lcbench_large"],
+                tuning_configurations=ARCHITECTURE_VARIATION_CONFIGURATIONS,
+                n_warm_starts=experiment_params.n_warm_starts,
+                n_trials=experiment_params.n_trials,
+                timeout=experiment_params.timeout,
+                base_random_state=BASE_RANDOM_STATE,
+                cache_path=CACHE_PATH,
+                run_start_str=run_start_str,
+                analysis_type="03_architecture_variation",
+                max_n_instances_per_benchmark=experiment_params.default_max_n_instances,
+                n_repetitions=experiment_params.small_n_repetitions_per_tuner_config,
+                analysis_components=[
+                    "architecture_comparison",
+                    "rank_analysis",
+                    "sampler_comparison",
+                ],
+                schema=schema,
+            )
+            logger.info(f"Completed task: {name}")
+        except Exception as e:
+            logger.error(f"Error in task {name}: {e}", exc_info=True)
 
-    # Static Analysis Section
-    if run_sections["run_static_analysis"]:
+    # External tuning
+    if run_sections.get("run_external_tuning_analysis", False):
+        name = "external_tuning"
+        logger.info("Starting external tuning analysis")
+        try:
+            run_and_analyze_main_benchmark(
+                benchmarks=["jahs201", "lcbench_large", "nas301", "rbv2_xgboost_large"],
+                tuning_configurations=LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS
+                + EXTERNAL_TUNING_CONFIGURATIONS,
+                n_warm_starts=experiment_params.n_warm_starts,
+                n_trials=experiment_params.n_trials,
+                timeout=experiment_params.timeout,
+                base_random_state=BASE_RANDOM_STATE,
+                cache_path=CACHE_PATH,
+                run_start_str=run_start_str,
+                analysis_type="04_external_tuning",
+                max_n_instances_per_benchmark=experiment_params.default_max_n_instances,
+                n_repetitions=experiment_params.small_n_repetitions_per_tuner_config,
+                analysis_components=[
+                    "permutation_test",
+                    "rank_analysis",
+                    "dataset_performances",
+                ],
+                schema=schema,
+            )
+            logger.info(f"Completed task: {name}")
+        except Exception as e:
+            logger.error(f"Error in task {name}: {e}", exc_info=True)
+
+    # Heteroscedastic external tuning
+    if run_sections.get("run_heteroscedastic_external_tuning_analysis", False):
+        name = "heteroscedastic_external_tuning"
+        logger.info("Starting heteroscedastic external tuning analysis")
+        try:
+            run_and_analyze_main_benchmark(
+                benchmarks=["lcbench_heteroscedastic", "rbv2_xgboost_heteroscedastic"],
+                tuning_configurations=LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS
+                + EXTERNAL_TUNING_CONFIGURATIONS,
+                n_warm_starts=experiment_params.n_warm_starts,
+                n_trials=experiment_params.n_trials,
+                timeout=experiment_params.timeout,
+                base_random_state=BASE_RANDOM_STATE,
+                cache_path=CACHE_PATH,
+                run_start_str=run_start_str,
+                analysis_type="04_heteroskedastic_external_tuning",
+                max_n_instances_per_benchmark=experiment_params.default_max_n_instances,
+                n_repetitions=experiment_params.small_n_repetitions_per_tuner_config,
+                analysis_components=[
+                    "permutation_test",
+                    "rank_analysis",
+                    "dataset_performances",
+                ],
+                schema=schema,
+            )
+            logger.info(f"Completed task: {name}")
+        except Exception as e:
+            logger.error(f"Error in task {name}: {e}", exc_info=True)
+
+    # Preconformal comparison
+    if run_sections.get("run_preconformal_comparison_analysis", False):
+        name = "preconformal_comparison"
+        logger.info("Starting pre-conformal comparison analysis")
+        try:
+            run_and_analyze_main_benchmark(
+                benchmarks=["lcbench_large"],
+                tuning_configurations=PRECONFORMAL_COMPARISON_CONFIGURATIONS,
+                n_warm_starts=experiment_params.n_warm_starts,
+                n_trials=experiment_params.n_trials,
+                timeout=experiment_params.timeout,
+                base_random_state=BASE_RANDOM_STATE,
+                cache_path=CACHE_PATH,
+                run_start_str=run_start_str,
+                analysis_type="05_preconformal_comparison",
+                max_n_instances_per_benchmark=experiment_params.default_max_n_instances,
+                n_repetitions=experiment_params.medium_n_repetitions_per_tuner_config,
+                analysis_components=["friedman", "nemenyi", "conformalization_effect"],
+                schema=schema,
+            )
+            logger.info(f"Completed task: {name}")
+        except Exception as e:
+            logger.error(f"Error in task {name}: {e}", exc_info=True)
+
+    # Quantile count comparison
+    if run_sections.get("run_quantile_count_comparison", False):
+        name = "quantile_count_comparison"
+        logger.info("Starting quantile count comparison")
+        try:
+            run_and_analyze_main_benchmark(
+                benchmarks=["lcbench_large"],
+                tuning_configurations=QUANTILE_COUNT_VARIATION_CONFIGURATIONS,
+                n_warm_starts=experiment_params.n_warm_starts,
+                n_trials=experiment_params.n_trials,
+                timeout=experiment_params.timeout,
+                base_random_state=BASE_RANDOM_STATE,
+                cache_path=CACHE_PATH,
+                run_start_str=run_start_str,
+                analysis_type="06_quantile_count_comparison",
+                max_n_instances_per_benchmark=experiment_params.default_max_n_instances,
+                n_repetitions=experiment_params.medium_n_repetitions_per_tuner_config,
+                analysis_components=["quantile_count_comparison"],
+                schema=schema,
+            )
+            logger.info(f"Completed task: {name}")
+        except Exception as e:
+            logger.error(f"Error in task {name}: {e}", exc_info=True)
+
+    # Search tuning effect
+    if run_sections.get("run_search_tuning_effect_comparison", False):
+        name = "search_tuning_effect"
+        logger.info("Starting search tuning effect comparison")
+        try:
+            run_and_analyze_main_benchmark(
+                benchmarks=["lcbench_large"],
+                tuning_configurations=SEARCH_TUNING_EFFECT_CONFIGURATIONS,
+                n_warm_starts=experiment_params.n_warm_starts,
+                n_trials=experiment_params.n_trials,
+                timeout=experiment_params.timeout,
+                base_random_state=BASE_RANDOM_STATE,
+                cache_path=CACHE_PATH,
+                run_start_str=run_start_str,
+                analysis_type="07_search_tuning_effect",
+                max_n_instances_per_benchmark=experiment_params.default_max_n_instances,
+                n_repetitions=experiment_params.medium_n_repetitions_per_tuner_config,
+                analysis_components=["search_tuning_effect_comparison"],
+                schema=schema,
+            )
+            logger.info(f"Completed task: {name}")
+        except Exception as e:
+            logger.error(f"Error in task {name}: {e}", exc_info=True)
+
+    # Static analysis (estimator error analysis)
+    if run_sections.get("run_static_analysis", False):
+        name = "static_analysis"
         logger.info("Starting Estimator Error Analysis (STATIC configs)...")
+        try:
+            static_results = run_static_benchmark(
+                benchmarks=["lcbench_large"],
+                data_size_range=experiment_params.static_data_sizes,
+                estimator_architectures=STATIC_ANALYSIS_ESTIMATOR_ARCHITECTURES,
+                n_repetitions_per_estimator=experiment_params.medium_n_repetitions_per_tuner_config,
+                tuning_iterations_range=experiment_params.tuning_iterations,
+                alpha=0.2,
+                n_pre_conformal_trials=min(experiment_params.tuning_iterations) - 1,
+                max_n_instances=experiment_params.default_max_n_instances,
+                base_random_state=BASE_RANDOM_STATE,
+            )
 
-        static_results = run_static_benchmark(
-            benchmarks=["lcbench_large"],
-            data_size_range=experiment_params.static_data_sizes,
-            estimator_architectures=STATIC_ANALYSIS_ESTIMATOR_ARCHITECTURES,
-            n_repetitions_per_estimator=experiment_params.medium_n_repetitions_per_tuner_config,
-            tuning_iterations_range=experiment_params.tuning_iterations,
-            calibration_split=0.1,
-            alpha=0.2,
-            n_pre_conformal_trials=min(experiment_params.tuning_iterations) - 1,
-            max_n_instances=experiment_params.default_max_n_instances,
-            base_random_state=BASE_RANDOM_STATE,
-        )
+            logger.info("Starting Tuning Effect Analysis...")
+            analyze_searcher_tuning_effect(
+                static_raw_benchmark_data=static_results,
+                cache_path=CACHE_PATH,
+                run_start_str=run_start_str,
+                analysis_type="05_static_analysis",
+            )
+            logger.info("Tuning Effect Analysis finished.")
 
-        logger.info("Starting Tuning Effect Analysis...")
-        analyze_searcher_tuning_effect(
-            results_df=static_results,
-            cache_path=CACHE_PATH,
-            run_start_str=run_start_str,
-            analysis_type="05_static_analysis",
-        )
-        logger.info("Tuning Effect Analysis finished.")
+            logger.info("Starting Estimator Comparison Analysis...")
+            analyze_searcher_estimator_comparison(
+                static_raw_benchmark_data=static_results,
+                cache_path=CACHE_PATH,
+                run_start_str=run_start_str,
+                analysis_type="05_static_analysis",
+            )
+            logger.info("Estimator Comparison Analysis finished.")
+        except Exception as e:
+            logger.error(f"Error in task {name}: {e}", exc_info=True)
 
-        logger.info("Starting Estimator Comparison Analysis...")
-        analyze_searcher_estimator_comparison(
-            results_df=static_results,
-            cache_path=CACHE_PATH,
-            run_start_str=run_start_str,
-            analysis_type="05_static_analysis",
-        )
-        logger.info("Estimator Comparison Analysis finished.")
 
-    logger.info(f"HPO Benchmark run {run_start_str} completed.")
+if __name__ == "__main__":
+    main()

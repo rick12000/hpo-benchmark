@@ -1,14 +1,35 @@
 from hpobench.config.config_types import IntRange, CategoricalRange, FloatRange
 import random
-from typing import Optional, Union
+from typing import Optional, Union, TYPE_CHECKING
 import pandas as pd
 import os
 import logging
-from hpobench.generation.generate import ObjectiveMetricGenerator
 from datetime import datetime
 import optuna
 
+if TYPE_CHECKING:
+    from hpobench.generation.generate import ObjectiveMetricGenerator
+
 logger = logging.getLogger(__name__)
+
+
+def ensure_yahpo_initialized():
+    """Ensure YAHPO config is initialized. Called lazily when needed."""
+    from yahpo_gym import local_config  # Import here to avoid issues
+
+    yahpo_data_path = "yahpo_bench_data"
+    os.makedirs(yahpo_data_path, exist_ok=True)
+
+    try:
+        # Only initialize if not already done
+        if not hasattr(local_config, "_config") or local_config._config is None:
+            local_config.init_config()
+        local_config.set_data_path(yahpo_data_path)
+    except Exception:
+        # Fallback for multiprocessing contexts
+        if not hasattr(local_config, "_config") or local_config._config is None:
+            local_config._config = {}
+        local_config.set_data_path(yahpo_data_path)
 
 
 class AnalysisPathManager:
@@ -117,7 +138,7 @@ def save_analysis_results(
 def add_runtime(
     experiment_log: pd.DataFrame,
     tune_start,
-    performance_generator: ObjectiveMetricGenerator,
+    performance_generator: "ObjectiveMetricGenerator",
 ):
     experiment_log_copy = experiment_log.copy()
 

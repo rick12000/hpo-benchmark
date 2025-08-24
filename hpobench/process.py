@@ -667,35 +667,33 @@ def block_bootstrap(
 
 def rank_and_collapse_data(
     static_raw_benchmark_data: pd.DataFrame,
-    grouping_cols: list[str],
+    aggregators: list[str],
     comparison_col: str,
-    value_col: str,
+    metric_col: str,
     repetition_col: str,
 ) -> pd.DataFrame:
     """
     Ranks data within groups and collapses the results by averaging ranks across repetitions.
 
     Args:
-        data: Input DataFrame containing the data to be ranked and collapsed.
-        grouping_cols: Total identifiers for grouping, may be inclusive of other cols in below inputs.
+        static_raw_benchmark_data: Input DataFrame containing the data to be ranked and collapsed.
+        aggregators: Total identifiers for grouping, may be inclusive of other cols in below inputs.
         comparison_col: Column containing the entities to rank over (eg. tuners).
-        value_col: Column containing the values to be ranked.
+        metric_col: Column containing the values to be ranked.
         repetition_col: Column containing experiment repetition values.
 
     Returns:
         pd.DataFrame: DataFrame with mean ranks collapsed across repetitions for each group and comparison.
     """
-    static_raw_benchmark_data.copy()
     # Get the columns to group by during ranking (all grouping columns, except the thing to rank over):
-    ranking_aggregators = [col for col in grouping_cols if col != comparison_col]
-
+    ranking_aggregators = [col for col in aggregators if col != comparison_col]
     ranked_df = static_raw_benchmark_data.copy()
-    ranked_df["rank"] = ranked_df.groupby(ranking_aggregators)[value_col].rank(
+    ranked_df["rank"] = ranked_df.groupby(ranking_aggregators)[metric_col].rank(
         method="average", ascending=True
     )
 
     # Collapse ranks by averaging across repetitions:
-    collapsing_aggregators = [col for col in grouping_cols if col != repetition_col]
+    collapsing_aggregators = [col for col in aggregators if col != repetition_col]
     collapsed_df = (
         ranked_df.groupby(collapsing_aggregators, observed=True)["rank"]
         .mean()

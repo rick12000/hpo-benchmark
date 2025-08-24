@@ -8,7 +8,6 @@ import numpy as np
 from sklearn.metrics import mean_pinball_loss
 from confopt.selection.conformalization import QuantileConformalEstimator
 from confopt.utils.configurations.encoding import ConfigurationEncoder
-from confopt.utils.preprocessing import train_val_split
 from hpobench.config.config_types import (
     ExperimentConfig,
     TunerConfig,
@@ -394,12 +393,16 @@ def run_and_analyze_main_benchmark(
         Literal[
             "friedman",
             "nemenyi",
+            "wilcoxon",
+            "permutation_test",
             "coverage",
             "dataset_performances",
             "rank_analysis",
             "sampler_comparison",
             "architecture_comparison",
             "conformalization_effect",
+            "quantile_count_comparison",
+            "search_tuning_effect_comparison",
         ]
     ],
     max_n_instances_per_benchmark: int = 10,
@@ -515,7 +518,6 @@ def run_static_benchmark(
     estimator_architectures: list[str],
     n_repetitions_per_estimator: int,
     tuning_iterations_range: list[int],
-    calibration_split: float,
     alpha: float,
     n_pre_conformal_trials: int,
     max_n_instances: int,
@@ -673,6 +675,7 @@ def run_static_benchmark(
                     objective_function=experiment_config.objective_function,
                     seed_offset=0,
                 )
+
                 holdout_configs_per_repetition = generate_configs_per_repetition(
                     search_space=experiment_config.search_space,
                     n_configs=5000,
@@ -681,6 +684,25 @@ def run_static_benchmark(
                     objective_function=experiment_config.objective_function,
                     seed_offset=n_repetitions_per_estimator,
                 )
+
+                # Filter: for each repetition, remove any holdout configs whose
+                # configuration matches one used in the experiment set. Use repr()
+                # to create a stable, hashable key for comparison (covers dicts,
+                # lists, tuples):
+                filtered_holdout_per_repetition = []
+                for rep_idx in range(n_repetitions_per_estimator):
+                    exp_list = experiment_configs_per_repetition[rep_idx]
+                    holdout_list = holdout_configs_per_repetition[rep_idx]
+
+                    exp_keys = {repr(cfg) for cfg, _ in exp_list}
+                    filtered = [
+                        (cfg, perf)
+                        for cfg, perf in holdout_list
+                        if repr(cfg) not in exp_keys
+                    ]
+                    filtered_holdout_per_repetition.append(filtered)
+
+                holdout_configs_per_repetition = filtered_holdout_per_repetition
 
                 # Train the searcher on the warm start configurations and
                 # evaluate on the holdout configurations:
@@ -700,7 +722,6 @@ def run_static_benchmark(
                             X_holdout = [cfg for cfg, _ in holdout_data]
                             y_holdout = [perf for _, perf in holdout_data]
 
-                            # Encode the warm start and holdout configurations:
                             encoder = ConfigurationEncoder(
                                 search_space=setup_confopt_params(
                                     experiment_config.search_space
@@ -711,16 +732,6 @@ def run_static_benchmark(
                             )
                             X_holdout_encoded = np.array(encoder.transform(X_holdout))
 
-                            # Split the warm starts for conformal training and calibration:
-                            X_train, y_train, X_val, y_val = train_val_split(
-                                X=X_experiment_encoded,
-                                y=np.array(y_experiment),
-                                train_split=(1 - calibration_split),
-                                normalize=False,
-                                ordinal=False,
-                            )
-
-                            # Train conformal searcher:
                             searcher = QuantileConformalEstimator(
                                 quantile_estimator_architecture=estimator_architecture,
                                 alphas=[alpha],
@@ -730,7 +741,6 @@ def run_static_benchmark(
                                 normalize_features=True,
                             )
 
-                            # Fit with tuning_iterations
                             searcher.fit(
                                 X=X_experiment_encoded,
                                 y=np.array(y_experiment),

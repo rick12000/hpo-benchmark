@@ -27,6 +27,13 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
+def _ensure_yahpo_initialized():
+    """Wrapper to avoid circular imports."""
+    from hpobench.utils import ensure_yahpo_initialized
+
+    ensure_yahpo_initialized()
+
+
 def _get_yahpo_log_info(benchmark: str) -> dict[str, bool]:
     """Extract log-scale information from yahpo benchmark JSON config files.
 
@@ -78,6 +85,9 @@ def setup_yahpo_instance_configs(
         List of ExperimentConfig objects, one per instance in the benchmark.
     """
     experiment_configs = []
+    # Ensure YAHPO is initialized before creating BenchmarkSet instances
+    _ensure_yahpo_initialized()
+
     if benchmark in ["lcbench_large", "lcbench_heteroscedastic"]:
         benchmark_override = "lcbench"
         benchmark_set = BenchmarkSet(
@@ -291,6 +301,9 @@ def setup_nas301_configs(
         List of ExperimentConfig objects, one per dataset.
     """
     experiment_configs = []
+
+    # Ensure YAHPO is initialized before creating BenchmarkSet
+    _ensure_yahpo_initialized()
 
     # Create ConfigSpace for NAS-301 with full parameter names
     # This will be used for parameter validation and active hyperparameter detection

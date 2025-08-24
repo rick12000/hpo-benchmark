@@ -14,8 +14,6 @@ from hpobench.process import (
 )
 
 from hpobench.report.utils import (
-    run_and_save_friedman,
-    run_and_save_nemenyi,
     run_statistical_tests_for_budget,
     aggregate_and_save,
     run_and_save_calibration_statistics,
@@ -120,19 +118,9 @@ def analyze_main_benchmark(
     iter_unit = schema.iter_unit
     norm_runtime_unit = schema.norm_runtime_unit
 
-    default_aggregators = [
-        bench_col,
-        data_col,
-        tuner_col,
-        rep_col,
-        sampler_col,
-        confidence_level_col,
-        estimator_architecture_col,
-    ]
-
     processor = BenchmarkDataProcessor(schema=schema)
 
-    # 1. Create broad use processed data:
+    # 1. Create broad-use processed data:
     # 1.1 Dataset-level relativized runtime results:
     dataset_relative_runtime_results = processor.process_performance_records(
         raw_benchmark_data=raw_benchmark_data,
@@ -144,7 +132,7 @@ def analyze_main_benchmark(
     )
 
     # 1.2 Dataset-level iterative results:
-    dataset_iterative_results = processor.process_performance_records(
+    dataset_absolute_iterative_results = processor.process_performance_records(
         raw_benchmark_data=raw_benchmark_data,
         budget_unit=iter_unit,
         relativize_budget=False,
@@ -164,12 +152,12 @@ def analyze_main_benchmark(
     )
 
     # 1.4 Benchmark-level iterative results:
-    bench_iterative_results = processor.process_performance_records(
+    bench_absolute_iterative_results = processor.process_performance_records(
         raw_benchmark_data=raw_benchmark_data,
         budget_unit=iter_unit,
         relativize_budget=False,
         collapse_repetitions=True,
-        collapse_datasets=False,
+        collapse_datasets=True,
         extra_ranking_cols=None,
     )
 
@@ -181,12 +169,21 @@ def analyze_main_benchmark(
             dataset_relative_runtime_results[norm_runtime_unit] == budget
         ]
 
-        # Only run statistical tests when we have at least 3 unique datasets
-        if budget_data[data_col].nunique() < 3:
+        # Check if ANY benchmark has at least 3 datasets (rather than all datasets across all benchmarks)
+        datasets_per_benchmark = budget_data.groupby(bench_col)[data_col].nunique()
+        benchmarks_with_sufficient_datasets = (datasets_per_benchmark >= 3).sum()
+
+        if benchmarks_with_sufficient_datasets == 0:
             logger.info(
-                f"Skipping statistical tests for budget={budget}: need at least 3 unique datasets, found {budget_data[data_col].nunique()}"
+                f"Skipping statistical tests for budget={budget}: no benchmark has at least 3 datasets. "
+                f"Dataset counts per benchmark: {datasets_per_benchmark.to_dict()}"
             )
             continue
+
+        logger.info(
+            f"Running statistical tests for budget={budget}: {benchmarks_with_sufficient_datasets} "
+            f"benchmark(s) have sufficient datasets (>=3). Dataset counts per benchmark: {datasets_per_benchmark.to_dict()}"
+        )
 
         cd_df = run_statistical_tests_for_budget(
             data=budget_data,
@@ -215,16 +212,16 @@ def analyze_main_benchmark(
         else:
             raw_benchmark_data_adj = raw_benchmark_data.copy()
 
-        bench_iterative_results_adj = processor.process_performance_records(
-            raw_benchmark_data=raw_benchmark_data,
+        bench_absolute_iterative_results_adj = processor.process_performance_records(
+            raw_benchmark_data=raw_benchmark_data_adj,
             budget_unit=iter_unit,
             relativize_budget=False,
             collapse_repetitions=True,
-            collapse_datasets=True,
+            collapse_datasets=False,
             extra_ranking_cols=[confidence_level_col],
         )
         plot_and_save(
-            data=bench_iterative_results_adj,
+            data=bench_absolute_iterative_results_adj,
             x_col=iter_unit,
             y_cols=["cumulative_coverage_error", "rolling_coverage_error"],
             entity_col=tuner_col,
@@ -240,9 +237,19 @@ def analyze_main_benchmark(
             share_y_axis=False,
         )
 
+        # TODO: This function is a bit archaic and not in line with the processor in process.py
+        # you must ensure that the entity_column uniquely identifies each variant to rank across:
         run_and_save_calibration_statistics(
             raw_benchmark_data=raw_benchmark_data_adj,
-            aggregators=default_aggregators,
+            aggregators=[
+                bench_col,
+                data_col,
+                tuner_col,
+                rep_col,
+                sampler_col,
+                confidence_level_col,
+                estimator_architecture_col,
+            ],
             benchmark_col=bench_col,
             tuner_column=tuner_col,
             breach_column="breach_status",
@@ -254,13 +261,12 @@ def analyze_main_benchmark(
             filename="calibration_statistics.csv",
             analysis_type=analysis_type,
             latex_layout_breakout_col=None,  # Can be modified to include estimator_architecture if needed
-            random_state=42,
         )
 
     # Dataset level analysis:
     if "dataset_performances" in analysis_components:
         plot_and_save(
-            data=dataset_iterative_results,
+            data=dataset_absolute_iterative_results,
             x_col=iter_unit,
             y_cols=["best_performance", "rank"],
             entity_col=tuner_col,
@@ -295,7 +301,7 @@ def analyze_main_benchmark(
             share_y_axis=False,
         )
         plot_and_save(
-            data=bench_iterative_results,
+            data=bench_absolute_iterative_results,
             x_col=iter_unit,
             y_cols=["rank"],
             entity_col=tuner_col,
@@ -313,12 +319,12 @@ def analyze_main_benchmark(
 
         if cd_significance_method in analysis_components:
             cd_budget = 100
-            # Ensure we have computed significance results for this budget and
-            # we have at least 3 datasets overall before plotting CD diagrams
-            if (
-                cd_budget in significance_results_for_cd
-                and bench_relative_runtime_results[data_col].nunique() >= 3
-            ):
+            # Plot CD diagrams if we have significance results for this budget
+            if cd_budget in significance_results_for_cd:
+                # NOTE: entity_col must uniquely identify the variants (not going to
+                # use confidence_col, estimator_architecture_col or other identifiers
+                # as in process.py):
+                # TODO: Fix this and align with process.py
                 plot_paired_rank_and_cd(
                     data=bench_relative_runtime_results,
                     significance_data=significance_results_for_cd[cd_budget],
@@ -337,7 +343,7 @@ def analyze_main_benchmark(
                 )
             else:
                 logger.info(
-                    f"Skipping CD plot for budget={cd_budget}: no significance results or fewer than 3 datasets ({bench_relative_runtime_results[data_col].nunique()})"
+                    f"Skipping CD plot for budget={cd_budget}: no significance results available"
                 )
 
     # NOTE: For next two breakout plots, values are first ranked by benchmark
@@ -384,6 +390,10 @@ def analyze_main_benchmark(
 
     # Conformalization effect analysis:
     if "conformalization_effect" in analysis_components:
+        # NOTE: Raw data for this component is expected to contain confopt
+        # variants where we want to rank a same architecture, repeated for
+        # many samplers, ranked across varying levels of n_preconformal_trials, hence
+        # 'extra_ranking_cols=[estimator_architecture_col, sampler_col]':
         conformalized_vs_nonconformalized_results = (
             processor.process_performance_records(
                 raw_benchmark_data=raw_benchmark_data,
@@ -417,13 +427,17 @@ def analyze_main_benchmark(
             raise ValueError(
                 "Quantile count comparison analysis requires only one architecture."
             )
+        # NOTE: Raw data for this component is expected to contain confopt
+        # variants where we want to rank a same architecture, repeated for
+        # many samplers, ranked across varying levels of n_quantiles, hence
+        # 'extra_ranking_cols=[estimator_architecture_col, sampler_col]':
         quantile_count_comparison_results = processor.process_performance_records(
             raw_benchmark_data=raw_benchmark_data,
             budget_unit=runtime_unit,
             relativize_budget=True,
             collapse_repetitions=True,
             collapse_datasets=True,
-            extra_ranking_cols=[sampler_col],
+            extra_ranking_cols=[estimator_architecture_col, sampler_col],
         )
         plot_and_save(
             data=quantile_count_comparison_results,
@@ -442,13 +456,14 @@ def analyze_main_benchmark(
             share_y_axis=False,
         )
 
-    # Search tuning effect comparison analysis:
     if "search_tuning_effect_comparison" in analysis_components:
-        # Enforce only one sampler type for this analysis
         if len(raw_benchmark_data[sampler_col].unique()) > 1:
             raise ValueError(
                 "Search tuning effect comparison analysis requires only one sampler."
             )
+        # NOTE: Raw data for this component is expected to contain confopt
+        # variants where we want to rank a same architecture across varying
+        # levels of tuning, hence 'extra_ranking_cols=[estimator_architecture_col]':
         search_tuning_effect_comparison_results = processor.process_performance_records(
             raw_benchmark_data=raw_benchmark_data,
             budget_unit=runtime_unit,
@@ -476,59 +491,47 @@ def analyze_main_benchmark(
 
 
 def analyze_searcher_tuning_effect(
-    results_df: pd.DataFrame,
+    static_raw_benchmark_data: pd.DataFrame,
     cache_path: str,
     run_start_str: str,
     analysis_type: str,
-    alpha: float = 0.05,
+    schema: BenchmarkDataSchema,
 ):
     """Analyze the effect of searcher tuning iterations on search estimator performance.
 
     Args:
-        results_df: DataFrame containing static benchmark results with columns:
+        static_raw_benchmark_data: DataFrame containing static benchmark results with columns:
             - benchmark_identifier: Benchmark suite identifier
             - dataset: Dataset name within benchmark
             - data_size: Number of training samples used
             - repetition: Experimental repetition number
             - estimator_architecture: ML model architecture (e.g., "RF", "XGBoost")
-            - alpha: Significance level for conformal prediction
             - tuning_iterations: Number of HPO iterations performed
             - mean_pinball_loss: Average pinball loss across test samples
         cache_path: Root directory for saving analysis outputs.
         run_start_str: Timestamp identifier for this experimental run.
         analysis_type: Analysis category label for file organization.
-        alpha: Significance level for statistical tests. Defaults to 0.05.
-
-    Side Effects:
-        - Saves filtered ranking data to "filtered_ranks.csv"
-        - Generates Friedman test results CSV with overall significance tests
-        - Creates Nemenyi pairwise comparison results with LaTeX formatting
-        - Produces rank vs tuning iteration plots partitioned by data size and architecture
-        - Logs plot save locations for reference
     """
-    # Define constants and column names:
-    grouping_columns = [
-        "benchmark_identifier",
-        "dataset",
-        "data_size",
-        "repetition",
-        "estimator_architecture",
-        "alpha",
-        "tuning_iterations",
-    ]
-    estimator_architecture_col = "estimator_architecture"
-    repetition_column = "repetition"
-    tuning_iterations_column = "tuning_iterations"
-    estimator_error_column = "mean_pinball_loss"
-    bench_col = "benchmark_identifier"
-    data_col = "dataset"
-    data_size_col = "data_size"
+    estimator_architecture_col = schema.estimator_architecture_col
+    repetition_column = schema.rep_col
+    tuning_iterations_column = schema.tuning_iterations_col
+    estimator_error_column = schema.estimator_error_col
+    bench_col = schema.bench_col
+    data_col = schema.data_col
+    data_size_col = schema.data_size_col
 
     filtered_df = rank_and_collapse_data(
-        static_raw_benchmark_data=results_df,
-        grouping_cols=grouping_columns,
+        static_raw_benchmark_data=static_raw_benchmark_data,
+        aggregators=[
+            schema.bench_col,
+            schema.data_col,
+            schema.data_size_col,
+            schema.rep_col,
+            schema.estimator_architecture_col,
+            schema.tuning_iterations_col,
+        ],
         comparison_col=tuning_iterations_column,
-        value_col=estimator_error_column,
+        metric_col=estimator_error_column,
         repetition_col=repetition_column,
     )
 
@@ -540,63 +543,21 @@ def analyze_searcher_tuning_effect(
         analysis_type,
     )
 
-    # Create an entity column by joining the estimator architecture and tuning iterations:
-    filtered_df["comparison_entity"] = (
-        filtered_df["estimator_architecture"].astype(str)
-        + "ti="
-        + filtered_df["tuning_iterations"].astype(str)
-    )
-    comparison_col = "comparison_entity"
-
-    run_and_save_friedman(
-        data=filtered_df,
-        # We only want pair test of same estimator architecture but different
-        # tuning iterations, so we break out by bench, data size AND estimator architecture:
-        breakout_col=[bench_col, estimator_architecture_col, data_size_col],
-        across_col=data_col,
-        entity_col=comparison_col,
-        rank_col="rank",
-        alpha=alpha,
-        cache_path=cache_path,
-        run_start_str=run_start_str,
-        filename="friedman_test_tuning_effect.csv",
-        analysis_type=analysis_type,
-        subfolder="tuning_effect",
-    )
-
-    run_and_save_nemenyi(
-        data=filtered_df,
-        # We only want pair test of same estimator architecture but different
-        # tuning iterations, so we break out by bench, data size AND estimator architecture:
-        breakout_col=[bench_col, estimator_architecture_col, data_size_col],
-        across_col=data_col,
-        entity_col=comparison_col,
-        rank_col="rank",
-        alpha=alpha,
-        cache_path=cache_path,
-        run_start_str=run_start_str,
-        filename="nemenyi_pairwise_test_tuning_effect.csv",
-        analysis_type=analysis_type,
-        subfolder="tuning_effect",
-        latex_vertical_breakout_col=data_size_col,
-        latex_layout_breakout_col=None,
-    )
-
     path_manager = AnalysisPathManager(cache_path, run_start_str)
     tuning_plots_path = path_manager.get_analysis_path(
         analysis_type, "plots", "tuning_effect"
     )
 
-    # Average rank across datasets AND repetitions with proper quantile calculation:
-    aggregation_columns = [
-        col
-        for col in grouping_columns
-        if col not in [data_col, repetition_column, estimator_error_column]
-    ]
+    # TODO: Remove dependancy on this legacy function:
     aggregated_df = aggregate_and_save(
         data=filtered_df,
-        grouping_cols=aggregation_columns,
-        breakout_cols=[bench_col, data_size_col, tuning_iterations_column],
+        grouping_cols=[
+            schema.bench_col,
+            schema.data_size_col,
+            schema.estimator_architecture_col,
+            schema.tuning_iterations_col,
+        ],
+        breakout_cols=[bench_col],
         block_cols=[data_col],
         metrics=["rank"],
         cache_path=cache_path,
@@ -626,11 +587,11 @@ def analyze_searcher_tuning_effect(
 
 
 def analyze_searcher_estimator_comparison(
-    results_df: pd.DataFrame,
+    static_raw_benchmark_data: pd.DataFrame,
     cache_path: str,
     run_start_str: str,
     analysis_type: str,
-    alpha: float = 0.05,
+    schema: BenchmarkDataSchema,
 ):
     """Compare baseline performance across different searcher estimator architectures.
 
@@ -646,56 +607,46 @@ def analyze_searcher_estimator_comparison(
     4. Visualization of performance patterns across data sizes and benchmarks
 
     Args:
-        results_df: DataFrame containing static benchmark results with columns:
+        static_raw_benchmark_data: DataFrame containing static benchmark results with columns:
             - benchmark_identifier: Benchmark suite identifier
             - dataset: Dataset name within benchmark
             - data_size: Number of training samples used
             - repetition: Experimental repetition number
             - estimator_architecture: ML model architecture identifier
-            - alpha: Significance level for conformal prediction
             - tuning_iterations: Number of HPO iterations (filtered to 0)
             - mean_pinball_loss: Average pinball loss performance metric
         cache_path: Root directory for saving analysis outputs.
         run_start_str: Timestamp identifier for this experimental run.
         analysis_type: Analysis category label for file organization.
-        alpha: Significance level for statistical tests. Defaults to 0.05.
-
-    Side Effects:
-        - Saves non-tuned filtered ranking data to "non_tuned_filtered_ranks.csv"
-        - Generates Friedman test results for architecture comparison significance
-        - Creates Nemenyi pairwise test results with LaTeX table formatting
-        - Produces estimator comparison plots showing rank vs data size relationships
-        - Logs analysis completion and plot save locations
 
     Note:
         Only analyzes configurations with tuning_iterations == 0 to isolate the effect
         of estimator architecture choice from hyperparameter optimization effects.
     """
-    # Define constants and column names:
-    grouping_columns = [
-        "benchmark_identifier",
-        "dataset",
-        "data_size",
-        "repetition",
-        "estimator_architecture",
-        "alpha",
-        "tuning_iterations",
-    ]
-    estimator_architecture_col = "estimator_architecture"
-    repetition_column = "repetition"
-    estimator_error_column = "mean_pinball_loss"
-    bench_col = "benchmark_identifier"
-    data_col = "dataset"
-    data_size_col = "data_size"
+    estimator_architecture_col = schema.estimator_architecture_col
+    repetition_column = schema.rep_col
+    estimator_error_column = schema.estimator_error_col
+    bench_col = schema.bench_col
+    data_col = schema.data_col
+    data_size_col = schema.data_size_col
 
     # Filter results to only include non-tuned configurations:
-    non_tuned_results_df = results_df[results_df["tuning_iterations"] == 0]
+    non_tuned_results_df = static_raw_benchmark_data[
+        static_raw_benchmark_data[schema.tuning_iterations_col] == 0
+    ]
     # Rank and collapse the data:
     filtered_df = rank_and_collapse_data(
         static_raw_benchmark_data=non_tuned_results_df,
-        grouping_cols=grouping_columns,
+        aggregators=[
+            schema.bench_col,
+            schema.data_col,
+            schema.data_size_col,
+            schema.rep_col,
+            schema.estimator_architecture_col,
+            schema.tuning_iterations_col,
+        ],
         comparison_col=estimator_architecture_col,
-        value_col=estimator_error_column,
+        metric_col=estimator_error_column,
         repetition_col=repetition_column,
     )
 
@@ -707,51 +658,15 @@ def analyze_searcher_estimator_comparison(
         analysis_type,
     )
 
-    run_and_save_friedman(
-        data=filtered_df,
-        # Ranks were calculated within benchmark and data size, so we
-        # break out by the same granularity (omit tuning iterations,
-        # since filtered out in previous step):
-        breakout_col=[bench_col, data_size_col],
-        across_col=data_col,
-        entity_col=estimator_architecture_col,
-        rank_col="rank",
-        alpha=alpha,
-        cache_path=cache_path,
-        run_start_str=run_start_str,
-        filename="friedman_test_estimator_comparison.csv",
-        analysis_type=analysis_type,
-        subfolder="estimator_comparison",
-    )
-
-    run_and_save_nemenyi(
-        data=filtered_df,
-        # Ranks were calculated within benchmark and data size, so we
-        # break out by the same granularity (omit tuning iterations,
-        # since filtered out in previous step):
-        breakout_col=[bench_col, data_size_col],
-        across_col=data_col,
-        entity_col=estimator_architecture_col,
-        rank_col="rank",
-        alpha=alpha,
-        cache_path=cache_path,
-        run_start_str=run_start_str,
-        filename="nemenyi_pairwise_test_estimator_comparison.csv",
-        analysis_type=analysis_type,
-        subfolder="estimator_comparison",
-        latex_vertical_breakout_col=data_size_col,
-        latex_layout_breakout_col=None,
-    )
-    # Average rank across datasets with proper quantile calculation:
-    aggregation_columns = [
-        col
-        for col in grouping_columns
-        if col not in [data_col, repetition_column, estimator_error_column]
-    ]
     aggregated_df = aggregate_and_save(
         data=filtered_df,
-        grouping_cols=aggregation_columns,
-        breakout_cols=[bench_col, data_size_col],
+        grouping_cols=[
+            schema.bench_col,
+            schema.data_size_col,
+            schema.estimator_architecture_col,
+            schema.tuning_iterations_col,
+        ],
+        breakout_cols=[bench_col],
         block_cols=[data_col],
         metrics=["rank"],
         cache_path=cache_path,

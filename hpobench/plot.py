@@ -587,7 +587,9 @@ def plot_paired_rank_and_cd(
 
         # Get mean ranks at the specified budget
         cd_data = row_data[row_data[x_col] == cd_budget]
-        if not cd_data.empty:
+
+        # Check if we have both rank data and significance results for this benchmark
+        if not cd_data.empty and not row_sig_data.empty:
             mean_ranks = dict(zip(cd_data[entity_col], cd_data["rank"]))
 
             plot_critical_difference_diagram(
@@ -598,10 +600,18 @@ def plot_paired_rank_and_cd(
                 title=f"{_get_label(row_measure_label, row_measure)}: {row_value}\nCritical Difference (Budget={cd_budget})",
             )
         else:
+            # Determine the reason for missing CD diagram
+            if cd_data.empty:
+                reason = f"No data available\nfor budget={cd_budget}"
+            else:
+                reason = (
+                    "Insufficient datasets\nfor significance testing\n(<3 datasets)"
+                )
+
             ax_cd.text(
                 0.5,
                 0.5,
-                f"No data available\nfor budget={cd_budget}",
+                reason,
                 ha="center",
                 va="center",
                 transform=ax_cd.transAxes,

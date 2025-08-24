@@ -274,6 +274,9 @@ def run_statistical_tests_for_budget(
 ) -> Optional[pd.DataFrame]:
     """Run the configured statistical tests for a single budget slice.
 
+    Only tests benchmarks that have at least 3 datasets. Benchmarks with
+    insufficient datasets are skipped gracefully and logged.
+
     Returns the pairwise results DataFrame to be used for critical-difference
     plotting if the chosen `cd_significance_method` produced results, otherwise
     returns None.
@@ -281,10 +284,40 @@ def run_statistical_tests_for_budget(
     logger = logging.getLogger(__name__)
     cd_results: Optional[pd.DataFrame] = None
 
+    # Check which benchmarks have sufficient datasets for significance testing
+    datasets_per_benchmark = data.groupby(bench_col)[data_col].nunique()
+    valid_benchmarks = datasets_per_benchmark[
+        datasets_per_benchmark >= 3
+    ].index.tolist()
+    invalid_benchmarks = datasets_per_benchmark[
+        datasets_per_benchmark < 3
+    ].index.tolist()
+
+    if invalid_benchmarks:
+        logger.info(
+            f"Skipping statistical tests for benchmarks with insufficient datasets "
+            f"(budget={budget}): {invalid_benchmarks}. Dataset counts: "
+            f"{datasets_per_benchmark[datasets_per_benchmark < 3].to_dict()}"
+        )
+
+    if not valid_benchmarks:
+        logger.warning(
+            f"No benchmarks have sufficient datasets for statistical testing at budget={budget}"
+        )
+        return None
+
+    logger.info(
+        f"Running statistical tests for benchmarks with sufficient datasets "
+        f"(budget={budget}): {valid_benchmarks}"
+    )
+
+    # Filter data to only include valid benchmarks
+    filtered_data = data[data[bench_col].isin(valid_benchmarks)]
+
     # Friedman (no return expected from helper)
     if "friedman" in analysis_components:
         run_and_save_friedman(
-            data=data,
+            data=filtered_data,
             breakout_col=[bench_col],
             across_col=data_col,
             entity_col=tuner_col,
@@ -299,7 +332,7 @@ def run_statistical_tests_for_budget(
 
     if "nemenyi" in analysis_components:
         results_df = run_and_save_nemenyi(
-            data=data,
+            data=filtered_data,
             breakout_col=[bench_col],
             across_col=data_col,
             entity_col=tuner_col,
@@ -317,7 +350,7 @@ def run_statistical_tests_for_budget(
 
     if "wilcoxon" in analysis_components:
         results_df = run_and_save_wilcoxon(
-            data=data,
+            data=filtered_data,
             breakout_col=[bench_col],
             across_col=data_col,
             entity_col=tuner_col,
@@ -335,7 +368,7 @@ def run_statistical_tests_for_budget(
 
     if "permutation_test" in analysis_components:
         results_df = run_and_save_permutation_test(
-            data=data,
+            data=filtered_data,
             breakout_col=[bench_col],
             across_col=data_col,
             entity_col=tuner_col,
@@ -353,9 +386,10 @@ def run_statistical_tests_for_budget(
             cd_results = results_df
 
     logger.info(
-        "Completed statistical tests for budget=%s; cd_method=%s",
+        "Completed statistical tests for budget=%s; cd_method=%s; valid_benchmarks=%s",
         budget,
         cd_significance_method,
+        valid_benchmarks,
     )
     return cd_results
 
