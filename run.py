@@ -32,10 +32,10 @@ run_sections = {
     "run_coverage_plot": False,
     "run_sampler_variation_analysis": False,
     "run_architecture_variation_analysis": False,
-    "run_external_tuning_analysis": True,
-    "run_heteroscedastic_external_tuning_analysis": True,
+    "run_external_tuning_analysis": False,
+    "run_heteroscedastic_external_tuning_analysis": False,
     "run_preconformal_comparison_analysis": True,
-    "run_static_analysis": True,
+    "run_static_analysis": False,
     "run_quantile_count_comparison": False,
     "run_search_tuning_effect_comparison": False,
 }
@@ -74,7 +74,7 @@ def main():
                 run_start_str=run_start_str,
                 analysis_type="01_coverage_analysis",
                 max_n_instances_per_benchmark=experiment_params.default_max_n_instances,
-                n_repetitions=experiment_params.large_n_repetitions_per_tuner_config,
+                n_repetitions=experiment_params.small_n_repetitions_per_tuner_config,
                 starting_coverage_trial=32,
                 analysis_components=["coverage"],
             )
@@ -124,7 +124,7 @@ def main():
                 run_start_str=run_start_str,
                 analysis_type="02_sampler_variation",
                 max_n_instances_per_benchmark=experiment_params.default_max_n_instances,
-                n_repetitions=experiment_params.medium_n_repetitions_per_tuner_config,
+                n_repetitions=experiment_params.large_n_repetitions_per_tuner_config,
                 analysis_components=["rank_analysis"],
                 schema=schema,
             )
@@ -166,7 +166,7 @@ def main():
         logger.info("Starting external tuning analysis")
         try:
             run_and_analyze_main_benchmark(
-                benchmarks=["jahs201", "lcbench_large", "nas301", "rbv2_xgboost_large"],
+                benchmarks=["jahs201", "nas301", "lcbench_large", "rbv2_xgboost_large"],
                 tuning_configurations=LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS
                 + EXTERNAL_TUNING_CONFIGURATIONS,
                 n_warm_starts=experiment_params.n_warm_starts,
@@ -177,7 +177,7 @@ def main():
                 run_start_str=run_start_str,
                 analysis_type="04_external_tuning",
                 max_n_instances_per_benchmark=experiment_params.default_max_n_instances,
-                n_repetitions=experiment_params.small_n_repetitions_per_tuner_config,
+                n_repetitions=experiment_params.medium_n_repetitions_per_tuner_config,
                 analysis_components=[
                     "permutation_test",
                     "rank_analysis",
@@ -206,7 +206,7 @@ def main():
                 run_start_str=run_start_str,
                 analysis_type="04_heteroskedastic_external_tuning",
                 max_n_instances_per_benchmark=experiment_params.default_max_n_instances,
-                n_repetitions=experiment_params.small_n_repetitions_per_tuner_config,
+                n_repetitions=experiment_params.medium_n_repetitions_per_tuner_config,
                 analysis_components=[
                     "permutation_test",
                     "rank_analysis",
@@ -313,6 +313,7 @@ def main():
                 cache_path=CACHE_PATH,
                 run_start_str=run_start_str,
                 analysis_type="05_static_analysis",
+                schema=schema,
             )
             logger.info("Tuning Effect Analysis finished.")
 
@@ -322,6 +323,7 @@ def main():
                 cache_path=CACHE_PATH,
                 run_start_str=run_start_str,
                 analysis_type="05_static_analysis",
+                schema=schema,
             )
             logger.info("Estimator Comparison Analysis finished.")
         except Exception as e:

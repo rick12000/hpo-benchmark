@@ -443,6 +443,7 @@ def confopt_tune(
         optimizer_framework=searcher_tuning_framework
         if searcher_tuning_framework in ("reward_cost", "fixed")
         else None,
+        parallelize_fast_operations=True,
     )
 
     history = []

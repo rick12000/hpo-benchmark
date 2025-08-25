@@ -127,12 +127,12 @@ SAMPLER_VARIATION_CONFIGURATIONS = build_sampler_variation_configurations(
             n_y_candidates_per_x=100,  # Should be 1000, but too slow
             entropy_method="distance",
         ),
-        LowerBoundSampler(
-            interval_width=DEFAULT_INTERVAL_WIDTH,
-            adapter=SAMPLER_VARIATION_DEFAULT_ADAPTER,
-            c=2,
-            beta_decay="logarithmic_decay",
-        ),
+        # LowerBoundSampler(
+        #     interval_width=DEFAULT_INTERVAL_WIDTH,
+        #     adapter=SAMPLER_VARIATION_DEFAULT_ADAPTER,
+        #     c=2,
+        #     beta_decay="logarithmic_decay",
+        # ),
         LowerBoundSampler(
             interval_width=DEFAULT_INTERVAL_WIDTH,
             adapter=SAMPLER_VARIATION_DEFAULT_ADAPTER,
@@ -202,23 +202,27 @@ ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurati
 
 LIMITED_ARCHITECTURE_ADAPTER = "DtACI"
 LIMITED_ARCHITECTURE_N_QUANTILES = 4
-LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS = (
-    build_architecture_variation_configurations(
-        architectures=[
-            "qgp",
-            "qgbm",
-            "qens5",
-        ],
-        samplers=[
-            ThompsonSampler(
-                n_quantiles=LIMITED_ARCHITECTURE_N_QUANTILES,
-                enable_optimistic_sampling=True,
-                adapter=LIMITED_ARCHITECTURE_ADAPTER,
-            )
-        ],
-        n_pre_conformal_trials=32,
-        searcher_tuning_framework=None,
-    )
+LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurations(
+    architectures=[
+        "qgp",
+        # "qgbm",
+        # "qens3",
+        # "qens5",
+    ],
+    samplers=[
+        # ExpectedImprovementSampler(
+        #     n_quantiles=LIMITED_ARCHITECTURE_N_QUANTILES,
+        #     num_ei_samples=1000,
+        #     adapter=LIMITED_ARCHITECTURE_ADAPTER,
+        # ),
+        ThompsonSampler(
+            n_quantiles=LIMITED_ARCHITECTURE_N_QUANTILES,
+            enable_optimistic_sampling=True,
+            adapter=LIMITED_ARCHITECTURE_ADAPTER,
+        )
+    ],
+    n_pre_conformal_trials=32,
+    searcher_tuning_framework=None,
 )
 
 
@@ -227,10 +231,10 @@ PRECONFORMAL_N_QUANTILES = 4
 PRECONFORMAL_COMPARISON_CONFIGURATIONS = []
 for architecture in [
     # "qgp",
-    "ql",
-    # "qgbm",
+    # "ql",
+    "qgbm",
     "qrf",
-    "qens5",
+    # "qens5",
 ]:
     # Simulate normal pre-conformal cutoff vs. unreachable one:
     for pre_conformal_trials in [32, 10000]:
@@ -242,11 +246,11 @@ for architecture in [
             build_architecture_variation_configurations(
                 architectures=[architecture],
                 samplers=[
-                    ExpectedImprovementSampler(
-                        n_quantiles=PRECONFORMAL_N_QUANTILES,
-                        num_ei_samples=1000,
-                        adapter=adapter,
-                    ),
+                    # ExpectedImprovementSampler(
+                    #     n_quantiles=PRECONFORMAL_N_QUANTILES,
+                    #     num_ei_samples=1000,
+                    #     adapter=adapter,
+                    # ),
                     # MaxValueEntropySearchSampler(
                     #     n_quantiles=PRECONFORMAL_N_QUANTILES,
                     #     adapter=adapter,
