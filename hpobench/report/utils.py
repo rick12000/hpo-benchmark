@@ -438,6 +438,7 @@ def run_and_save_calibration_statistics(
     run_start_str: str,
     filename: str,
     analysis_type: str,
+    n_bootstraps: int = 1000,
     latex_layout_breakout_col: Optional[str] = None,
     random_state: int = 42,
 ) -> pd.DataFrame:
@@ -468,40 +469,43 @@ def run_and_save_calibration_statistics(
     ]
 
     logger = logging.getLogger(__name__)
+    # NOTE: These calculations don't align or filter the raw becnhmark data like in the
+    # process.py module, this is fine since we always benchmark on the same number of iterations
+    # and this function only gets passed the iteration benchmark data, but align in future (TODO).
 
-    calibration_stats = calculate_calibration_statistics_per_repetition(
-        raw_benchmark_data=raw_benchmark_data,
-        aggregators=aggregators,
-        breach_column=breach_column,
-        entity_column=entity_column,
-        metric_columns=metric_columns,
-        budget_unit=budget_unit,
-        random_state=random_state,
-        rank_metrics=True,
-    )
-    collapsed_calibration_stats = block_bootstrap(
-        data=calibration_stats,
-        breakout_cols=[benchmark_col],
-        block_cols=[dataset_column],
-        aggregators=[benchmark_col, tuner_column],
-        metric_cols=metric_columns,
-        n_bootstraps=1000,
-    )
-
-    # Generate LaTeX table for calibration metrics
-    latex_metrics_str = format_calibration_metrics_to_latex(
-        collapsed_calibration_stats,
-        layout_breakout_col=latex_layout_breakout_col,
-    )
-
-    if latex_metrics_str:
-        latex_metrics_filename = f"{filename.replace('.csv', '')}_metrics_latex.tex"
-        _save_text_content(
-            latex_metrics_str,
-            cache_path,
-            run_start_str,
-            latex_metrics_filename,
-            analysis_type,
-            "latex_outputs",
+    for rank_metrics in [True, False]:
+        calibration_stats = calculate_calibration_statistics_per_repetition(
+            raw_benchmark_data=raw_benchmark_data,
+            aggregators=aggregators,
+            breach_column=breach_column,
+            entity_column=entity_column,
+            metric_columns=metric_columns,
+            budget_unit=budget_unit,
+            random_state=random_state,
+            rank_metrics=rank_metrics,
         )
-        logger.info("Generated LaTeX table for calibration metrics by entity")
+        collapsed_calibration_stats = block_bootstrap(
+            data=calibration_stats,
+            breakout_cols=[benchmark_col],
+            block_cols=[dataset_column],
+            aggregators=[benchmark_col, tuner_column],
+            metric_cols=metric_columns,
+            n_bootstraps=n_bootstraps,
+        )
+        # Generate LaTeX table for calibration metrics
+        latex_metrics_str = format_calibration_metrics_to_latex(
+            collapsed_calibration_stats,
+            layout_breakout_col=latex_layout_breakout_col,
+        )
+
+        if latex_metrics_str:
+            latex_metrics_filename = f"{filename.replace('.csv', '')}_metrics_latex__ranked_{rank_metrics}.tex"
+            _save_text_content(
+                latex_metrics_str,
+                cache_path,
+                run_start_str,
+                latex_metrics_filename,
+                analysis_type,
+                "latex_outputs",
+            )
+            logger.info("Generated LaTeX table for calibration metrics by entity")

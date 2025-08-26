@@ -364,7 +364,7 @@ def plot_and_save(
                 share_y_axis=share_y_axis,
                 entity_legend_mapping=entity_legend_mapping,
             )
-            time.sleep(2)
+            time.sleep(1)
         except Exception as e:
             logger.error(f"Error plotting {y_col}: {e}")
     logger.debug(f"Plots saved in {output_path} with prefix {filename_prefix}")

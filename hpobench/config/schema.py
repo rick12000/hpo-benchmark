@@ -25,6 +25,7 @@ class BenchmarkDataSchema(BaseModel):
     runtime_unit: str = "runtime"
     iter_unit: str = "iteration"
     norm_runtime_unit: str = f"normalized_{runtime_unit}"
+    norm_iter_unit: str = f"normalized_{iter_unit}"
     breach_column: str = "breach_status"
 
     def to_list(self) -> List[str]:

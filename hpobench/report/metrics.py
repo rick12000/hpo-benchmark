@@ -492,6 +492,14 @@ def _compute_likelihood_ratio_statistic(
     # Check if y contains only one class
     if len(y.unique()) < 2:
         return np.nan
+
+    # Validate input dimensions
+    if len(X) != len(y):
+        logger.warning(
+            f"Feature matrix and target length mismatch: {len(X)} vs {len(y)}"
+        )
+        return np.nan
+
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
 
@@ -510,7 +518,14 @@ def _compute_likelihood_ratio_statistic(
     full_model.fit(X_scaled, y)
     ll_full = _log_likelihood(full_model, X_scaled, y)
 
-    return 2 * (ll_full - ll_null)
+    llr_stat = 2 * (ll_full - ll_null)
+
+    # Validate result
+    if not np.isfinite(llr_stat) or llr_stat < 0:
+        logger.warning(f"Invalid LLR statistic computed: {llr_stat}")
+        return np.nan
+
+    return llr_stat
 
 
 def _calculate_chunked_target_coverage_deviation(
@@ -524,7 +539,6 @@ def _calculate_chunked_target_coverage_deviation(
     Args:
         group: DataFrame containing experiment records for a single group.
         breach_column: Column name indicating constraint breaches.
-        n_chunks: Number of chunks to split the group into.
 
     Returns:
         pd.Series with chunked target coverage deviation values (NaN for non-chunk start indices).
@@ -532,7 +546,10 @@ def _calculate_chunked_target_coverage_deviation(
     n_obs = len(group)
     chunk_size = 10
     n_chunks = n_obs // chunk_size
-    chunked_deviations = pd.Series([np.nan] * n_obs, index=group.index)
+
+    # Fix: Use positional index instead of group.index to avoid misalignment when reset_index is applied
+    chunked_deviations = pd.Series([np.nan] * n_obs, index=range(n_obs))
+
     if n_chunks > 3:
         for chunk_idx in range(n_chunks):
             start_idx = chunk_idx * chunk_size
@@ -604,14 +621,15 @@ def calculate_calibration_statistics_per_repetition(
     )
 
     if "llr_statistic" in metric_columns:
-        tabularized_features = np.vstack(
-            sorted_experiment_log["tabularized_configuration"].values
-        )
-        llr_series = sorted_experiment_log.groupby(aggregators).apply(
-            lambda grp: _compute_likelihood_ratio_statistic(
-                tabularized_features[grp.index], grp[breach_column], random_state
+        # Fix: Don't pre-compute feature matrix, extract features per group to avoid index mismatch
+        def compute_group_llr(grp):
+            # Extract features directly from group to avoid index mismatch issues
+            group_features = np.vstack(grp["tabularized_configuration"].values)
+            return _compute_likelihood_ratio_statistic(
+                pd.DataFrame(group_features), grp[breach_column], random_state
             )
-        )
+
+        llr_series = sorted_experiment_log.groupby(aggregators).apply(compute_group_llr)
         llr_df = llr_series.reset_index(name="llr_statistic")
         avg_scores_per_repetition = avg_scores_per_repetition.merge(
             llr_df, on=aggregators, how="left"

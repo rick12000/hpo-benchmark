@@ -34,8 +34,8 @@ run_sections = {
     "run_architecture_variation_analysis": False,
     "run_external_tuning_analysis": False,
     "run_heteroscedastic_external_tuning_analysis": False,
-    "run_preconformal_comparison_analysis": True,
-    "run_static_analysis": False,
+    "run_preconformal_comparison_analysis": False,
+    "run_static_analysis": True,
     "run_quantile_count_comparison": False,
     "run_search_tuning_effect_comparison": False,
 }
@@ -166,7 +166,12 @@ def main():
         logger.info("Starting external tuning analysis")
         try:
             run_and_analyze_main_benchmark(
-                benchmarks=["jahs201", "nas301", "lcbench_large", "rbv2_xgboost_large"],
+                benchmarks=[
+                    "jahs201",
+                    # "nas301",
+                    "lcbench_large",
+                    "rbv2_xgboost_large",
+                ],
                 tuning_configurations=LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS
                 + EXTERNAL_TUNING_CONFIGURATIONS,
                 n_warm_starts=experiment_params.n_warm_starts,
@@ -224,7 +229,7 @@ def main():
         logger.info("Starting pre-conformal comparison analysis")
         try:
             run_and_analyze_main_benchmark(
-                benchmarks=["lcbench_large"],
+                benchmarks=["jahs201"],
                 tuning_configurations=PRECONFORMAL_COMPARISON_CONFIGURATIONS,
                 n_warm_starts=experiment_params.n_warm_starts,
                 n_trials=experiment_params.n_trials,

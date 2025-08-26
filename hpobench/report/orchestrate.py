@@ -659,6 +659,27 @@ def run_static_benchmark(
         else:
             raise ValueError(f"Unsupported benchmark: {benchmark}")
 
+        # NOTE: Create single population per experiment (single source of truth)
+        populations = {}
+        for experiment_config in experiment_configs:
+            logger.info(
+                f"Preparing population for experiment: {experiment_config.dataset_identifier}"
+            )
+
+            # Create single large population that will be sampled from for both experiment and holdout
+            population = generate_configs_per_repetition(
+                search_space=experiment_config.search_space,
+                n_configs=1000,
+                n_repetitions=1,
+                base_seed=base_random_state,
+                objective_function=experiment_config.objective_function,
+                seed_offset=0,
+            )[
+                0
+            ]  # Take first (and only) repetition
+
+            populations[experiment_config.dataset_identifier] = population
+
         for data_size in data_size_range:
             logger.info(f"Loop Level | Dataset Size: {data_size}")
             for experiment_config in experiment_configs:
@@ -666,43 +687,24 @@ def run_static_benchmark(
                     f"Loop Level | Dataset: {experiment_config.dataset_identifier}"
                 )
 
-                # Extract some parameter space realizations to train the estimator on:
-                experiment_configs_per_repetition = generate_configs_per_repetition(
-                    search_space=experiment_config.search_space,
-                    n_configs=data_size,
-                    n_repetitions=n_repetitions_per_estimator,
-                    base_seed=base_random_state,
-                    objective_function=experiment_config.objective_function,
-                    seed_offset=0,
-                )
+                population = populations[experiment_config.dataset_identifier]
 
-                holdout_configs_per_repetition = generate_configs_per_repetition(
-                    search_space=experiment_config.search_space,
-                    n_configs=5000,
-                    n_repetitions=n_repetitions_per_estimator,
-                    base_seed=base_random_state,
-                    objective_function=experiment_config.objective_function,
-                    seed_offset=n_repetitions_per_estimator,
-                )
+                experiment_configs_per_repetition = []
+                holdout_configs_per_repetition = []
+                for repetition in range(n_repetitions_per_estimator):
+                    random_seed = np.random.RandomState(base_random_state + repetition)
 
-                # Filter: for each repetition, remove any holdout configs whose
-                # configuration matches one used in the experiment set. Use repr()
-                # to create a stable, hashable key for comparison (covers dicts,
-                # lists, tuples):
-                filtered_holdout_per_repetition = []
-                for rep_idx in range(n_repetitions_per_estimator):
-                    exp_list = experiment_configs_per_repetition[rep_idx]
-                    holdout_list = holdout_configs_per_repetition[rep_idx]
+                    experiment_indices = random_seed.choice(
+                        len(population), size=data_size, replace=False
+                    )
+                    holdout_indices = np.setdiff1d(
+                        np.arange(len(population)), experiment_indices
+                    )
+                    sampled_experiment = [population[i] for i in experiment_indices]
+                    sampled_holdout = [population[i] for i in holdout_indices]
 
-                    exp_keys = {repr(cfg) for cfg, _ in exp_list}
-                    filtered = [
-                        (cfg, perf)
-                        for cfg, perf in holdout_list
-                        if repr(cfg) not in exp_keys
-                    ]
-                    filtered_holdout_per_repetition.append(filtered)
-
-                holdout_configs_per_repetition = filtered_holdout_per_repetition
+                    experiment_configs_per_repetition.append(sampled_experiment)
+                    holdout_configs_per_repetition.append(sampled_holdout)
 
                 # Train the searcher on the warm start configurations and
                 # evaluate on the holdout configurations:
@@ -781,6 +783,12 @@ def run_static_benchmark(
                                 "mean_pinball_loss": mean_loss,
                             }
                             estimator_error_results.append(results)
+
+        # Clean up populations to free memory
+        for experiment_config in experiment_configs:
+            experiment_config.objective_function = None
+        del populations
+        gc.collect()
 
     logger.info("Estimator Error Analysis finished.")
     return pd.DataFrame(estimator_error_results)

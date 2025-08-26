@@ -384,6 +384,7 @@ class BenchmarkDataProcessor:
         relativize_budget: bool = False,
         collapse_repetitions: bool = False,
         collapse_datasets: bool = False,
+        n_bootstraps: int = 1000,
     ) -> pd.DataFrame:
         """
         Process data with iteration-based budget.
@@ -440,7 +441,7 @@ class BenchmarkDataProcessor:
                     if col != self.data_col
                 ],
                 metric_cols=metrics,
-                n_bootstraps=1000,
+                n_bootstraps=n_bootstraps,
             )
 
         return final_data
@@ -452,6 +453,7 @@ class BenchmarkDataProcessor:
         relativize_budget: bool = False,
         collapse_repetitions: bool = False,
         collapse_datasets: bool = False,
+        n_bootstraps: int = 1000,
     ) -> pd.DataFrame:
         """
         Process data with runtime-based budget.
@@ -497,7 +499,7 @@ class BenchmarkDataProcessor:
                     if col != self.data_col
                 ],
                 metric_cols=["rank", "best_performance"],
-                n_bootstraps=1000,
+                n_bootstraps=n_bootstraps,
             )
 
         return final_data
@@ -510,6 +512,7 @@ class BenchmarkDataProcessor:
         relativize_budget: bool = False,
         collapse_repetitions: bool = False,
         collapse_datasets: bool = False,
+        n_bootstraps: int = 1000,
     ) -> pd.DataFrame:
         """
         Main entry point for processing HPO benchmark data.
@@ -525,6 +528,7 @@ class BenchmarkDataProcessor:
                 relativize_budget,
                 collapse_repetitions,
                 collapse_datasets,
+                n_bootstraps=n_bootstraps,
             )
         elif budget_unit == self.runtime_unit:
             return self.process_runtime_budget_data(
@@ -533,6 +537,7 @@ class BenchmarkDataProcessor:
                 relativize_budget=relativize_budget,
                 collapse_repetitions=collapse_repetitions,
                 collapse_datasets=collapse_datasets,
+                n_bootstraps=n_bootstraps,
             )
         else:
             raise ValueError(f"Unsupported budget unit: {budget_unit}")
