@@ -80,11 +80,8 @@ def generate_hyperparameter_combinations(
                     list(range(param_values.lower, param_values.upper + 1))
                 )
             elif isinstance(param_values, FloatRange):
-                combination[param_name] = random.choice(
-                    [
-                        random.uniform(param_values.lower, param_values.upper)
-                        for _ in range(1000)
-                    ]
+                combination[param_name] = random.uniform(
+                    param_values.lower, param_values.upper
                 )
             elif isinstance(param_values, CategoricalRange):
                 combination[param_name] = random.choice(param_values.choices)

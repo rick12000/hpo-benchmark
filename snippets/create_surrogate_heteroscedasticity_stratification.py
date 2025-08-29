@@ -4,8 +4,9 @@ from typing import Dict, List, Tuple, Union
 import warnings
 
 from yahpo_gym import BenchmarkSet, local_config
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.preprocessing import OneHotEncoder
+from sklearn.gaussian_process import GaussianProcessRegressor
+from sklearn.gaussian_process.kernels import RBF, ConstantKernel as C
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from scipy import stats
 import logging
 
@@ -148,10 +149,30 @@ def calculate_heteroscedasticity_robust(X: np.ndarray, y: np.ndarray) -> float:
         return 0.0
 
     try:
-        # Fit a simple Random Forest model (more robust than GP for this purpose)
-        rf = RandomForestRegressor(n_estimators=100, random_state=42, max_depth=10)
-        rf.fit(X, y)
-        predictions = rf.predict(X)
+        # Normalize features and target
+        X_scaler = StandardScaler()
+        y_scaler = StandardScaler()
+
+        X_normalized = X_scaler.fit_transform(X)
+        y_normalized = y_scaler.fit_transform(y.reshape(-1, 1)).ravel()
+
+        # Fit Gaussian Process with RBF kernel
+        kernel = C(1.0, (1e-3, 1e3)) * RBF(1.0, (1e-2, 1e2))
+        gp = GaussianProcessRegressor(
+            kernel=kernel,
+            alpha=1e-6,  # Small noise for numerical stability
+            normalize_y=False,  # We already normalized
+            n_restarts_optimizer=10,
+            random_state=42,
+        )
+
+        gp.fit(X_normalized, y_normalized)
+        predictions_normalized = gp.predict(X_normalized)
+
+        # Transform predictions back to original scale
+        predictions = y_scaler.inverse_transform(
+            predictions_normalized.reshape(-1, 1)
+        ).ravel()
         residuals = y - predictions
 
         # Method 1: Variance ratio across prediction quantiles

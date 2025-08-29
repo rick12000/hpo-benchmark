@@ -173,6 +173,7 @@ def build_sampler_variation_configurations(
     quantile_arch: QuantileEstimatorArchitecture,
     n_pre_conformal_trials: int = 20,
     searcher_tuning_framework: Optional[str] = None,
+    calibration_split_strategy: str = "train_test_split",
 ) -> List[TunerConfig]:
     """Build tuning configurations for different samplers with a fixed quantile architecture.
 
@@ -181,7 +182,7 @@ def build_sampler_variation_configurations(
         quantile_arch: Quantile estimator architecture.
         n_pre_conformal_trials: Number of pre-conformal trials.
         searcher_tuning_framework: Value to set in TunerConfig for searcher_tuning_framework.
-
+        calibration_split_strategy: Value to set in QuantileConformalSearcher for calibration_split_strategy.
     Returns:
         List of tuning configuration objects for each sampler.
     """
@@ -193,7 +194,7 @@ def build_sampler_variation_configurations(
             sampler=sampler_copy,
             n_pre_conformal_trials=n_pre_conformal_trials,
             n_calibration_folds=5,
-            calibration_split_strategy="adaptive",
+            calibration_split_strategy=calibration_split_strategy,
             symmetric_adjustment=True,
         )
         config_id = create_sampler_config_id(searcher) + (
@@ -222,6 +223,7 @@ def build_architecture_variation_configurations(
     ],
     n_pre_conformal_trials: int = 20,
     searcher_tuning_framework: Optional[str] = None,
+    calibration_split_strategy: str = "train_test_split",
 ) -> List[TunerConfig]:
     """Build tuning configurations for different quantile architectures and samplers.
 
@@ -230,6 +232,7 @@ def build_architecture_variation_configurations(
         samplers: List of sampler instances.
         n_pre_conformal_trials: Number of pre-conformal trials.
         searcher_tuning_framework: Value to set in TunerConfig for searcher_tuning_framework.
+        calibration_split_strategy: Value to set in QuantileConformalSearcher for calibration_split_strategy.
 
     Returns:
         List of tuning configuration objects for each architecture and sampler combination.
@@ -243,7 +246,7 @@ def build_architecture_variation_configurations(
                 sampler=sampler_copy,
                 n_pre_conformal_trials=n_pre_conformal_trials,
                 n_calibration_folds=5,
-                calibration_split_strategy="adaptive",
+                calibration_split_strategy=calibration_split_strategy,
                 symmetric_adjustment=True,
             )
             config_id = create_sampler_config_id(searcher) + (
@@ -268,15 +271,25 @@ def get_external_tuning_configurations() -> List[TunerConfig]:
     """
     return [
         # TunerConfig(
+        #     tuner="gp_opt",
+        #     searcher="gp_opt_ei",
+        #     config_identifier="GP-EI",
+        # ),
+        # TunerConfig(
+        #     tuner="gp_opt",
+        #     searcher="gp_opt_ts",
+        #     config_identifier="GP-TS",
+        # ),
+        # TunerConfig(
         #     tuner="skopt",
         #     searcher="gp",
         #     config_identifier="GP1",
         # ),
-        TunerConfig(
-            tuner="optuna",
-            searcher="tpe",
-            config_identifier="TPE",
-        ),
+        # TunerConfig(
+        #     tuner="optuna",
+        #     searcher="tpe",
+        #     config_identifier="TPE",
+        # ),
         # TunerConfig(
         #     tuner="optuna",
         #     searcher="gp",
@@ -301,13 +314,13 @@ def get_external_tuning_configurations() -> List[TunerConfig]:
         TunerConfig(
             tuner="optuna",
             searcher="confopt_gp_expected_improvement",
-            config_identifier="GP-EI",
+            config_identifier="optuna-GP-EI",
         ),
-        TunerConfig(
-            tuner="optuna",
-            searcher="confopt_gp_thompson_sampling",
-            config_identifier="GP-TS",
-        ),
+        # TunerConfig(
+        #     tuner="optuna",
+        #     searcher="confopt_gp_thompson_sampling",
+        #     config_identifier="optuna-GP-TS",
+        # ),
         # TunerConfig(
         #     tuner="smac",
         #     searcher="smac_rf_ei",

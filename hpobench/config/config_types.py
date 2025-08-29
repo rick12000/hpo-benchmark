@@ -32,7 +32,7 @@ class CategoricalRange(BaseModel):
 class TunerConfig(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    tuner: Literal["confopt", "optuna", "skopt", "syne_tune_cqr", "smac"]
+    tuner: Literal["confopt", "optuna", "skopt", "syne_tune_cqr", "smac", "gp_opt"]
     searcher: Union[
         Literal[
             "tpe",
@@ -52,6 +52,11 @@ class TunerConfig(BaseModel):
             "cqr_pessimistic",
             "smac_rf_ei",
             "smac_rf_ts",
+            "gp_opt_ei",
+            "gp_opt_ts",
+            "gp_opt_log_ei",
+            "gp_opt_ucb",
+            "gp_opt_ots",
         ],
         QuantileConformalSearcher,
         LocallyWeightedConformalSearcher,

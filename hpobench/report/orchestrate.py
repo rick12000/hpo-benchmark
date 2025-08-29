@@ -669,7 +669,7 @@ def run_static_benchmark(
             # Create single large population that will be sampled from for both experiment and holdout
             population = generate_configs_per_repetition(
                 search_space=experiment_config.search_space,
-                n_configs=1000,
+                n_configs=5000,
                 n_repetitions=1,
                 base_seed=base_random_state,
                 objective_function=experiment_config.objective_function,

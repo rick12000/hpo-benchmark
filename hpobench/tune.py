@@ -44,11 +44,23 @@ from smac.acquisition.maximizer.random_search import RandomSearch
 from smac.scenario import Scenario
 from smac.runhistory.dataclasses import TrialInfo, TrialValue
 
+from hpobench.gp_opt.tuning import GPTuner
+from hpobench.gp_opt import wrapping as gp_opt_ranges
+from hpobench.gp_opt.acquisition_functions import (
+    ExpectedImprovement,
+    LogExpectedImprovement,
+    ThompsonSampling,
+    UpperConfidenceBound,
+    OptimisticThompsonSampling,
+)
+
 # Constants:
 SKOPT_GP_ACQ_FUNC = "EI"
 SKOPT_GP_ACQ_OPTIMIZER = "sampling"
 CONFOPT_USE_DYNAMIC_SAMPLING = True
 CONFOPT_RETRAINING_FREQUENCY = 1
+GP_OPT_USE_DYNAMIC_SAMPLING = True
+GP_OPT_RETRAINING_FREQUENCY = 1
 N_CANDIDATES = 2000  # 1000
 
 
@@ -118,6 +130,7 @@ def build_history_entry(
     width: Optional[float] = None,
     miscoverage_penalty: Optional[float] = None,
     tabularized_configuration: Optional[Any] = None,
+    acquisition_source: Optional[str] = None,
 ) -> dict[str, Any]:
     """Standardizes the history entry structure for all tuners.
 
@@ -149,6 +162,7 @@ def build_history_entry(
         "width": width,
         "miscoverage_penalty": miscoverage_penalty,
         "tabularized_configuration": tabularized_configuration,
+        "acquisition_source": acquisition_source,
     }
 
 
@@ -443,7 +457,6 @@ def confopt_tune(
         optimizer_framework=searcher_tuning_framework
         if searcher_tuning_framework in ("reward_cost", "fixed")
         else None,
-        parallelize_fast_operations=True,
     )
 
     history = []
@@ -847,6 +860,127 @@ def smac_tune(
     return pd.DataFrame(history)
 
 
+def gp_opt_objective_function(
+    performance_generator: ObjectiveMetricGenerator,
+) -> Any:
+    """Returns a callable objective function for confopt.
+
+    Args:
+        performance_generator: ObjectiveMetricGenerator instance.
+
+    Returns:
+        Callable that takes a configuration and returns predicted performance.
+    """
+    return lambda configuration: performance_generator.predict(
+        configuration=configuration
+    )
+
+
+def setup_gp_opt_params(
+    raw_params: dict[str, Union[IntRange, FloatRange, CategoricalRange]],
+) -> dict[str, Any]:
+    """Builds gp_opt search space from parameter definitions.
+
+    Args:
+        raw_params: Dictionary mapping parameter names to IntRange, FloatRange, or CategoricalRange.
+
+    Returns:
+        Dictionary mapping parameter names to gp_opt range objects.
+    """
+    gp_opt_params: dict[str, Any] = {}
+    for name, param in raw_params.items():
+        if isinstance(param, IntRange):
+            log_flag = getattr(param, "log", False)
+            gp_opt_params[name] = gp_opt_ranges.IntRange(
+                min_value=param.lower, max_value=param.upper, log_scale=log_flag
+            )
+        elif isinstance(param, FloatRange):
+            log_flag = getattr(param, "log", False)
+            gp_opt_params[name] = gp_opt_ranges.FloatRange(
+                min_value=param.lower, max_value=param.upper, log_scale=log_flag
+            )
+        elif isinstance(param, CategoricalRange):
+            gp_opt_params[name] = gp_opt_ranges.CategoricalRange(choices=param.choices)
+        else:
+            raise ValueError(f"Unknown parameter type: {type(param)}")
+    return gp_opt_params
+
+
+def gp_opt_tune(
+    raw_params: dict[str, Union[IntRange, FloatRange, CategoricalRange]],
+    performance_generator: ObjectiveMetricGenerator,
+    sampler: str,
+    warm_start_configs: Optional[list[tuple[dict, float]]] = None,
+    random_state: Optional[int] = None,
+    n_trials: Optional[int] = None,
+    timeout: Optional[float] = None,
+) -> pd.DataFrame:
+    """Runs gp_opt tuning with a synthetic objective.
+
+    Args:
+        raw_params: Dictionary mapping parameter names to IntRange, FloatRange, or CategoricalRange.
+        performance_generator: ObjectiveMetricGenerator instance.
+        sampler: Name of the surrogate model to use.
+        warm_start_configs: Optional list of (config, loss) tuples for warm start.
+        random_state: Optional random seed.
+        n_trials: Optional number of trials.
+        timeout: Optional time budget in seconds.
+
+    Returns:
+        DataFrame with tuning history.
+    """
+    objective_fn = gp_opt_objective_function(performance_generator)
+    gp_opt_params = setup_gp_opt_params(raw_params)
+    searcher = GPTuner(
+        objective_function=objective_fn,
+        search_space=gp_opt_params,
+        minimize=True,
+        n_candidates=N_CANDIDATES,
+        warm_starts=warm_start_configs,
+        dynamic_sampling=GP_OPT_USE_DYNAMIC_SAMPLING,
+    )
+
+    adj_n_trials = n_trials
+
+    if sampler == "gp_opt_ei":
+        acquisition_func = ExpectedImprovement()
+    elif sampler == "gp_opt_ts":
+        acquisition_func = ThompsonSampling()
+    elif sampler == "gp_opt_log_ei":
+        acquisition_func = LogExpectedImprovement()
+    elif sampler == "gp_opt_ucb":
+        acquisition_func = UpperConfidenceBound()
+    elif sampler == "gp_opt_ots":
+        acquisition_func = OptimisticThompsonSampling()
+    else:
+        raise ValueError(f"Unknown gp_opt sampler: {sampler}")
+
+    # NOTE: Zero random searches because this benchmark repository uses warm-starting:
+    searcher.tune(
+        acquisition_func=acquisition_func,
+        max_runtime=int(timeout) if timeout is not None else None,
+        max_searches=adj_n_trials,
+        n_random_searches=0,
+        retraining_frequency=GP_OPT_RETRAINING_FREQUENCY,
+        verbose=False,
+        random_state=random_state,
+    )
+
+    history = []
+    for idx, trial in enumerate(searcher.study.trials):
+        history.append(
+            build_history_entry(
+                end_time=trial.timestamp,
+                performance=trial.performance,
+                configurations=trial.configuration,
+                iteration=idx + 1,
+                searcher_training_time=trial.searcher_runtime,
+                tabularized_configuration=trial.tabularized_configuration,
+            )
+        )
+    return pd.DataFrame(history)
+
+
 def tune(
     performance_generator: ObjectiveMetricGenerator,
     tuner_config: TunerConfig,
@@ -916,6 +1050,13 @@ def tune(
         if not isinstance(tuner_config.searcher, str):
             raise ValueError("SMAC tuner requires a string searcher.")
         history = smac_tune(
+            sampler=tuner_config.searcher,
+            **shared_kwargs,
+        )
+    elif tuner_config.tuner == "gp_opt":
+        if not isinstance(tuner_config.searcher, str):
+            raise ValueError("GP-Opt tuner requires a string searcher.")
+        history = gp_opt_tune(
             sampler=tuner_config.searcher,
             **shared_kwargs,
         )

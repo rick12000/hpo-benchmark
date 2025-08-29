@@ -123,6 +123,8 @@ def analyze_main_benchmark(
 
     processor = BenchmarkDataProcessor(schema=schema)
 
+    raw_benchmark_data[data_col] = raw_benchmark_data[data_col].astype(str)
+
     # 1. Create broad-use processed data:
     # 1.1 Dataset-level relativized runtime results:
     dataset_relative_runtime_results = processor.process_performance_records(
@@ -214,6 +216,44 @@ def analyze_main_benchmark(
         analysis_type=analysis_type,
     )
 
+    # 1.6 Cross benchmark relative runtime results:
+    global_raw_benchmark_data = raw_benchmark_data.copy()
+    global_raw_benchmark_data[data_col] = (
+        global_raw_benchmark_data[bench_col] + "_" + global_raw_benchmark_data[data_col]
+    )
+    global_raw_benchmark_data[bench_col] = "OMNI"
+    global_bench_relative_runtime_results = processor.process_performance_records(
+        raw_benchmark_data=global_raw_benchmark_data,
+        budget_unit=runtime_unit,
+        relativize_budget=True,
+        collapse_repetitions=True,
+        collapse_datasets=True,
+        extra_ranking_cols=None,
+        n_bootstraps=n_bootstraps,
+    )
+
+    # 1.7 Cross benchmark relative iterative results:
+    global_bench_relative_iterative_results = processor.process_performance_records(
+        raw_benchmark_data=global_raw_benchmark_data,
+        budget_unit=iter_unit,
+        relativize_budget=True,
+        collapse_repetitions=True,
+        collapse_datasets=True,
+        extra_ranking_cols=None,
+        n_bootstraps=n_bootstraps,
+    )
+
+    # 1.8 Cross benchmark dataset relative runtime results:
+    global_dataset_relative_runtime_results = processor.process_performance_records(
+        raw_benchmark_data=global_raw_benchmark_data,
+        budget_unit=runtime_unit,
+        relativize_budget=True,
+        collapse_repetitions=True,
+        collapse_datasets=False,
+        extra_ranking_cols=None,
+        n_bootstraps=n_bootstraps,
+    )
+
     # 2. Carry out component analysis:
     # 2.1 Significance Analysis:
     significance_results_for_cd = {}
@@ -233,11 +273,6 @@ def analyze_main_benchmark(
             )
             continue
 
-        logger.info(
-            f"Running statistical tests for budget={budget}: {benchmarks_with_sufficient_datasets} "
-            f"benchmark(s) have sufficient datasets (>=3). Dataset counts per benchmark: {datasets_per_benchmark.to_dict()}"
-        )
-
         cd_df = run_statistical_tests_for_budget(
             data=budget_data,
             budget=budget,
@@ -255,6 +290,37 @@ def analyze_main_benchmark(
         )
         if cd_df is not None:
             significance_results_for_cd[budget] = cd_df
+
+    global_significance_results_for_cd = {}
+    for budget in [50, 100]:
+        global_budget_data = global_dataset_relative_runtime_results[
+            global_dataset_relative_runtime_results[norm_runtime_unit] == budget
+        ]
+
+        if global_budget_data[data_col].nunique() < 3:
+            logger.info(
+                f"Skipping statistical tests for budget={budget}: no benchmark has at least 3 datasets. "
+                f"Dataset counts per benchmark: {datasets_per_benchmark.to_dict()}"
+            )
+            continue
+
+        global_cd_df = run_statistical_tests_for_budget(
+            data=global_budget_data,
+            budget=budget,
+            norm_runtime_unit=norm_runtime_unit,
+            analysis_components=analysis_components,
+            cd_significance_method="wilcoxon",
+            bench_col=bench_col,
+            data_col=data_col,
+            tuner_col=tuner_col,
+            alpha=alpha,
+            cache_path=cache_path,
+            run_start_str=run_start_str,
+            analysis_type=analysis_type,
+            random_state=42,
+        )
+        if global_cd_df is not None:
+            global_significance_results_for_cd[budget] = global_cd_df
 
     # 2.2 Coverage analysis plots:
     if "coverage" in analysis_components:
@@ -362,6 +428,7 @@ def analyze_main_benchmark(
         ] = bench_relative_runtime_results_filled_bounds["rank_lower"].fillna(
             bench_relative_runtime_results_filled_bounds["rank"]
         )
+        # TODO: This plot is probably redundant, since the cd diagram already shows ranks by runtime:
         plot_and_save(
             data=bench_relative_runtime_results_filled_bounds,
             x_col=norm_runtime_unit,
@@ -378,17 +445,17 @@ def analyze_main_benchmark(
             y_cols_upper=["rank_upper"],
             share_y_axis=False,
         )
-        bench_absolute_iterative_results_filled_bounds = (
-            bench_absolute_iterative_results.copy()
+        bench_relative_iterative_results_filled_bounds = (
+            bench_relative_iterative_results.copy()
         )
-        bench_absolute_iterative_results_filled_bounds[
+        bench_relative_iterative_results_filled_bounds[
             "rank_lower"
-        ] = bench_absolute_iterative_results_filled_bounds["rank_lower"].fillna(
-            bench_absolute_iterative_results_filled_bounds["rank"]
+        ] = bench_relative_iterative_results_filled_bounds["rank_lower"].fillna(
+            bench_relative_iterative_results_filled_bounds["rank"]
         )
         plot_and_save(
-            data=bench_absolute_iterative_results_filled_bounds,
-            x_col=iter_unit,
+            data=bench_relative_iterative_results_filled_bounds,
+            x_col=norm_iter_unit,
             y_cols=["rank"],
             entity_col=tuner_col,
             col_measure=bench_col,
@@ -396,6 +463,24 @@ def analyze_main_benchmark(
             cache_path=cache_path,
             run_start_str=run_start_str,
             filename_prefix="rank_vs_iteration",
+            analysis_type=analysis_type,
+            subfolder="rank_analysis",
+            y_cols_lower=["rank_lower"],
+            y_cols_upper=["rank_upper"],
+            share_y_axis=False,
+        )
+
+        # Plot global figures across benchmarks:
+        plot_and_save(
+            data=global_bench_relative_iterative_results,
+            x_col=norm_iter_unit,
+            y_cols=["rank"],
+            entity_col=tuner_col,
+            col_measure=bench_col,
+            row_measure=None,
+            cache_path=cache_path,
+            run_start_str=run_start_str,
+            filename_prefix="global_rank_vs_iteration",
             analysis_type=analysis_type,
             subfolder="rank_analysis",
             y_cols_lower=["rank_lower"],
@@ -431,6 +516,24 @@ def analyze_main_benchmark(
                 logger.info(
                     f"Skipping CD plot for budget={cd_budget}: no significance results available"
                 )
+
+        if cd_budget in global_significance_results_for_cd:
+            plot_paired_rank_and_cd(
+                data=global_bench_relative_runtime_results,
+                significance_data=global_significance_results_for_cd[cd_budget],
+                x_col=norm_runtime_unit,
+                entity_col=tuner_col,
+                cache_path=cache_path,
+                run_start_str=run_start_str,
+                filename_prefix=f"rank_vs_norm_runtime_with_global_cd_{cd_significance_method}",
+                analysis_type=analysis_type,
+                subfolder="rank_analysis",
+                row_measure=bench_col,
+                cd_budget=cd_budget,
+                alpha=alpha,
+                x_label="Normalized Runtime",
+                row_measure_label="Benchmark",
+            )
 
     # NOTE: For next two breakout plots, values are first ranked by benchmark
     # and then split by sampler or architecture on column axis of plots, but

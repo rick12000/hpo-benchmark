@@ -315,19 +315,30 @@ def run_statistical_tests_for_budget(
     filtered_data = data[data[bench_col].isin(valid_benchmarks)]
 
     # Friedman (no return expected from helper)
-    if "friedman" in analysis_components:
-        run_and_save_friedman(
-            data=filtered_data,
-            breakout_col=[bench_col],
-            across_col=data_col,
-            entity_col=tuner_col,
-            rank_col="rank",
-            alpha=alpha,
-            cache_path=cache_path,
-            run_start_str=run_start_str,
-            filename=f"friedman_test_budget_{budget}.csv",
-            analysis_type=analysis_type,
-            subfolder=subfolder,
+    # Check if all benchmarks have more than 3 unique tuners for the Friedman test.
+    tuner_counts_per_benchmark = filtered_data.groupby(bench_col)[tuner_col].nunique()
+
+    if (tuner_counts_per_benchmark > 3).all():
+        if "friedman" in analysis_components:
+            run_and_save_friedman(
+                data=filtered_data,
+                breakout_col=[bench_col],
+                across_col=data_col,
+                entity_col=tuner_col,
+                rank_col="rank",
+                alpha=alpha,
+                cache_path=cache_path,
+                run_start_str=run_start_str,
+                filename=f"friedman_test_budget_{budget}.csv",
+                analysis_type=analysis_type,
+                subfolder=subfolder,
+            )
+    else:
+        failing_benchmarks = tuner_counts_per_benchmark[tuner_counts_per_benchmark <= 3]
+        logger.info(
+            f"Skipping Friedman test for budget={budget} because some benchmarks "
+            f"have 3 or fewer unique tuners. Failing benchmarks and their tuner counts: "
+            f"{failing_benchmarks.to_dict()}"
         )
 
     if "nemenyi" in analysis_components:
