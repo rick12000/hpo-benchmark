@@ -488,8 +488,9 @@ def analyze_main_benchmark(
             share_y_axis=False,
         )
 
+        cd_budget = 100
+
         if cd_significance_method in analysis_components:
-            cd_budget = 100
             # Plot CD diagrams if we have significance results for this budget
             if cd_budget in significance_results_for_cd:
                 # NOTE: entity_col must uniquely identify the variants (not going to

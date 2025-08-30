@@ -251,7 +251,7 @@ class GPTuner:
             )
             self.study.append_trial(trial)
 
-            searchable_count = len(self.config_manager.get_searchable_configurations())
+            searchable_count = self.config_manager.get_searchable_configurations_count()
             current_runtime = self.search_timer.return_runtime()
 
             stop = stop_search(
@@ -445,7 +445,7 @@ class GPTuner:
             )
             self.study.append_trial(trial)
 
-            searchable_count = len(self.config_manager.get_searchable_configurations())
+            searchable_count = self.config_manager.get_searchable_configurations_count()
             should_stop = stop_search(
                 n_remaining_configurations=searchable_count,
                 current_runtime=self.search_timer.return_runtime(),
