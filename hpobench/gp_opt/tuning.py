@@ -187,6 +187,7 @@ class GPTuner:
         runtime_tracker = RuntimeTracker()
         performance = self.objective_function(configuration=configuration)
         runtime = runtime_tracker.return_runtime()
+
         return performance, runtime
 
     def random_search(
@@ -369,6 +370,7 @@ class GPTuner:
             candidate_points=transformed_configs,
             f_best=f_best,
         )
+
         next_config = searchable_configs[next_idx]
 
         return next_config
@@ -415,18 +417,24 @@ class GPTuner:
             y = np.array(self.config_manager.searched_performances) * self.metric_sign
 
             searchable_configs = self.config_manager.get_searchable_configurations()
+
             X_searchable = self.config_manager.tabularize_configs(searchable_configs)
 
+            # GP retraining phase
+            training_runtime = 0
             if search_iter == 0 or search_iter % retraining_frequency == 0:
                 training_runtime = self.retrain_searcher(searcher, X, y)
 
+            # Configuration selection phase
             next_config = self.select_next_configuration(
                 searcher=searcher,
                 acquisition_func=acquisition_func,
                 searchable_configs=searchable_configs,
                 transformed_configs=X_searchable,
             )
+
             performance, _ = self._evaluate_configuration(next_config)
+
             if np.isnan(performance):
                 self.config_manager.add_to_banned_configurations(next_config)
                 continue
@@ -453,6 +461,7 @@ class GPTuner:
                 current_iter=len(self.study.trials),
                 max_searches=max_searches,
             )
+
             if should_stop:
                 break
 
@@ -529,6 +538,7 @@ class GPTuner:
 
         n_warm_starts = len(self.warm_starts) if self.warm_starts else 0
         remaining_random_searches = max(0, n_random_searches - n_warm_starts)
+
         if remaining_random_searches > 0:
             self.random_search(
                 max_random_iter=remaining_random_searches,

@@ -30,9 +30,9 @@ experiment_params = ExperimentParameters()
 run_sections = {
     "run_coverage_analysis": False,
     "run_coverage_plot": False,
-    "run_sampler_variation_analysis": True,
+    "run_sampler_variation_analysis": False,
     "run_architecture_variation_analysis": False,
-    "run_external_tuning_analysis": False,
+    "run_external_tuning_analysis": True,
     "run_heteroscedastic_external_tuning_analysis": False,
     "run_preconformal_comparison_analysis": False,
     "run_static_analysis": False,
@@ -170,7 +170,7 @@ def main():
                     # "jahs201",
                     # "nas301",
                     "lcbench_large",
-                    "rbv2_xgboost_large",
+                    # "rbv2_xgboost_large",
                 ],
                 tuning_configurations=LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS
                 + EXTERNAL_TUNING_CONFIGURATIONS,

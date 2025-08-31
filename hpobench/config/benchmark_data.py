@@ -22,15 +22,14 @@ JAHS201_SEARCH_SPACE = {
 # create_surrogate_heteroscedasticity_stratification.py IN THE snippets/ FOLDER:
 LCBENCH_LARGE_IDS: list[str] = ["189873", "168908", "7593", "189866", "189354"]
 LCBENCH_HETEROSCEDASTIC_IDS: list[str] = [
-    "189873",
-    "189908",
-    "167185",
-    "167152",
-    "126026",
+    "167190",
+    "126029",
+    "168331",
+    "167201",
+    "126025",
 ]
-RBV2_XGBOOST_LARGE_IDS: list[str] = ["40927", "40923", "41165", "40996", "554"]
-RBV2_XGBOOST_HETEROSCEDASTIC_IDS: list[str] = ["1510", "1464", "40496", "1457", "1468"]
-
+RBV2_XGBOOST_LARGE_IDS: list[str] = ["41166", "300", "41163", "4541", "41161"]
+RBV2_XGBOOST_HETEROSCEDASTIC_IDS: list[str] = ["41150", "40984", "32", "40978", "1479"]
 
 YAHPO_SUBSETS: dict[str, list[str]] = {
     "lcbench_large": LCBENCH_LARGE_IDS,

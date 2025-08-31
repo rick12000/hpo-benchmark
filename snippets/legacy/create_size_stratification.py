@@ -56,14 +56,14 @@ def get_benchmark_task_ids(benchmark_name: str) -> List[str]:
 def _fetch_dataset_size_internal(task_id: str) -> int:
     """Internal function to fetch dataset size."""
     # Configure OpenML to use working endpoint
-    openml.config.server = 'https://www.openml.org/api/v1/xml'
-    
+    openml.config.server = "https://www.openml.org/api/v1/xml"
+
     task = openml.tasks.get_task(int(task_id))
     dataset_id = task.dataset_id
-    
+
     # Get size from metadata instead of downloading the full dataset
     dataset = openml.datasets.get_dataset(dataset_id)
-    size = int(dataset.qualities['NumberOfInstances'])
+    size = int(dataset.qualities["NumberOfInstances"])
     return size
 
 

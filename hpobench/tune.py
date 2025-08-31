@@ -702,7 +702,6 @@ def smac_objective_function(
     config: Configuration,
     performance_generator: ObjectiveMetricGenerator,
     runtimes: list[datetime],
-    seed: int = 0,
 ) -> float:
     """Objective function for SMAC using a synthetic performance generator.
 
@@ -762,14 +761,12 @@ def smac_tune(
     # Create configuration space
     configspace = setup_smac_configspace(raw_params, random_state)
 
-    # Create scenario with vanilla settings
     scenario = Scenario(
         configspace=configspace,
         deterministic=True,  # Set to deterministic for fair comparison
         n_trials=n_trials if n_trials is not None else 100,
         walltime_limit=timeout,
         seed=random_state,
-        # Disable multi-fidelity and other advanced features
         n_workers=1,  # No parallelization
     )
 

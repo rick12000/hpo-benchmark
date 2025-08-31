@@ -1,6 +1,6 @@
 import json
 import numpy as np
-from typing import List, Union
+from typing import List, Union, Tuple
 import warnings
 
 from yahpo_gym import BenchmarkSet, local_config
@@ -22,9 +22,12 @@ def get_benchmark_task_ids(benchmark_name: str) -> List[str]:
 
 
 def sample_runtime_data(
-    benchmark_name: str, task_id: str, n_samples: int = 1000
-) -> Union[np.ndarray, None]:
-    """Sample runtime data from YAHPO Gym benchmark."""
+    benchmark_name: str,
+    task_id: str,
+    n_samples: int = 1000,
+    max_perfect_acc_ratio: float = 0.01,
+) -> Union[Tuple[np.ndarray, bool], None]:
+    """Sample runtime data from YAHPO Gym benchmark and check for excessive perfect accuracy."""
     benchmark_set = BenchmarkSet(scenario=benchmark_name, instance=task_id)
     config_space = benchmark_set.get_opt_space(drop_fidelity_params=False, seed=42)
     configurations = config_space.sample_configuration(n_samples)
@@ -33,6 +36,7 @@ def sample_runtime_data(
         configurations = [configurations]
 
     runtimes = []
+    accuracies = []
 
     for config in configurations:
         config_dict = dict(config)
@@ -70,8 +74,34 @@ def sample_runtime_data(
                             break
                         except (ValueError, TypeError):
                             continue
+
+            # Extract accuracy from the result dictionary using benchmark-specific prioritization
+            accuracy = None
+            if benchmark_name.startswith("rbv2"):
+                accuracy = result["acc"]
+            elif benchmark_name == "lcbench":
+                accuracy = result["val_accuracy"]
+            else:
+                # For other benchmarks, use the original hierarchy
+                if "val_accuracy" in result:
+                    accuracy = result["val_accuracy"]
+                elif "acc" in result:
+                    accuracy = result["acc"]
+                elif "auc" in result:
+                    accuracy = result["auc"]
+
+            # Fallback: try to find any accuracy-related key
+            if accuracy is None:
+                for key, value in result.items():
+                    if "acc" in key.lower() or "accuracy" in key.lower():
+                        try:
+                            accuracy = float(value)
+                            break
+                        except (ValueError, TypeError):
+                            continue
         else:
             runtime = result
+            accuracy = None
 
         if runtime is not None:
             try:
@@ -85,12 +115,51 @@ def sample_runtime_data(
             except (ValueError, TypeError):
                 continue
 
+        if accuracy is not None:
+            try:
+                accuracy_float = float(accuracy)
+                if not np.isnan(accuracy_float) and np.isfinite(accuracy_float):
+                    accuracies.append(accuracy_float)
+            except (ValueError, TypeError):
+                continue
+
     if (
         len(runtimes) < 50
     ):  # Lower threshold since runtime extraction might be more limited
         return None
 
-    return np.array(runtimes)
+    # Check proportion of perfect accuracy configurations
+    if accuracies:
+        # Determine the scale (decimal vs percentage) based on maximum accuracy value
+        max_accuracy = max(accuracies) if accuracies else 0
+        # If max accuracy > 10, assume percentage scale (0-100), otherwise decimal scale (0-1)
+        is_percentage_scale = max_accuracy > 1
+
+        # Set threshold based on scale
+        if is_percentage_scale:
+            perfect_threshold = 99.9  # 99.9% for percentage scale
+        else:
+            perfect_threshold = 0.999  # 99.9% for decimal scale
+
+        perfect_acc_count = sum(1 for acc in accuracies if acc >= perfect_threshold)
+        perfect_acc_ratio = perfect_acc_count / len(accuracies)
+        exclude_dataset = perfect_acc_ratio > max_perfect_acc_ratio
+
+        print(
+            f"  Task {task_id}: Scale detected = {'percentage' if is_percentage_scale else 'decimal'}, threshold = {perfect_threshold}"
+        )
+
+        if exclude_dataset:
+            print(
+                f"  Task {task_id}: Excluded due to {perfect_acc_ratio:.3f} perfect accuracy ratio (>{max_perfect_acc_ratio:.3f})"
+            )
+        else:
+            print(f"  Task {task_id}: Perfect accuracy ratio = {perfect_acc_ratio:.3f}")
+    else:
+        exclude_dataset = False
+        print(f"  Task {task_id}: No accuracy data available")
+
+    return np.array(runtimes), exclude_dataset
 
 
 def calculate_average_runtime(runtimes: np.ndarray) -> float:
@@ -119,15 +188,18 @@ def create_runtime_stratification(
     task_ids: List[str],
     top_count: Union[int, None] = None,
     top_percent: Union[float, None] = None,
+    max_perfect_acc_ratio: float = 0.01,
 ) -> List[str]:
     """
     Create stratification based on either top N datasets or top X percent by average runtime.
+    Excludes datasets with excessive perfect accuracy configurations.
 
     Args:
         benchmark_name: Name of the benchmark
         task_ids: List of task IDs to process
         top_count: Number of top datasets to select (mutually exclusive with top_percent)
         top_percent: Percentage of top datasets to select (mutually exclusive with top_count)
+        max_perfect_acc_ratio: Maximum allowed proportion of configurations with perfect accuracy (default: 0.01 = 1%)
     """
     if top_count is not None and top_percent is not None:
         raise ValueError("Cannot specify both top_count and top_percent")
@@ -135,13 +207,21 @@ def create_runtime_stratification(
         raise ValueError("Must specify either top_count or top_percent")
 
     runtime_scores = {}
+    excluded_datasets = []
 
     for i, task_id in enumerate(task_ids, 1):
         print(f"Processing {i}/{len(task_ids)}: Task {task_id}")
 
-        runtimes = sample_runtime_data(benchmark_name, task_id)
+        result = sample_runtime_data(
+            benchmark_name, task_id, max_perfect_acc_ratio=max_perfect_acc_ratio
+        )
 
-        if runtimes is not None:
+        if result is not None:
+            runtimes, exclude_dataset = result
+            if exclude_dataset:
+                excluded_datasets.append(task_id)
+                continue
+
             avg_runtime = calculate_average_runtime(runtimes)
             runtime_scores[task_id] = avg_runtime
             print(
@@ -170,10 +250,15 @@ def create_runtime_stratification(
     top_tasks = [task_id for task_id, _ in sorted_tasks[:n_top]]
 
     print(
-        f"\n{selection_desc.title()} (from {len(valid_scores)} with valid runtime data):"
+        f"\n{selection_desc.title()} (from {len(valid_scores)} with valid runtime data, {len(excluded_datasets)} excluded for excessive perfect accuracy):"
     )
     for i, (task_id, avg_runtime) in enumerate(sorted_tasks[:n_top], 1):
         print(f"  {i}. Task {task_id}: {avg_runtime:.4f}")
+
+    if excluded_datasets:
+        print(f"\nExcluded datasets ({len(excluded_datasets)} total):")
+        for task_id in excluded_datasets:
+            print(f"  - Task {task_id}")
 
     return top_tasks
 
@@ -192,15 +277,25 @@ def main():
     # Configuration - define parameters directly
     top_count = 5
     top_percent = None
+    max_perfect_acc_ratio = (
+        0.05  # Exclude datasets with >1% perfect accuracy configurations
+    )
     benchmarks = ["rbv2_xgboost", "lcbench"]
 
     for benchmark in benchmarks:
         print(f"\nCreating {benchmark} runtime stratification...")
+        print(
+            f"Excluding datasets with >{max_perfect_acc_ratio:.1%} perfect accuracy configurations"
+        )
 
         try:
             task_ids = get_benchmark_task_ids(benchmark)
             top_runtime_datasets = create_runtime_stratification(
-                benchmark, task_ids, top_count=top_count, top_percent=top_percent
+                benchmark,
+                task_ids,
+                top_count=top_count,
+                top_percent=top_percent,
+                max_perfect_acc_ratio=max_perfect_acc_ratio,
             )
 
             if top_runtime_datasets:

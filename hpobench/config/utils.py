@@ -270,30 +270,20 @@ def get_external_tuning_configurations() -> List[TunerConfig]:
         List of external tuning configuration objects (e.g., for skopt, optuna).
     """
     return [
-        # TunerConfig(
-        #     tuner="gp_opt",
-        #     searcher="gp_opt_ei",
-        #     config_identifier="GP-EI",
-        # ),
+        TunerConfig(
+            tuner="gp_opt",
+            searcher="gp_opt_ei",
+            config_identifier="GP-EI",
+        ),
         # TunerConfig(
         #     tuner="gp_opt",
         #     searcher="gp_opt_ts",
         #     config_identifier="GP-TS",
         # ),
         # TunerConfig(
-        #     tuner="skopt",
-        #     searcher="gp",
-        #     config_identifier="GP1",
-        # ),
-        # TunerConfig(
         #     tuner="optuna",
         #     searcher="tpe",
         #     config_identifier="TPE",
-        # ),
-        # TunerConfig(
-        #     tuner="optuna",
-        #     searcher="gp",
-        #     config_identifier="GP2",
         # ),
         # Syne-Tune CQR configurations using string searchers
         # TunerConfig(
@@ -306,21 +296,6 @@ def get_external_tuning_configurations() -> List[TunerConfig]:
             searcher="random",
             config_identifier="RS",
         ),
-        # TunerConfig(
-        #     tuner="skopt",
-        #     searcher="gbrt",
-        #     config_identifier="GBRT",
-        # ),
-        TunerConfig(
-            tuner="optuna",
-            searcher="confopt_gp_expected_improvement",
-            config_identifier="optuna-GP-EI",
-        ),
-        # TunerConfig(
-        #     tuner="optuna",
-        #     searcher="confopt_gp_thompson_sampling",
-        #     config_identifier="optuna-GP-TS",
-        # ),
         # TunerConfig(
         #     tuner="smac",
         #     searcher="smac_rf_ei",

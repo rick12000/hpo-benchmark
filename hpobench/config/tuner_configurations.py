@@ -182,12 +182,19 @@ LIMITED_ARCHITECTURE_ADAPTER = "DtACI"
 LIMITED_ARCHITECTURE_N_QUANTILES = 4
 LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurations(
     architectures=[
-        "qgp",
+        # "qgp",
         "qgbm",
-        "qens1",
-        "qens5",
+        # "qens1",
+        # "qens5",
     ],
     samplers=[
+        MaxValueEntropySearchSampler(
+            n_quantiles=LIMITED_ARCHITECTURE_N_QUANTILES,
+            adapter=LIMITED_ARCHITECTURE_ADAPTER,
+            n_paths=1000,
+            n_y_candidates_per_x=1000,
+            entropy_method="distance",
+        ),
         # ExpectedImprovementSampler(
         #     n_quantiles=LIMITED_ARCHITECTURE_N_QUANTILES,
         #     num_ei_samples=1000,
@@ -197,7 +204,7 @@ LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_con
             n_quantiles=LIMITED_ARCHITECTURE_N_QUANTILES,
             enable_optimistic_sampling=True,
             adapter=LIMITED_ARCHITECTURE_ADAPTER,
-        )
+        ),
     ],
     n_pre_conformal_trials=32,
     searcher_tuning_framework=None,

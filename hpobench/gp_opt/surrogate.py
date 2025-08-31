@@ -198,6 +198,7 @@ class GPEstimator:
 
         try:
             temp_gp.fit(self.X_train_, self.y_train_)
+
             # Extract optimized kernel
             self.kernel_ = temp_gp.kernel_
 
@@ -251,6 +252,7 @@ class GPEstimator:
         self._fit_gp()
 
         self.is_fitted_ = True
+
         return self
 
     def _fit_gp(self) -> None:
@@ -342,11 +344,13 @@ class GPEstimator:
 
             if return_std:
                 means, stds = zip(*results)
-                return np.concatenate(means), np.concatenate(stds)
+                result = (np.concatenate(means), np.concatenate(stds))
             else:
-                return np.concatenate(results)
+                result = np.concatenate(results)
         else:
-            return self._predict_batch(X_scaled, return_std=return_std)
+            result = self._predict_batch(X_scaled, return_std=return_std)
+
+        return result
 
     def _predict_batch(
         self, X: np.ndarray, return_std: bool = False
@@ -409,3 +413,60 @@ class GPEstimator:
         y_var += self.noise_variance_ * self.y_train_std_**2
 
         return y_mean, y_var
+
+    def sample_posterior(
+        self, X: np.ndarray, n_samples: int = 1, random_state: int = None
+    ) -> np.ndarray:
+        """Sample functions from the GP posterior distribution.
+
+        Args:
+            X: Features with shape (n_samples, n_features).
+            n_samples: Number of function samples to draw.
+            random_state: Random seed for reproducible sampling.
+
+        Returns:
+            Function samples with shape (n_samples, n_points).
+        """
+        if not self.is_fitted_:
+            raise RuntimeError("Model must be fitted before sampling")
+
+        # Set random state
+        if random_state is not None:
+            np.random.seed(random_state)
+
+        # Normalize input features using the same scaler from training
+        X_scaled = self.feature_scaler_.transform(X)
+
+        # Compute mean and covariance
+        y_mean, y_var = self._predict_mean_var(X_scaled)
+
+        # Compute full covariance matrix
+        K_star_star = self.kernel_(X_scaled)
+        K_star = self.kernel_(X_scaled, self.X_train_)
+
+        if self.chol_factor_ is not None:
+            # Use Cholesky-based computation for covariance
+            chol_solve = solve_triangular(self.chol_factor_, K_star.T, lower=True)
+            cov = K_star_star - chol_solve.T @ chol_solve
+        else:
+            # Use eigendecomposition fallback
+            K_inv_K_star = (
+                self.eigenvecs_
+                @ (K_star.T / self.eigenvals_.reshape(-1, 1))
+                @ self.eigenvecs_.T
+            )
+            cov = K_star_star - K_star @ K_inv_K_star
+
+        # Add noise variance for total predictive covariance
+        cov += (self.noise_variance_ * self.y_train_std_**2) * np.eye(len(X))
+
+        # Ensure positive semi-definite
+        cov = (cov + cov.T) / 2  # Make symmetric
+        eigenvals, eigenvecs = np.linalg.eigh(cov)
+        eigenvals = np.maximum(eigenvals, 1e-10)  # Clip negative eigenvalues
+        cov = eigenvecs @ np.diag(eigenvals) @ eigenvecs.T
+
+        # Sample from multivariate normal
+        samples = np.random.multivariate_normal(y_mean, cov, size=n_samples)
+
+        return samples

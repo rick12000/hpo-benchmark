@@ -5,6 +5,6 @@ alwaysApply: true
 ---
 
 To run anything in the terminal or console, ALWAYS:
-1. Run: conda activate hpo_benchmark_env
+1. Run: conda activate hpo_benchmark_env_2
 2. Run: pip install .
 3. Run your command

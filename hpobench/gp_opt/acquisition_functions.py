@@ -7,10 +7,13 @@ selection of the next hyperparameter configuration to evaluate.
 """
 
 import math
+import logging
 import numpy as np
 from typing import Union, Tuple
 from enum import Enum
 from abc import ABC, abstractmethod
+
+logger = logging.getLogger(__name__)
 
 
 class AcquisitionFunction(Enum):
@@ -185,7 +188,9 @@ class UpperConfidenceBound(BaseAcquisitionFunction):
 class ThompsonSampling(BaseAcquisitionFunction):
     """Thompson Sampling acquisition function.
 
-    Samples from the GP posterior distribution for probabilistic exploration.
+    Samples a single function from the GP posterior distribution for probabilistic exploration.
+    This implements proper Thompson Sampling by drawing one function sample and evaluating
+    it across all candidate points, rather than independent sampling per point.
 
     Args:
         random_state: Random seed for reproducible sampling
@@ -194,27 +199,34 @@ class ThompsonSampling(BaseAcquisitionFunction):
     def __init__(self, random_state: int = None):
         super().__init__(random_state=random_state)
         self.random_state = random_state
-        self._rng = np.random.RandomState(random_state)
 
     def __call__(self, mean: np.ndarray, var: np.ndarray, **kwargs) -> np.ndarray:
         """Compute Thompson Sampling acquisition function.
+
+        This method is called by optimize_acquisition but Thompson Sampling requires
+        access to the full GP posterior covariance, not just pointwise variances.
+        Therefore, this method raises an error and directs users to use the proper
+        Thompson Sampling optimization method.
 
         Args:
             mean: GP posterior mean with shape (n_points,)
             var: GP posterior variance with shape (n_points,)
 
-        Returns:
-            Sampled values with shape (n_points,)
+        Raises:
+            NotImplementedError: Thompson Sampling requires special handling
         """
-        std = np.sqrt(var)
-        # Negate samples for argmin (lower sampled values = better for minimization)
-        return -self._rng.normal(mean, std)
+        raise NotImplementedError(
+            "Thompson Sampling requires access to the full GP posterior covariance matrix. "
+            "Use optimize_thompson_sampling() instead of optimize_acquisition()."
+        )
 
 
 class OptimisticThompsonSampling(BaseAcquisitionFunction):
     """Optimistic Thompson Sampling acquisition function.
 
     Thompson sampling with a floor at the posterior mean for more optimistic sampling.
+    This implements proper Thompson Sampling by drawing one function sample and applying
+    optimistic constraints, rather than independent sampling per point.
 
     Args:
         random_state: Random seed for reproducible sampling
@@ -223,22 +235,26 @@ class OptimisticThompsonSampling(BaseAcquisitionFunction):
     def __init__(self, random_state: int = None):
         super().__init__(random_state=random_state)
         self.random_state = random_state
-        self._rng = np.random.RandomState(random_state)
 
     def __call__(self, mean: np.ndarray, var: np.ndarray, **kwargs) -> np.ndarray:
         """Compute Optimistic Thompson Sampling acquisition function.
+
+        This method is called by optimize_acquisition but Optimistic Thompson Sampling
+        requires access to the full GP posterior covariance, not just pointwise variances.
+        Therefore, this method raises an error and directs users to use the proper
+        optimization method.
 
         Args:
             mean: GP posterior mean with shape (n_points,)
             var: GP posterior variance with shape (n_points,)
 
-        Returns:
-            Optimistic sampled values with shape (n_points,)
+        Raises:
+            NotImplementedError: Optimistic Thompson Sampling requires special handling
         """
-        std = np.sqrt(var)
-        samples = self._rng.normal(mean, std)
-        # For minimization: take minimum between sample and mean, then negate for argmin
-        return -np.minimum(samples, mean)
+        raise NotImplementedError(
+            "Optimistic Thompson Sampling requires access to the full GP posterior covariance matrix. "
+            "Use optimize_optimistic_thompson_sampling() instead of optimize_acquisition()."
+        )
 
 
 def get_acquisition_function(
@@ -298,6 +314,16 @@ def optimize_acquisition(
     Returns:
         Tuple of (best_index, best_acquisition_value)
     """
+    # Handle Thompson Sampling variants specially
+    if isinstance(acquisition_func, ThompsonSampling):
+        return optimize_thompson_sampling(
+            acquisition_func, gp_estimator, candidate_points
+        )
+    elif isinstance(acquisition_func, OptimisticThompsonSampling):
+        return optimize_optimistic_thompson_sampling(
+            acquisition_func, gp_estimator, candidate_points
+        )
+
     # Get GP predictions
     mean, std = gp_estimator.predict(candidate_points, return_std=True)
     var = std**2
@@ -312,6 +338,84 @@ def optimize_acquisition(
     else:
         acq_values = acquisition_func(mean, var)
 
+    # Find best candidate
     best_idx = np.argmin(acq_values)
 
     return best_idx, acq_values[best_idx]
+
+
+def optimize_thompson_sampling(
+    acquisition_func: ThompsonSampling,
+    gp_estimator,
+    candidate_points: np.ndarray,
+) -> Tuple[int, float]:
+    """Optimize Thompson Sampling acquisition function using Matheron's Rule.
+
+    This method implements Thompson Sampling by drawing a single function sample
+    from the GP posterior using Matheron's Rule (f*(x) = mu(x) + sigma(x) * Z, where Z ~ N(0,1)).
+    This avoids the expensive computation of the full covariance matrix while maintaining
+    statistical correctness.
+
+    Args:
+        acquisition_func: Thompson Sampling acquisition function
+        gp_estimator: Fitted GP estimator
+        candidate_points: Candidate points to evaluate with shape (n_candidates, n_features)
+
+    Returns:
+        Tuple of (best_index, sampled_function_value_at_best_point)
+    """
+    # Use Matheron's Rule for efficient posterior sampling
+    mean, std = gp_estimator.predict(candidate_points, return_std=True)
+
+    # Sample Z from a standard normal distribution
+    if acquisition_func.random_state is not None:
+        np.random.seed(acquisition_func.random_state)
+    Z = np.random.standard_normal(len(candidate_points))
+
+    # Apply Matheron's Rule: f*(x) = mean(x) + std(x) * Z
+    sampled_function = mean + std * Z
+
+    # For minimization, find the candidate with the lowest sampled function value
+    best_idx = np.argmin(sampled_function)
+
+    return best_idx, sampled_function[best_idx]
+
+
+def optimize_optimistic_thompson_sampling(
+    acquisition_func: OptimisticThompsonSampling,
+    gp_estimator,
+    candidate_points: np.ndarray,
+) -> Tuple[int, float]:
+    """Optimize Optimistic Thompson Sampling acquisition function using Matheron's Rule.
+
+    This method implements Optimistic Thompson Sampling by drawing a single function sample
+    from the GP posterior using Matheron's Rule, applying optimistic constraints (floor at posterior mean),
+    and finding the candidate that optimizes this constrained sample.
+
+    Args:
+        acquisition_func: Optimistic Thompson Sampling acquisition function
+        gp_estimator: Fitted GP estimator
+        candidate_points: Candidate points to evaluate with shape (n_candidates, n_features)
+
+    Returns:
+        Tuple of (best_index, constrained_sampled_function_value_at_best_point)
+    """
+    # Use Matheron's Rule for efficient posterior sampling
+    mean, std = gp_estimator.predict(candidate_points, return_std=True)
+
+    # Sample Z from a standard normal distribution
+    if acquisition_func.random_state is not None:
+        np.random.seed(acquisition_func.random_state)
+    Z = np.random.standard_normal(len(candidate_points))
+
+    # Apply Matheron's Rule: f*(x) = mean(x) + std(x) * Z
+    sampled_function = mean + std * Z
+
+    # Apply optimistic constraint: take minimum between sample and mean
+    # This encourages exploitation by preventing the sample from being worse than the mean
+    constrained_sample = np.minimum(sampled_function, mean)
+
+    # For minimization, find the candidate with the lowest constrained sampled value
+    best_idx = np.argmin(constrained_sample)
+
+    return best_idx, constrained_sample[best_idx]

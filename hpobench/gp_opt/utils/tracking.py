@@ -3,12 +3,12 @@ import time
 from pydantic import BaseModel
 from datetime import datetime
 from typing import Optional, Literal
-from confopt.wrapping import ParameterRange
+from hpobench.gp_opt.wrapping import ParameterRange
 import numpy as np
-from confopt.utils.configurations.encoding import ConfigurationEncoder
-from confopt.utils.configurations.sampling import get_tuning_configurations
+from hpobench.gp_opt.utils.configurations.encoding import ConfigurationEncoder
+from hpobench.gp_opt.utils.configurations.sampling import get_tuning_configurations
 from tqdm import tqdm
-from confopt.utils.configurations.utils import create_config_hash
+from hpobench.gp_opt.utils.configurations.utils import create_config_hash
 
 
 logger = logging.getLogger(__name__)
@@ -310,7 +310,10 @@ class BaseConfigurationManager:
         """
         if not configs:
             return np.array([])
-        return self.encoder.transform(configs).to_numpy()
+
+        result = self.encoder.transform(configs).to_numpy()
+
+        return result
 
     def listify_configs(self, configs: list[dict]) -> list[list[float]]:
         """
@@ -494,14 +497,16 @@ class DynamicConfigurationManager(BaseConfigurationManager):
         Returns:
             List of configuration dictionaries.
         """
+        # Generate candidate configurations
+        n_configurations = self.n_candidate_configurations + len(self.searched_configs)
         candidate_configurations = get_tuning_configurations(
             parameter_grid=self.search_space,
-            n_configurations=self.n_candidate_configurations
-            + len(self.searched_configs),
+            n_configurations=n_configurations,
             random_state=None,
             sampling_method="uniform",
         )
 
+        # Filter out searched and banned configurations
         banned_hashes = set(create_config_hash(c) for c in self.banned_configurations)
         filtered_configs = []
 
@@ -517,6 +522,7 @@ class DynamicConfigurationManager(BaseConfigurationManager):
 
         # Store current searchable configs for count method
         self.current_searchable_configs = filtered_configs
+
         return filtered_configs
 
     def get_searchable_configurations_count(self) -> int:
