@@ -88,14 +88,14 @@ def setup_yahpo_instance_configs(
     # Ensure YAHPO is initialized before creating BenchmarkSet instances
     _ensure_yahpo_initialized()
 
-    if benchmark in ["lcbench_large", "lcbench_heteroscedastic"]:
+    if benchmark in ["LCBench-L", "LCBench-H", "LCBench-A"]:
         benchmark_override = "lcbench"
         benchmark_set = BenchmarkSet(
             benchmark_override, active_session=False, check=False
         )
         instances = YAHPO_SUBSETS[benchmark]
-    elif benchmark in ["rbv2_xgboost_large", "rbv2_xgboost_heteroscedastic"]:
-        benchmark_override = "rbv2_xgboost"
+    elif benchmark in ["rbv2_aknn-L", "rbv2_aknn-H", "rbv2_aknn-A"]:
+        benchmark_override = "rbv2_aknn"
         benchmark_set = BenchmarkSet(
             benchmark_override, active_session=False, check=False
         )

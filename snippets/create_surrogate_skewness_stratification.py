@@ -4,16 +4,13 @@ import os
 import random
 from typing import Dict, List, Tuple, Union, Any
 import warnings
-
+from sklearn.neighbors import NearestNeighbors
 from yahpo_gym import BenchmarkSet, local_config
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
-from sklearn.gaussian_process import GaussianProcessRegressor
-from sklearn.gaussian_process.kernels import Matern, ConstantKernel as C
-from sklearn.cluster import KMeans
 from ConfigSpace import Configuration
 import ConfigSpace as CS
+from scipy import stats
 
-import statsmodels.api as sm
 import logging
 
 # Set random seeds for reproducibility
@@ -271,6 +268,7 @@ def sample_surrogate_data(
         )
         filtered_configs.append(filtered_config)
 
+    print(f"  Evaluating {len(filtered_configs)} configurations in batch...")
     batch_results = benchmark_set.objective_function(filtered_configs, seed=1234)
 
     performances = []
@@ -368,172 +366,107 @@ def sample_surrogate_data(
     return X, y, exclude_dataset
 
 
-class LightweightGP:
-    """Lightweight GP with inducing points for scalability while preserving ARD and Matern kernel."""
-
-    def __init__(self, n_inducing: int = 100, random_state: int = 42):
-        self.n_inducing = n_inducing
-        self.random_state = random_state
-        self.X_inducing_ = None
-        self.y_inducing_ = None
-        self.gp_ = None
-        self.scaler_X_ = None
-        self.scaler_y_ = None
-
-    def _select_inducing_points(
-        self, X: np.ndarray, y: np.ndarray
-    ) -> Tuple[np.ndarray, np.ndarray]:
-        """Select inducing points using K-means clustering for representative coverage."""
-        n_samples = len(X)
-
-        if n_samples <= self.n_inducing:
-            return X, y
-
-        # Use K-means to find representative points
-        np.random.seed(self.random_state)
-        kmeans = KMeans(
-            n_clusters=self.n_inducing, random_state=self.random_state, n_init=10
-        )
-        cluster_labels = kmeans.fit_predict(X)
-
-        # Select one point from each cluster (closest to centroid)
-        inducing_indices = []
-        for i in range(self.n_inducing):
-            cluster_mask = cluster_labels == i
-            if np.any(cluster_mask):
-                cluster_X = X[cluster_mask]
-                centroid = kmeans.cluster_centers_[i]
-                # Find closest point to centroid
-                distances = np.sum((cluster_X - centroid) ** 2, axis=1)
-                closest_idx = np.argmin(distances)
-                original_idx = np.where(cluster_mask)[0][closest_idx]
-                inducing_indices.append(original_idx)
-
-        return X[inducing_indices], y[inducing_indices]
-
-    def fit(self, X: np.ndarray, y: np.ndarray):
-        """Fit lightweight GP with inducing points and ARD Matern kernel."""
-        # Normalize features and targets
-        self.scaler_X_ = StandardScaler()
-        self.scaler_y_ = StandardScaler()
-
-        X_scaled = self.scaler_X_.fit_transform(X)
-        y_scaled = self.scaler_y_.fit_transform(y.reshape(-1, 1)).ravel()
-
-        # Select inducing points
-        self.X_inducing_, self.y_inducing_ = self._select_inducing_points(
-            X_scaled, y_scaled
-        )
-
-        # Create ARD Matern kernel
-        n_features = X.shape[1]
-        length_scales = np.ones(n_features)  # ARD: one per feature
-        kernel = C(1.0, (1e-3, 1e3)) * Matern(
-            length_scale=length_scales, length_scale_bounds=(1e-2, 1e2), nu=2.5
-        )
-
-        # Fit GP on inducing points only for speed
-        self.gp_ = GaussianProcessRegressor(
-            kernel=kernel,
-            alpha=1e-10,
-            normalize_y=False,
-            n_restarts_optimizer=5,  # Reduced for speed
-            random_state=self.random_state,
-        )
-
-        self.gp_.fit(self.X_inducing_, self.y_inducing_)
-        return self
-
-    def predict(self, X: np.ndarray, return_std: bool = False):
-        """Make predictions using the fitted GP."""
-        X_scaled = self.scaler_X_.transform(X)
-
-        if return_std:
-            y_pred_scaled, y_std_scaled = self.gp_.predict(X_scaled, return_std=True)
-
-            # Transform back to original scale
-            y_pred = self.scaler_y_.inverse_transform(
-                y_pred_scaled.reshape(-1, 1)
-            ).ravel()
-            y_std = y_std_scaled * self.scaler_y_.scale_
-
-            return y_pred, y_std
-        else:
-            y_pred_scaled = self.gp_.predict(X_scaled)
-            y_pred = self.scaler_y_.inverse_transform(
-                y_pred_scaled.reshape(-1, 1)
-            ).ravel()
-            return y_pred
-
-
-def calculate_heteroscedasticity_robust(
-    X: np.ndarray, y: np.ndarray, max_samples: int = 200
-) -> float:
+def calculate_conditional_asymmetry(X: np.ndarray, y: np.ndarray) -> float:
     """
-    Calculate heteroscedasticity using lightweight GP with inducing points, ARD, and Matern kernel.
+    Calculate conditional asymmetry using quantile skew ratio.
 
-    This function implements scalable GP-based heteroscedasticity analysis:
-    1. Use sampling/inducing points for GP scalability with large datasets
-    2. Fit lightweight GP (Matern kernel with ARD) on representative subset
-    3. Compute residuals and squared residuals on full dataset
-    4. Fit auxiliary regression on squared residuals using original inputs X
-    5. Return adjusted R² as heteroscedasticity metric
+    For each x-neighborhood (k-NN), estimate q_0.95(x), q_0.5(x), q_0.05(x).
+    Define SkewRatio(x) = (q_0.95(x) - q_0.5(x)) / (q_0.5(x) - q_0.05(x)).
+    Aggregate as median of |log(SkewRatio(x))|.
 
     Args:
         X: Input features array
         y: Target values array
-        max_samples: Maximum samples for GP training (inducing points limit)
 
     Returns:
-        Adjusted R² score (0-1, higher = more heteroscedastic)
+        Conditional asymmetry index (0+, higher = more asymmetric conditional distributions)
     """
     if len(X) < 50:
         return 0.0
 
-    try:
-        # Step 1: Fit lightweight GP with inducing points for scalability
-        n_inducing = min(max_samples, len(X))
-        gp = LightweightGP(n_inducing=n_inducing, random_state=42)
-        gp.fit(X, y)
+    # Standardize features for meaningful distance calculation
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
 
-        # Get predictions and predictive variance on full dataset
-        predictions, pred_std = gp.predict(X, return_std=True)
+    # Adaptive parameters based on dataset size
+    n_neighbors = 100
 
-        # Step 2: Compute residuals
-        residuals = y - predictions
+    # Find k nearest neighbors for each sampled point
+    nbrs = NearestNeighbors(n_neighbors=n_neighbors, algorithm="ball_tree").fit(
+        X_scaled
+    )
 
-        # Use standardized residuals if predictive variance is available
-        if np.any(pred_std > 0):
-            standardized_residuals = residuals / (pred_std + 1e-10)
-            squared_residuals = standardized_residuals**2
-        else:
-            squared_residuals = residuals**2
+    skew_ratios = []
 
-        # Step 3: Use original inputs X as auxiliary regressors
-        Z = X.copy()
-        Z = sm.add_constant(Z)  # Add intercept
+    for i in range(len(X_scaled)):
+        # Get neighbors of point i in feature space
+        distances, indices = nbrs.kneighbors([X_scaled[i]])
+        neighbor_indices = indices[0]
 
-        # Step 4: Fit auxiliary regression
-        aux_model = sm.OLS(squared_residuals, Z)
-        aux_results = aux_model.fit()
+        # Get y values of neighbors
+        local_y = y[neighbor_indices]
 
-        # Extract regression statistics
-        n = len(squared_residuals)
-        k = Z.shape[1] - 1  # Number of regressors excluding intercept
-        r_squared = aux_results.rsquared
+        q95 = np.quantile(local_y, 0.95)
+        q50 = np.quantile(local_y, 0.5)
+        q05 = np.quantile(local_y, 0.05)
 
-        # Step 5: Compute adjusted R²
-        if n > k + 1:
-            r_squared_adj = 1 - (1 - r_squared) * (n - 1) / (n - k - 1)
-        else:
-            r_squared_adj = 0.0
+        # Avoid division by zero
+        denominator = q50 - q05
+        numerator = q95 - q50
+        if numerator > 0 and denominator > 0:
+            skew_ratio = numerator / denominator
+            skew_ratios.append(np.log(skew_ratio))
 
-        # Ensure score is in [0, 1] range
-        return max(0.0, min(1.0, r_squared_adj))
+    return np.median([abs(ratio) for ratio in skew_ratios])
 
-    except Exception as e:
-        print(f"    Error in heteroscedasticity calculation: {str(e)[:50]}...")
-        return 0.0
+
+def calculate_overall_asymmetry(y: np.ndarray) -> float:
+    """
+    Calculate the overall skewness of the entire Y sample using scipy.stats.skew.
+
+    Args:
+        y: Target values array
+
+    Returns:
+        Overall skewness of the sample (can be negative, zero, or positive)
+    """
+    skewness = stats.skew(y)
+    return skewness if np.isfinite(skewness) else 0.0
+
+
+def calculate_summary_stats(y: np.ndarray) -> Dict[str, float]:
+    """
+    Calculate comprehensive summary statistics for the y values.
+
+    Args:
+        y: Target values array
+
+    Returns:
+        Dictionary of summary statistics
+    """
+    stats_dict = {
+        "count": len(y),
+        "mean": np.mean(y),
+        "std": np.std(y),
+        "min": np.min(y),
+        "max": np.max(y),
+        "q05": np.quantile(y, 0.05),
+        "q25": np.quantile(y, 0.25),
+        "q50": np.quantile(y, 0.50),
+        "q75": np.quantile(y, 0.75),
+        "q95": np.quantile(y, 0.95),
+        "skewness": stats.skew(y),
+        "kurtosis": stats.kurtosis(y),
+        "range": np.max(y) - np.min(y),
+        "iqr": np.quantile(y, 0.75) - np.quantile(y, 0.25),
+    }
+
+    # Replace any non-finite values with 0
+    for key in stats_dict:
+        if not np.isfinite(stats_dict[key]):
+            stats_dict[key] = 0.0
+
+    return stats_dict
 
 
 def create_stratification(
@@ -544,7 +477,7 @@ def create_stratification(
     max_perfect_acc_ratio: float = 0.01,
 ) -> List[str]:
     """
-    Create stratification based on either top N datasets or top X percent by heteroscedasticity.
+    Create stratification based on either top N datasets or top X percent by conditional asymmetry.
     Excludes datasets with excessive perfect accuracy configurations.
 
     Args:
@@ -559,7 +492,7 @@ def create_stratification(
     if top_count is None and top_percent is None:
         raise ValueError("Must specify either top_count or top_percent")
 
-    heteroscedasticity_scores = {}
+    skewness_scores = {}
     excluded_datasets = []
 
     for i, task_id in enumerate(task_ids, 1):
@@ -576,21 +509,38 @@ def create_stratification(
                 continue
 
             if X is not None and y is not None:
-                score = calculate_heteroscedasticity_robust(X, y)
-                heteroscedasticity_scores[task_id] = score
-                print(f"  Task {task_id}: Adjusted R² = {score:.4f}")
+                score = calculate_conditional_asymmetry(X, y)
+                overall_skewness = calculate_overall_asymmetry(y)
+                summary_stats = calculate_summary_stats(y)
+
+                skewness_scores[task_id] = score
+
+                print(
+                    f"  Task {task_id}: AI metric (conditional asymmetry) = {score:.4f}, Overall skewness = {overall_skewness:.4f}"
+                )
+                print(
+                    f"    Summary: count={summary_stats['count']}, mean={summary_stats['mean']:.4f}, std={summary_stats['std']:.4f}"
+                )
+                print(
+                    f"    Quantiles: 5%={summary_stats['q05']:.4f}, 25%={summary_stats['q25']:.4f}, 50%={summary_stats['q50']:.4f}, 75%={summary_stats['q75']:.4f}, 95%={summary_stats['q95']:.4f}"
+                )
+                print(
+                    f"    Range: min={summary_stats['min']:.4f}, max={summary_stats['max']:.4f}, IQR={summary_stats['iqr']:.4f}"
+                )
+                print(f"    Shape: kurtosis={summary_stats['kurtosis']:.4f}")
+
             else:
                 print(f"  Task {task_id}: Failed")
         else:
             print(f"  Task {task_id}: Failed")
 
-    valid_scores = {k: v for k, v in heteroscedasticity_scores.items() if v > 0}
+    valid_scores = {k: v for k, v in skewness_scores.items() if v > 0}
 
     if not valid_scores:
-        print("No datasets with detectable heteroscedasticity!")
+        print("No datasets with detectable conditional asymmetry!")
         return []
 
-    # Sort by score (descending)
+    # Sort by score (descending - higher asymmetry first)
     sorted_tasks = sorted(valid_scores.items(), key=lambda x: x[1], reverse=True)
 
     # Determine how many to select
@@ -599,12 +549,12 @@ def create_stratification(
         selection_desc = f"top {n_top} datasets"
     else:
         n_top = max(1, int(len(sorted_tasks) * top_percent / 100))
-        selection_desc = f"top {top_percent}% most heteroscedastic datasets"
+        selection_desc = f"top {top_percent}% most asymmetric datasets"
 
     top_tasks = [task_id for task_id, _ in sorted_tasks[:n_top]]
 
     print(
-        f"\n{selection_desc.title()} (from {len(valid_scores)} datasets with valid adjusted R² scores, {len(excluded_datasets)} excluded for excessive perfect accuracy):"
+        f"\n{selection_desc.title()} (from {len(valid_scores)} datasets with valid AI scores, {len(excluded_datasets)} excluded for excessive perfect accuracy):"
     )
     for i, (task_id, score) in enumerate(sorted_tasks[:n_top], 1):
         print(f"  {i}. Task {task_id}: {score:.4f}")
@@ -619,7 +569,7 @@ def create_stratification(
 
 def save_stratification(task_ids: List[str], output_file: str = None):
     if output_file is None:
-        output_file = "top_heteroscedastic_datasets.json"
+        output_file = "top_asymmetric_datasets.json"
 
     with open(output_file, "w") as f:
         json.dump(task_ids, f, indent=2)
@@ -639,7 +589,7 @@ def main():
     for benchmark in benchmarks:
         try:
             task_ids = get_benchmark_task_ids(benchmark)
-            top_heteroscedastic = create_stratification(
+            top_skewed = create_stratification(
                 benchmark,
                 task_ids,
                 top_count=top_count,
@@ -647,12 +597,10 @@ def main():
                 max_perfect_acc_ratio=max_perfect_acc_ratio,
             )
 
-            if top_heteroscedastic:
-                output_file = f"top_heteroscedastic_datasets_{benchmark}.json"
-                save_stratification(top_heteroscedastic, output_file)
-                print(
-                    f"Completed {benchmark}: {len(top_heteroscedastic)} datasets selected"
-                )
+            if top_skewed:
+                output_file = f"top_asymmetric_datasets_{benchmark}.json"
+                save_stratification(top_skewed, output_file)
+                print(f"Completed {benchmark}: {len(top_skewed)} datasets selected")
             else:
                 print(f"No suitable datasets found for {benchmark}.")
         except Exception as e:

@@ -24,6 +24,7 @@ from hpobench.prepare import (
     setup_nas301_configs,
 )
 from hpobench.config.schema import BenchmarkDataSchema
+from hpobench.config.constants import Aliases
 
 from hpobench.tune import tune
 from hpobench.report.analyze import analyze_main_benchmark
@@ -31,17 +32,21 @@ from hpobench.report.analyze import analyze_main_benchmark
 logger = logging.getLogger(__name__)
 os.environ["SYNETUNE_FOLDER"] = "cache/syne-tune"
 
+aliases = Aliases()
+
 
 def load_experiment_configs(
     benchmarks: list[
         Literal[
             "jahs201",
             "lcbench",
-            "rbv2_xgboost",
-            "lcbench_large",
-            "lcbench_heteroscedastic",
-            "rbv2_xgboost_large",
-            "rbv2_xgboost_heteroscedastic",
+            "rbv2_aknn",
+            "LCBench-L",
+            "LCBench-H",
+            "LCBench-A",
+            "rbv2_aknn-L",
+            "rbv2_aknn-H",
+            "rbv2_aknn-A",
             "nas301",
         ]
     ],
@@ -60,14 +65,16 @@ def load_experiment_configs(
     prioritizing CIFAR-10, Fashion-MNIST, and colorectal histology datasets.
 
     Args:
-        benchmarks: List of benchmark names to initialize. Supported benchmarks are:
+        benchmarks: List of benchmark names to initialize.         Supported benchmarks are:
             - "jahs201": JAHS-Bench-201 neural architecture search benchmark
             - "lcbench": Learning Curves Benchmark for machine learning algorithms
-            - "rbv2_xgboost": RBVS2 XGBoost benchmark from YAHPO suite
-            - "lcbench_large": LCBench subset with largest datasets
-            - "lcbench_heteroscedastic": LCBench subset with most heteroscedastic datasets
-            - "rbv2_xgboost_large": RBV2 XGBoost subset with largest datasets
-            - "rbv2_xgboost_heteroscedastic": RBV2 XGBoost subset with most heteroscedastic datasets
+            - "rbv2_aknn": RBVS2 XGBoost benchmark from YAHPO suite
+            - "LCBench-L": LCBench subset with largest datasets
+            - "LCBench-H": LCBench subset with most heteroscedastic datasets
+            - "LCBench-A": LCBench subset with most skewed datasets
+            - "rbv2_aknn-L": RBV2 XGBoost subset with largest datasets
+            - "rbv2_aknn-H": RBV2 XGBoost subset with most heteroscedastic datasets
+            - "rbv2_aknn-A": RBV2 XGBoost subset with most skewed datasets
         tuning_configurations: List of tuner configurations defining the HPO algorithms
             and their parameters to be evaluated on each benchmark instance.
         n_warm_starts: Number of initial random hyperparameter configurations to generate
@@ -93,12 +100,14 @@ def load_experiment_configs(
     experiment_configs = []
     for i, benchmark in enumerate(benchmarks):
         if benchmark in [
-            "rbv2_xgboost",
+            "rbv2_aknn",
             "lcbench",
-            "lcbench_large",
-            "lcbench_heteroscedastic",
-            "rbv2_xgboost_large",
-            "rbv2_xgboost_heteroscedastic",
+            "LCBench-L",
+            "LCBench-H",
+            "LCBench-A",
+            "rbv2_aknn-L",
+            "rbv2_aknn-H",
+            "rbv2_aknn-A",
         ]:
             configs = setup_yahpo_instance_configs(
                 benchmark=benchmark,
@@ -269,9 +278,15 @@ def run_main_benchmark(
                     performance_generator=experiment_config.objective_function,
                 )
 
+                aliased_benchmark_identifier = (
+                    aliases.benchmark_aliases[experiment_config.benchmark_identifier]
+                    if experiment_config.benchmark_identifier
+                    in aliases.benchmark_aliases
+                    else experiment_config.benchmark_identifier
+                )
                 historical_performance[
                     "benchmark_identifier"
-                ] = experiment_config.benchmark_identifier
+                ] = aliased_benchmark_identifier
                 historical_performance["dataset"] = dataset_name
                 historical_performance["tuner"] = tuner.config_identifier
                 historical_performance["repetition"] = repetition + 1
@@ -328,11 +343,26 @@ def run_main_benchmark(
                     sampler_adapter = ""
                     tuner_searcher_tuning_framework = ""
 
+                aliased_estimator_architecture = (
+                    aliases.architecture_aliases[estimator_architecture]
+                    if estimator_architecture in aliases.architecture_aliases
+                    else estimator_architecture
+                )
+                aliased_sampler_name = (
+                    aliases.sampler_aliases[sampler_name]
+                    if sampler_name in aliases.sampler_aliases
+                    else sampler_name
+                )
+                if (
+                    tuner.searcher.sampler.enable_optimistic_sampling
+                    and sampler_name == "ThompsonSampler"
+                ):
+                    aliased_sampler_name = "OBS"
                 historical_performance[
                     "estimator_architecture"
-                ] = estimator_architecture
+                ] = aliased_estimator_architecture
                 historical_performance["confidence_level"] = confidence_level
-                historical_performance["sampler"] = sampler_name
+                historical_performance["sampler"] = aliased_sampler_name
                 historical_performance[
                     "n_pre_conformal_trials"
                 ] = n_pre_conformal_trials
@@ -373,11 +403,13 @@ def run_and_analyze_main_benchmark(
         Literal[
             "jahs201",
             "lcbench",
-            "rbv2_xgboost",
-            "lcbench_large",
-            "lcbench_heteroscedastic",
-            "rbv2_xgboost_large",
-            "rbv2_xgboost_heteroscedastic",
+            "rbv2_aknn",
+            "LCBench-L",
+            "LCBench-H",
+            "LCBench-A",
+            "rbv2_aknn-L",
+            "rbv2_aknn-H",
+            "rbv2_aknn-A",
         ]
     ],
     tuning_configurations: list[TunerConfig],
@@ -426,11 +458,13 @@ def run_and_analyze_main_benchmark(
             different characteristics (search space dimensionality, evaluation cost, etc.):
             - "jahs201": Neural architecture search with expensive evaluations
             - "lcbench": Classical ML algorithms with learning curve data
-            - "rbv2_xgboost": Gradient boosting hyperparameter optimization
-            - "lcbench_large": LCBench subset with largest datasets
-            - "lcbench_heteroscedastic": LCBench subset with most heteroscedastic datasets
-            - "rbv2_xgboost_large": RBV2 XGBoost subset with largest datasets
-            - "rbv2_xgboost_heteroscedastic": RBV2 XGBoost subset with most heteroscedastic datasets
+            - "rbv2_aknn": Gradient boosting hyperparameter optimization
+            - "LCBench-L": LCBench subset with largest datasets
+            - "LCBench-H": LCBench subset with most heteroscedastic datasets
+            - "LCBench-A": LCBench subset with most skewed datasets
+            - "rbv2_aknn-L": RBV2 XGBoost subset with largest datasets
+            - "rbv2_aknn-H": RBV2 XGBoost subset with most heteroscedastic datasets
+            - "rbv2_aknn-A": RBV2 XGBoost subset with most skewed datasets
         tuning_configurations: HPO algorithms and their parameter settings to compare.
             Should include both confopt-based methods and baseline algorithms for
             comprehensive evaluation.
@@ -508,10 +542,12 @@ def run_static_benchmark(
     benchmarks: list[
         Literal[
             "jahs201",
-            "lcbench_large",
-            "lcbench_heteroscedastic",
-            "rbv2_xgboost_large",
-            "rbv2_xgboost_heteroscedastic",
+            "LCBench-L",
+            "LCBench-H",
+            "LCBench-A",
+            "rbv2_aknn-L",
+            "rbv2_aknn-H",
+            "rbv2_aknn-A",
         ]
     ],
     data_size_range: list[int],
@@ -525,7 +561,7 @@ def run_static_benchmark(
 ) -> pd.DataFrame:
     """Evaluate conformal prediction estimator architectures in controlled static setting.
 
-    Supports lcbench, rbv2_xgboost, and jahs201 benchmark variants.
+    Supports lcbench, rbv2_aknn, and jahs201 benchmark variants.
 
     This function performs a controlled evaluation of different quantile estimator
     architectures for conformal prediction by training on fixed datasets of varying
@@ -542,10 +578,12 @@ def run_static_benchmark(
 
     Args:
         benchmarks: List of benchmark names to evaluate. Supported benchmarks are:
-            - "lcbench_large": LCBench subset with largest datasets
-            - "lcbench_heteroscedastic": LCBench subset with most heteroscedastic datasets
-            - "rbv2_xgboost_large": RBV2 XGBoost subset with largest datasets
-            - "rbv2_xgboost_heteroscedastic": RBV2 XGBoost subset with most heteroscedastic datasets
+            - "LCBench-L": LCBench subset with largest datasets
+            - "LCBench-H": LCBench subset with most heteroscedastic datasets
+            - "LCBench-A": LCBench subset with most skewed datasets
+            - "rbv2_aknn-L": RBV2 XGBoost subset with largest datasets
+            - "rbv2_aknn-H": RBV2 XGBoost subset with most heteroscedastic datasets
+            - "rbv2_aknn-A": RBV2 XGBoost subset with most skewed datasets
             - "jahs201": JAHS-Bench-201 neural architecture search benchmark
         data_size_range: List of training dataset sizes to evaluate. Allows studying
             how estimator performance scales with available data, typically ranging
@@ -590,12 +628,12 @@ def run_static_benchmark(
     for benchmark in benchmarks:
         logger.info(f"Processing benchmark: {benchmark}")
         experiment_configs = []
-        if benchmark == "lcbench_large":
+        if benchmark == "LCBench-L":
             # Below we use setup function as shortcut, but we are only interested in
             # the yahpo generator and param space generation, the other inputs are
             # just placeholders:
             yahpo_configs = setup_yahpo_instance_configs(
-                benchmark="lcbench_large",  # hard coded, leave as is
+                benchmark="LCBench-L",  # hard coded, leave as is
                 tuning_configurations=[],  # placeholder
                 n_warm_starts=1,  # placeholder
                 n_trials=0,  # placeholder
@@ -604,9 +642,9 @@ def run_static_benchmark(
             )
             experiment_configs.extend(yahpo_configs)
 
-        elif benchmark == "lcbench_heteroscedastic":
+        elif benchmark == "LCBench-H":
             yahpo_configs = setup_yahpo_instance_configs(
-                benchmark="lcbench_heteroscedastic",  # hard coded, leave as is
+                benchmark="LCBench-H",  # hard coded, leave as is
                 tuning_configurations=[],  # placeholder
                 n_warm_starts=1,  # placeholder
                 n_trials=0,  # placeholder
@@ -615,9 +653,9 @@ def run_static_benchmark(
             )
             experiment_configs.extend(yahpo_configs)
 
-        elif benchmark == "rbv2_xgboost_large":
+        elif benchmark == "LCBench-A":
             yahpo_configs = setup_yahpo_instance_configs(
-                benchmark="rbv2_xgboost_large",  # hard coded, leave as is
+                benchmark="LCBench-A",  # hard coded, leave as is
                 tuning_configurations=[],  # placeholder
                 n_warm_starts=1,  # placeholder
                 n_trials=0,  # placeholder
@@ -626,9 +664,31 @@ def run_static_benchmark(
             )
             experiment_configs.extend(yahpo_configs)
 
-        elif benchmark == "rbv2_xgboost_heteroscedastic":
+        elif benchmark == "rbv2_aknn-L":
             yahpo_configs = setup_yahpo_instance_configs(
-                benchmark="rbv2_xgboost_heteroscedastic",  # hard coded, leave as is
+                benchmark="rbv2_aknn-L",  # hard coded, leave as is
+                tuning_configurations=[],  # placeholder
+                n_warm_starts=1,  # placeholder
+                n_trials=0,  # placeholder
+                timeout=100000,  # placeholder
+                max_n_instances=max_n_instances,
+            )
+            experiment_configs.extend(yahpo_configs)
+
+        elif benchmark == "rbv2_aknn-H":
+            yahpo_configs = setup_yahpo_instance_configs(
+                benchmark="rbv2_aknn-H",  # hard coded, leave as is
+                tuning_configurations=[],  # placeholder
+                n_warm_starts=1,  # placeholder
+                n_trials=0,  # placeholder
+                timeout=100000,  # placeholder
+                max_n_instances=max_n_instances,
+            )
+            experiment_configs.extend(yahpo_configs)
+
+        elif benchmark == "rbv2_aknn-A":
+            yahpo_configs = setup_yahpo_instance_configs(
+                benchmark="rbv2_aknn-A",  # hard coded, leave as is
                 tuning_configurations=[],  # placeholder
                 n_warm_starts=1,  # placeholder
                 n_trials=0,  # placeholder
@@ -669,7 +729,7 @@ def run_static_benchmark(
             # Create single large population that will be sampled from for both experiment and holdout
             population = generate_configs_per_repetition(
                 search_space=experiment_config.search_space,
-                n_configs=5000,
+                n_configs=50000,
                 n_repetitions=1,
                 base_seed=base_random_state,
                 objective_function=experiment_config.objective_function,
@@ -739,7 +799,6 @@ def run_static_benchmark(
                                 alphas=[alpha],
                                 n_pre_conformal_trials=n_pre_conformal_trials,
                                 calibration_split_strategy="train_test_split",
-                                symmetric_adjustment=True,
                                 normalize_features=True,
                             )
 
@@ -771,11 +830,25 @@ def run_static_benchmark(
                             )
                             mean_loss = (lo_score + hi_score) / 2
 
+                            aliased_estimator_architecture = (
+                                aliases.architecture_aliases[estimator_architecture]
+                                if estimator_architecture
+                                in aliases.architecture_aliases
+                                else estimator_architecture
+                            )
+                            aliased_benchmark_identifier = (
+                                aliases.benchmark_aliases[
+                                    experiment_config.benchmark_identifier
+                                ]
+                                if experiment_config.benchmark_identifier
+                                in aliases.benchmark_identifier
+                                else experiment_config.benchmark_identifier
+                            )
                             # Create dictionary with results:
                             results = {
-                                "estimator_architecture": estimator_architecture,
+                                "estimator_architecture": aliased_estimator_architecture,
                                 "dataset": experiment_config.dataset_identifier,
-                                "benchmark_identifier": experiment_config.benchmark_identifier,
+                                "benchmark_identifier": aliased_benchmark_identifier,
                                 "repetition": repetition,
                                 "tuning_iterations": tuning_iterations,
                                 "data_size": data_size,

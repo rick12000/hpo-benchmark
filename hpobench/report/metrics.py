@@ -602,15 +602,19 @@ def calculate_calibration_statistics_per_repetition(
         by=aggregators + [budget_unit],
         ascending=True,
     ).reset_index(drop=True)
-    sorted_experiment_log["chunked_target_coverage_deviation"] = (
-        sorted_experiment_log.groupby(aggregators)
-        .apply(
-            lambda group: _calculate_chunked_target_coverage_deviation(
-                group, breach_column
-            )
+    # Fix: Use manual concatenation instead of groupby.apply to avoid pandas version compatibility issues
+    # The original groupby.apply creates a wide DataFrame instead of properly stacking Series
+    chunked_deviation_results = []
+    for name, group in sorted_experiment_log.groupby(aggregators):
+        series_result = _calculate_chunked_target_coverage_deviation(
+            group, breach_column
         )
-        .reset_index(drop=True)
-    )
+        # Reset index to align with the original DataFrame
+        series_result.index = group.index
+        chunked_deviation_results.append(series_result)
+
+    chunked_deviations = pd.concat(chunked_deviation_results).sort_index()
+    sorted_experiment_log["chunked_target_coverage_deviation"] = chunked_deviations
 
     score_columns = [col for col in metric_columns if col != "llr_statistic"]
 

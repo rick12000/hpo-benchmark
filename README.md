@@ -127,16 +127,15 @@ The framework supports multiple HPO algorithms:
 **Description**: Yet Another Hyperparameter Optimization Gym provides surrogate models for various machine learning benchmarks.
 
 **Supported Benchmarks**:
-- `rbv2_xgboost`: XGBoost on OpenML datasets
+- `rbv2_aknn`: Approximate Nearest Neighbours on OpenML datasets
 - `lcbench`: Learning Curve Benchmark
-- `rbv2_glmnet`, `rbv2_ranger`, `rbv2_rpart`, `rbv2_super`, `rbv2_svm`: Various ML algorithms
 
 **Setup Instructions**:
 1. Install the YAHPO Gym package (included in requirements.txt)
 2. **Manual Data Setup Required**: Download the YAHPO benchmark data from the forked repository at: https://github.com/rick12000/yahpo_data_snapshot
 3. Extract the data folders into the `yahpo_bench_data/` folder at the root of this repository
 4. The folder structure should contain subdirectories like:
-   - `yahpo_bench_data/rbv2_xgboost/`
+   - `yahpo_bench_data/rbv2_aknn/`
    - `yahpo_bench_data/lcbench/`
    - `yahpo_bench_data/iaml_*/`
 

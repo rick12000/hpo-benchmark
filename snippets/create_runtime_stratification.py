@@ -1,10 +1,18 @@
 import json
 import numpy as np
-from typing import List, Union, Tuple
+import os
+import random
+from typing import List, Union, Tuple, Dict, Any
 import warnings
 
 from yahpo_gym import BenchmarkSet, local_config
+from ConfigSpace import Configuration
+import ConfigSpace as CS
 import logging
+
+# Set random seeds for reproducibility
+np.random.seed(42)
+random.seed(42)
 
 warnings.filterwarnings("ignore")
 
@@ -16,43 +24,156 @@ local_config.init_config()
 local_config.set_data_path("yahpo_bench_data")
 
 
+def _ensure_yahpo_initialized():
+    """Wrapper to ensure YAHPO is properly initialized."""
+    try:
+        local_config.init_config()
+        local_config.set_data_path("yahpo_bench_data")
+    except Exception as e:
+        logger.warning(f"YAHPO initialization warning: {e}")
+
+
+def _get_yahpo_log_info(benchmark: str) -> Dict[str, bool]:
+    """Extract log-scale information from yahpo benchmark JSON config files.
+
+    Args:
+        benchmark: Name of the yahpo benchmark (e.g., 'rbv2_aknn')
+
+    Returns:
+        Dictionary mapping parameter names to whether they should use log scale
+    """
+    config_path = os.path.join("yahpo_bench_data", benchmark, "config_space.json")
+    log_info = {}
+
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r") as f:
+                config_data = json.load(f)
+
+            for hp in config_data.get("hyperparameters", []):
+                param_name = hp.get("name")
+                log_flag = hp.get("log", False)
+                if param_name:
+                    log_info[param_name] = log_flag
+
+        except Exception as e:
+            logger.warning(f"Failed to read log info from {config_path}: {e}")
+
+    return log_info
+
+
 def get_benchmark_task_ids(benchmark_name: str) -> List[str]:
     benchmark_set = BenchmarkSet(benchmark_name)
     return benchmark_set.instances
 
 
+def _get_filtered_configuration(
+    configuration: dict,
+    config_space: CS.ConfigurationSpace,
+    fidelity_space: Dict[str, Any],
+    instance_name: str,
+    instance_value: Any,
+) -> dict:
+    """Filter configuration to include only active and fidelity parameters.
+
+    Uses ConfigSpace's built-in get_active_hyperparameters method for robust
+    conditional dependency handling.
+    """
+    config_dict = configuration.copy()
+
+    # Add fidelity parameters to the configuration for evaluation
+    if fidelity_space:
+        config_dict.update(fidelity_space)
+
+    # Add instance parameter for evaluation
+    config_dict[instance_name] = instance_value
+
+    # Use ConfigSpace's built-in method to get active hyperparameters
+    try:
+        cs_config = Configuration(
+            config_space,
+            values=config_dict,
+            allow_inactive_with_values=True,
+        )
+        active_hyperparameters = config_space.get_active_hyperparameters(cs_config)
+
+        # Filter configuration to only include active parameters
+        filtered_configuration = {
+            k: v
+            for k, v in config_dict.items()
+            if k in active_hyperparameters or k == instance_name
+        }
+
+    except Exception as e:
+        logger.warning(f"ConfigSpace evaluation failed: {e}")
+        # Fallback to unfiltered configuration
+        filtered_configuration = config_dict
+
+    return filtered_configuration
+
+
 def sample_runtime_data(
     benchmark_name: str,
     task_id: str,
-    n_samples: int = 1000,
+    n_samples: int = 10000,
     max_perfect_acc_ratio: float = 0.01,
 ) -> Union[Tuple[np.ndarray, bool], None]:
     """Sample runtime data from YAHPO Gym benchmark and check for excessive perfect accuracy."""
-    benchmark_set = BenchmarkSet(scenario=benchmark_name, instance=task_id)
+    # Ensure YAHPO is initialized
+    _ensure_yahpo_initialized()
+
+    benchmark_set = BenchmarkSet(
+        scenario=benchmark_name, instance=task_id, active_session=False, check=False
+    )
     config_space = benchmark_set.get_opt_space(drop_fidelity_params=False, seed=42)
     configurations = config_space.sample_configuration(n_samples)
 
     if not isinstance(configurations, list):
         configurations = [configurations]
 
+    # Get log scale information from JSON config files (aligned with prepare.py)
+    _get_yahpo_log_info(benchmark_name)
+
+    # Extract fidelity parameters and their maximum values
+    fidelity_param_names = benchmark_set.config.fidelity_params
+    instance_names = benchmark_set.config.instance_names
+
+    fidelity_space = {}
+    for hyperparameter in config_space.get_hyperparameters():
+        if hyperparameter.name in fidelity_param_names:
+            # Always use MAXIMUM fidelity for best performance evaluation
+            if hasattr(hyperparameter, "upper"):
+                fidelity_space[hyperparameter.name] = hyperparameter.upper
+            elif hasattr(hyperparameter, "default_value"):
+                fidelity_space[hyperparameter.name] = hyperparameter.default_value
+
+    # Special case for lcbench
+    if benchmark_name == "lcbench":
+        fidelity_space["epoch"] = 50
+
+    config_dicts = []
+    filtered_configs = []
+
+    # Prepare all configurations for batch evaluation
+    for config in configurations:
+        config_dict = dict(config)
+        config_dicts.append(config_dict)
+
+        # Use proper configuration filtering
+        filtered_config = _get_filtered_configuration(
+            config_dict, config_space, fidelity_space, instance_names, task_id
+        )
+        filtered_configs.append(filtered_config)
+
+    # Batch evaluation - MAJOR PERFORMANCE IMPROVEMENT
+    print(f"  Evaluating {len(filtered_configs)} configurations in batch...")
+    batch_results = benchmark_set.objective_function(filtered_configs, seed=1234)
+
     runtimes = []
     accuracies = []
 
-    for config in configurations:
-        config_dict = dict(config)
-
-        fidelity_params = benchmark_set.config.fidelity_params
-        if fidelity_params:
-            for param in fidelity_params:
-                if param in config_space:
-                    hp = config_space.get_hyperparameter(param)
-                    if hasattr(hp, "upper"):
-                        config_dict[param] = hp.upper
-                    elif hasattr(hp, "default_value"):
-                        config_dict[param] = hp.default_value
-
-        result = benchmark_set.objective_function(config_dict)
-
+    # Process batch results
+    for i, result in enumerate(batch_results):
         if isinstance(result, list) and len(result) > 0:
             result = result[0]
 
@@ -65,15 +186,6 @@ def sample_runtime_data(
                 runtime = result["runtime"]
             elif "timetrain" in result and "timepredict" in result:
                 runtime = result["timetrain"] + result["timepredict"]
-            else:
-                # Try to find any time-related key
-                for key, value in result.items():
-                    if "time" in key.lower() or "runtime" in key.lower():
-                        try:
-                            runtime = float(value)
-                            break
-                        except (ValueError, TypeError):
-                            continue
 
             # Extract accuracy from the result dictionary using benchmark-specific prioritization
             accuracy = None
@@ -90,15 +202,6 @@ def sample_runtime_data(
                 elif "auc" in result:
                     accuracy = result["auc"]
 
-            # Fallback: try to find any accuracy-related key
-            if accuracy is None:
-                for key, value in result.items():
-                    if "acc" in key.lower() or "accuracy" in key.lower():
-                        try:
-                            accuracy = float(value)
-                            break
-                        except (ValueError, TypeError):
-                            continue
         else:
             runtime = result
             accuracy = None
@@ -162,27 +265,6 @@ def sample_runtime_data(
     return np.array(runtimes), exclude_dataset
 
 
-def calculate_average_runtime(runtimes: np.ndarray) -> float:
-    """Calculate the average runtime from the collected samples."""
-    if len(runtimes) == 0:
-        return 0.0
-
-    # Remove outliers using IQR method to get a more robust average
-    q1 = np.percentile(runtimes, 25)
-    q3 = np.percentile(runtimes, 75)
-    iqr = q3 - q1
-    lower_bound = q1 - 1.5 * iqr
-    upper_bound = q3 + 1.5 * iqr
-
-    # Filter out outliers
-    filtered_runtimes = runtimes[(runtimes >= lower_bound) & (runtimes <= upper_bound)]
-
-    if len(filtered_runtimes) == 0:
-        return np.mean(runtimes)  # Fallback to regular mean if all values are outliers
-
-    return np.mean(filtered_runtimes)
-
-
 def create_runtime_stratification(
     benchmark_name: str,
     task_ids: List[str],
@@ -222,7 +304,7 @@ def create_runtime_stratification(
                 excluded_datasets.append(task_id)
                 continue
 
-            avg_runtime = calculate_average_runtime(runtimes)
+            avg_runtime = np.mean(runtimes)
             runtime_scores[task_id] = avg_runtime
             print(
                 f"  Task {task_id}: Average runtime = {avg_runtime:.4f} (from {len(runtimes)} samples)"
@@ -280,7 +362,7 @@ def main():
     max_perfect_acc_ratio = (
         0.05  # Exclude datasets with >1% perfect accuracy configurations
     )
-    benchmarks = ["rbv2_xgboost", "lcbench"]
+    benchmarks = ["rbv2_aknn", "lcbench"]
 
     for benchmark in benchmarks:
         print(f"\nCreating {benchmark} runtime stratification...")

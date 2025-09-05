@@ -120,6 +120,9 @@ def analyze_main_benchmark(
     norm_runtime_unit = schema.norm_runtime_unit
     norm_iter_unit = schema.norm_iter_unit
     breach_col = schema.breach_column
+    n_pre_conformal_trials_col = schema.n_pre_conformal_trials
+    n_quantiles_col = schema.sampler_n_quantiles
+    searcher_tuning_framework_col = schema.tuner_searcher_tuning_framework
 
     processor = BenchmarkDataProcessor(schema=schema)
 
@@ -300,7 +303,6 @@ def analyze_main_benchmark(
         if global_budget_data[data_col].nunique() < 3:
             logger.info(
                 f"Skipping statistical tests for budget={budget}: no benchmark has at least 3 datasets. "
-                f"Dataset counts per benchmark: {datasets_per_benchmark.to_dict()}"
             )
             continue
 
@@ -308,7 +310,7 @@ def analyze_main_benchmark(
             data=global_budget_data,
             budget=budget,
             norm_runtime_unit=norm_runtime_unit,
-            analysis_components=analysis_components,
+            analysis_components=list(set(analysis_components + ["wilcoxon"])),
             cd_significance_method="wilcoxon",
             bench_col=bench_col,
             data_col=data_col,
@@ -358,7 +360,48 @@ def analyze_main_benchmark(
                 y_cols_lower=None,
                 y_cols_upper=None,
                 share_y_axis=False,
+                col_measure_label="Confidence Level",
+                hide_col_and_row_labels=False,
             )
+
+            # Snapshot plot (pick one dataset, and only show CV+ vs. Unconformalized):
+            # NOTE: All hardcoded
+            if "7593" in dataset_absolute_iterative_results_adj[data_col].unique():
+                snapshot_data = dataset_absolute_iterative_results_adj[
+                    dataset_absolute_iterative_results_adj[data_col] == "7593"
+                ]
+            else:
+                random_data_col_value = (
+                    dataset_absolute_iterative_results_adj[data_col]
+                    .sample(n=1, random_state=42)
+                    .iloc[0]
+                )
+                snapshot_data = dataset_absolute_iterative_results_adj[
+                    dataset_absolute_iterative_results_adj[data_col]
+                    == random_data_col_value
+                ]
+            snapshot_data = snapshot_data[
+                ~snapshot_data[tuner_col].str.contains("Split")
+            ]
+            plot_and_save(
+                data=snapshot_data,
+                x_col=iter_unit,
+                y_cols=["cumulative_coverage_error", "rolling_coverage_error"],
+                entity_col=tuner_col,
+                col_measure=confidence_level_col,
+                row_measure=data_col,
+                cache_path=cache_path,
+                run_start_str=run_start_str,
+                filename_prefix="coverage_per_dataset_snapshot",
+                analysis_type=analysis_type,
+                subfolder="coverage_breach_rates",
+                y_cols_lower=None,
+                y_cols_upper=None,
+                share_y_axis=False,
+                col_measure_label="Confidence Level",
+                hide_col_and_row_labels=False,
+            )
+
         else:
             # TODO: Change so this loops through each benchmark slice like in later sections:
             logger.warning(
@@ -416,6 +459,7 @@ def analyze_main_benchmark(
                 y_cols_lower=None,
                 y_cols_upper=None,
                 share_y_axis=False,
+                hide_col_and_row_labels=False,
             )
 
     # Rank analysis:
@@ -428,12 +472,16 @@ def analyze_main_benchmark(
         ] = bench_relative_runtime_results_filled_bounds["rank_lower"].fillna(
             bench_relative_runtime_results_filled_bounds["rank"]
         )
-        # TODO: This plot is probably redundant, since the cd diagram already shows ranks by runtime:
+        bench_relative_runtime_results_filled_bounds["plotting_identifier"] = (
+            bench_relative_runtime_results_filled_bounds[estimator_architecture_col]
+            + "-"
+            + bench_relative_runtime_results_filled_bounds[sampler_col]
+        )
         plot_and_save(
             data=bench_relative_runtime_results_filled_bounds,
             x_col=norm_runtime_unit,
             y_cols=["rank"],
-            entity_col=tuner_col,
+            entity_col="plotting_identifier",
             col_measure=bench_col,
             row_measure=None,
             cache_path=cache_path,
@@ -444,6 +492,7 @@ def analyze_main_benchmark(
             y_cols_lower=["rank_lower"],
             y_cols_upper=["rank_upper"],
             share_y_axis=False,
+            x_label="% Budget Used",
         )
         bench_relative_iterative_results_filled_bounds = (
             bench_relative_iterative_results.copy()
@@ -453,11 +502,16 @@ def analyze_main_benchmark(
         ] = bench_relative_iterative_results_filled_bounds["rank_lower"].fillna(
             bench_relative_iterative_results_filled_bounds["rank"]
         )
+        bench_relative_iterative_results_filled_bounds["plotting_identifier"] = (
+            bench_relative_iterative_results_filled_bounds[estimator_architecture_col]
+            + "-"
+            + bench_relative_iterative_results_filled_bounds[sampler_col]
+        )
         plot_and_save(
             data=bench_relative_iterative_results_filled_bounds,
             x_col=norm_iter_unit,
             y_cols=["rank"],
-            entity_col=tuner_col,
+            entity_col="plotting_identifier",
             col_measure=bench_col,
             row_measure=None,
             cache_path=cache_path,
@@ -468,19 +522,25 @@ def analyze_main_benchmark(
             y_cols_lower=["rank_lower"],
             y_cols_upper=["rank_upper"],
             share_y_axis=False,
+            x_label="% Budget Used",
         )
 
         # Plot global figures across benchmarks:
+        global_bench_relative_iterative_results["plotting_identifier"] = (
+            global_bench_relative_iterative_results[estimator_architecture_col]
+            + "-"
+            + global_bench_relative_iterative_results[sampler_col]
+        )
         plot_and_save(
             data=global_bench_relative_iterative_results,
             x_col=norm_iter_unit,
             y_cols=["rank"],
-            entity_col=tuner_col,
+            entity_col="plotting_identifier",
             col_measure=bench_col,
             row_measure=None,
             cache_path=cache_path,
             run_start_str=run_start_str,
-            filename_prefix="global_rank_vs_iteration",
+            filename_prefix="global_rank_vs_norm_iteration",
             analysis_type=analysis_type,
             subfolder="rank_analysis",
             y_cols_lower=["rank_lower"],
@@ -497,11 +557,18 @@ def analyze_main_benchmark(
                 # use confidence_col, estimator_architecture_col or other identifiers
                 # as in process.py):
                 # TODO: Fix this and align with process.py
+                bench_relative_runtime_results_filled_bounds["plotting_identifier"] = (
+                    bench_relative_runtime_results_filled_bounds[
+                        estimator_architecture_col
+                    ]
+                    + "-"
+                    + bench_relative_runtime_results_filled_bounds[sampler_col]
+                )
                 plot_paired_rank_and_cd(
                     data=bench_relative_runtime_results,
                     significance_data=significance_results_for_cd[cd_budget],
                     x_col=norm_runtime_unit,
-                    entity_col=tuner_col,
+                    entity_col="plotting_identifier",
                     cache_path=cache_path,
                     run_start_str=run_start_str,
                     filename_prefix=f"rank_vs_norm_runtime_with_cd_{cd_significance_method}",
@@ -510,8 +577,7 @@ def analyze_main_benchmark(
                     row_measure=bench_col,
                     cd_budget=cd_budget,
                     alpha=alpha,
-                    x_label="Normalized Runtime",
-                    row_measure_label="Benchmark",
+                    x_label="% Budget Used",
                 )
             else:
                 logger.info(
@@ -519,11 +585,16 @@ def analyze_main_benchmark(
                 )
 
         if cd_budget in global_significance_results_for_cd:
+            global_bench_relative_runtime_results["plotting_identifier"] = (
+                global_bench_relative_runtime_results[estimator_architecture_col]
+                + "-"
+                + global_bench_relative_runtime_results[sampler_col]
+            )
             plot_paired_rank_and_cd(
                 data=global_bench_relative_runtime_results,
                 significance_data=global_significance_results_for_cd[cd_budget],
                 x_col=norm_runtime_unit,
-                entity_col=tuner_col,
+                entity_col="plotting_identifier",
                 cache_path=cache_path,
                 run_start_str=run_start_str,
                 filename_prefix=f"rank_vs_norm_runtime_with_global_cd_{cd_significance_method}",
@@ -532,8 +603,7 @@ def analyze_main_benchmark(
                 row_measure=bench_col,
                 cd_budget=cd_budget,
                 alpha=alpha,
-                x_label="Normalized Runtime",
-                row_measure_label="Benchmark",
+                x_label="% Budget Used",
             )
 
     # NOTE: For next two breakout plots, values are first ranked by benchmark
@@ -546,11 +616,14 @@ def analyze_main_benchmark(
             (bench_relative_runtime_results, norm_runtime_unit),
             (bench_relative_iterative_results, norm_iter_unit),
         ]:
+            dataset["plotting_identifier"] = (
+                dataset[estimator_architecture_col] + "-" + dataset[sampler_col]
+            )
             plot_and_save(
                 data=dataset,
                 x_col=x_col,
                 y_cols=["rank"],
-                entity_col=tuner_col,
+                entity_col="plotting_identifier",
                 col_measure=sampler_col,
                 row_measure=bench_col,
                 cache_path=cache_path,
@@ -561,6 +634,7 @@ def analyze_main_benchmark(
                 y_cols_lower=["rank_lower"],
                 y_cols_upper=["rank_upper"],
                 share_y_axis=True,
+                x_label="% Budget Used",
             )
 
     # Architecture comparison plots:
@@ -569,11 +643,14 @@ def analyze_main_benchmark(
             (bench_relative_runtime_results, norm_runtime_unit),
             (bench_relative_iterative_results, norm_iter_unit),
         ]:
+            dataset["plotting_identifier"] = (
+                dataset[estimator_architecture_col] + "-" + dataset[sampler_col]
+            )
             plot_and_save(
                 data=dataset,
                 x_col=x_col,
                 y_cols=["rank"],
-                entity_col=tuner_col,
+                entity_col="plotting_identifier",
                 col_measure=estimator_architecture_col,
                 row_measure=bench_col,
                 cache_path=cache_path,
@@ -584,6 +661,7 @@ def analyze_main_benchmark(
                 y_cols_lower=["rank_lower"],
                 y_cols_upper=["rank_upper"],
                 share_y_axis=True,
+                x_label="% Budget Used",
             )
 
     # Conformalization effect analysis:
@@ -608,11 +686,20 @@ def analyze_main_benchmark(
                         n_bootstraps=n_bootstraps,
                     )
                 )
+                conformalized_vs_nonconformalized_results[
+                    "plotting_identifier"
+                ] = conformalized_vs_nonconformalized_results[
+                    n_pre_conformal_trials_col
+                ].apply(
+                    lambda x: "Unconformalized"
+                    if x > 32
+                    else "Split Conformalized + DtACI"
+                )
                 plot_and_save(
                     data=conformalized_vs_nonconformalized_results,
                     x_col=f"normalized_{budget_unit}",
                     y_cols=["rank"],
-                    entity_col=tuner_col,
+                    entity_col="plotting_identifier",
                     col_measure=sampler_col,
                     row_measure=estimator_architecture_col,
                     cache_path=cache_path,
@@ -623,6 +710,7 @@ def analyze_main_benchmark(
                     y_cols_lower=["rank_lower"],
                     y_cols_upper=["rank_upper"],
                     share_y_axis=False,
+                    x_label="% Budget Used",
                 )
 
     # Quantile count comparison analysis:
@@ -651,11 +739,16 @@ def analyze_main_benchmark(
                         n_bootstraps=n_bootstraps,
                     )
                 )
+                quantile_count_comparison_results[
+                    "plotting_identifier"
+                ] = quantile_count_comparison_results[n_quantiles_col].apply(
+                    lambda x: f"{x} Quantiles"
+                )
                 plot_and_save(
                     data=quantile_count_comparison_results,
                     x_col=f"normalized_{budget_unit}",
                     y_cols=["rank"],
-                    entity_col=tuner_col,
+                    entity_col="plotting_identifier",
                     col_measure=sampler_col,
                     row_measure=bench_col,
                     cache_path=cache_path,
@@ -666,6 +759,7 @@ def analyze_main_benchmark(
                     y_cols_lower=["rank_lower"],
                     y_cols_upper=["rank_upper"],
                     share_y_axis=False,
+                    x_label="% Budget Used",
                 )
 
     if "search_tuning_effect_comparison" in analysis_components:
@@ -696,7 +790,7 @@ def analyze_main_benchmark(
                     data=search_tuning_effect_comparison_results,
                     x_col=f"normalized_{budget_unit}",
                     y_cols=["rank"],
-                    entity_col=tuner_col,
+                    entity_col=searcher_tuning_framework_col,
                     col_measure=estimator_architecture_col,
                     row_measure=bench_col,
                     cache_path=cache_path,
@@ -707,6 +801,7 @@ def analyze_main_benchmark(
                     y_cols_lower=["rank_lower"],
                     y_cols_upper=["rank_upper"],
                     share_y_axis=False,
+                    x_label="% Budget Used",
                 )
 
 
@@ -785,7 +880,6 @@ def analyze_searcher_tuning_effect(
         filename="tuning_effect_aggregated_results.csv",
         analysis_type=analysis_type,
     )
-
     plot_and_save(
         data=aggregated_df,
         x_col=tuning_iterations_column,
@@ -798,9 +892,11 @@ def analyze_searcher_tuning_effect(
         subfolder="tuning_effect",
         col_measure=data_size_col,
         row_measure=bench_col,
-        y_cols_lower=["rank_lower"],
-        y_cols_upper=["rank_upper"],
+        y_cols_lower=None,
+        y_cols_upper=None,
         share_y_axis=False,
+        add_markers=True,
+        hide_col_and_row_labels=False,
     )
 
     logger.info(f"Tuning rank comparison plots saved in {tuning_plots_path}")
@@ -906,7 +1002,11 @@ def analyze_searcher_estimator_comparison(
         subfolder="estimator_comparison",
         col_measure=bench_col,
         row_measure=None,
-        y_cols_lower=["rank_lower"],
-        y_cols_upper=["rank_upper"],
+        y_cols_lower=None,
+        y_cols_upper=None,
         share_y_axis=False,
+        add_markers=True,
+        col_measure_label="Benchmark",
+        row_measure_label="Surrogate Architecture",
+        hide_col_and_row_labels=False,
     )

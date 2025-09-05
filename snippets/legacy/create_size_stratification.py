@@ -163,7 +163,7 @@ def main():
     # Configuration - define parameters directly
     top_count = 5
     top_percent = None
-    benchmarks = ["lcbench", "rbv2_xgboost"]
+    benchmarks = ["lcbench", "rbv2_aknn"]
 
     for benchmark in benchmarks:
         print(f"\nCreating {benchmark} size stratification...")

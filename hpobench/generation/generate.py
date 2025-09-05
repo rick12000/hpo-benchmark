@@ -52,6 +52,17 @@ class ObjectiveMetricGenerator(ABC):
         """
 
     @abstractmethod
+    def predict_batch(self, configurations: list[dict]) -> list[float]:
+        """Return objective values for multiple configurations in batch.
+
+        Args:
+            configurations: List of configuration dictionaries to evaluate.
+
+        Returns:
+            List of objective values for the given configurations.
+        """
+
+    @abstractmethod
     def predict_runtime(
         self, configuration: dict[str, Union[str, int, float, bool]]
     ) -> float:
@@ -62,6 +73,17 @@ class ObjectiveMetricGenerator(ABC):
 
         Returns:
             The runtime for the given configuration.
+        """
+
+    @abstractmethod
+    def predict_runtime_batch(self, configurations: list[dict]) -> list[float]:
+        """Return runtime values for multiple configurations in batch.
+
+        Args:
+            configurations: List of configuration dictionaries to evaluate.
+
+        Returns:
+            List of runtime values for the given configurations.
         """
 
     def initialize(self) -> None:
@@ -82,6 +104,30 @@ class BlackBoxGenerator(ObjectiveMetricGenerator):
     def __init__(self, generator: str):
         self.generator = generator
 
+    def _evaluate_function(self, x: np.ndarray) -> float:
+        """Evaluate the black-box function for the given parameter vector.
+
+        Args:
+            x: Parameter vector as numpy array.
+
+        Returns:
+            Function value.
+        """
+        if self.generator == "rastrigin":
+            return rastrigin(x=x)
+        elif self.generator == "ackley":
+            return ackley(x=x)
+        elif self.generator == "griewank":
+            return griewank(x=x)
+        elif self.generator == "weierstrass":
+            return weierstrass(x=x)
+        elif self.generator == "shekel":
+            return shekel(x=x)
+        elif self.generator == "hartmann6":
+            return hartmann6(x=x)
+        else:
+            raise ValueError(f"Unknown generator: {self.generator}")
+
     def predict(self, configuration: dict[str, Union[str, int, float, bool]]) -> float:
         """Evaluate the black-box function for the given configuration.
 
@@ -92,22 +138,18 @@ class BlackBoxGenerator(ObjectiveMetricGenerator):
             The function value for the given configuration.
         """
         x = np.array(list(configuration.values()), dtype=float)
+        return self._evaluate_function(x)
 
-        if self.generator == "rastrigin":
-            y = rastrigin(x=x)
-        elif self.generator == "ackley":
-            y = ackley(x=x)
-        elif self.generator == "griewank":
-            y = griewank(x=x)
-        elif self.generator == "weierstrass":
-            y = weierstrass(x=x)
-        elif self.generator == "shekel":
-            y = shekel(x=x)
-        elif self.generator == "hartmann6":
-            y = hartmann6(x=x)
-        else:
-            raise ValueError(f"Unknown generator: {self.generator}")
-        return y
+    def predict_batch(self, configurations: list[dict]) -> list[float]:
+        """Evaluate multiple configurations in batch.
+
+        Args:
+            configurations: List of configuration dictionaries to evaluate.
+
+        Returns:
+            List of function values.
+        """
+        return [self.predict(config) for config in configurations]
 
     def predict_runtime(
         self, configuration: dict[str, Union[str, int, float, bool]]
@@ -121,6 +163,17 @@ class BlackBoxGenerator(ObjectiveMetricGenerator):
             Always returns 0.
         """
         return 0
+
+    def predict_runtime_batch(self, configurations: list[dict]) -> list[float]:
+        """Return runtime for multiple configurations (always 0 for black-box functions).
+
+        Args:
+            configurations: List of configuration dictionaries.
+
+        Returns:
+            List of runtime values (all 0 for black-box functions).
+        """
+        return [0.0] * len(configurations)
 
 
 class Jahs201Generator(ObjectiveMetricGenerator):
@@ -156,6 +209,7 @@ class Jahs201Generator(ObjectiveMetricGenerator):
             self.generator = None
 
     def _initialize_generator(self) -> None:
+        """Initialize the JAHS-201 generator if not already initialized."""
         if not self._initialized:
             self.generator = Benchmark(
                 task=self._dataset, lazy=False, metrics=self._metrics
@@ -163,30 +217,44 @@ class Jahs201Generator(ObjectiveMetricGenerator):
             self._initialized = True
 
     def initialize(self) -> None:
+        """Initialize the generator if needed."""
         self._initialize_generator()
 
     def _merge_with_fidelities(
         self, configuration: dict[str, Union[str, int, float, bool]]
     ) -> dict[str, Union[str, int, float, bool]]:
+        """Merge configuration with default maximum fidelities."""
         merged = configuration.copy()
         merged.update(self.default_fidelities)
         return merged
 
-    def predict(self, configuration: dict[str, Union[str, int, float, bool]]) -> float:
+    def _evaluate_jahs(
+        self, configuration: dict[str, Union[str, int, float, bool]]
+    ) -> dict:
+        """Helper method to evaluate configuration with JAHS-201 benchmark."""
         self._initialize_generator()
         merged_config = self._merge_with_fidelities(configuration)
-        return -self.generator(merged_config)[self.default_fidelities["epoch"]][
-            "valid-acc"
-        ]
+        return self.generator(merged_config)[self.default_fidelities["epoch"]]
+
+    def predict(self, configuration: dict[str, Union[str, int, float, bool]]) -> float:
+        """Return negative validation accuracy for the given configuration."""
+        result = self._evaluate_jahs(configuration)
+        return -result["valid-acc"]
+
+    def predict_batch(self, configurations: list[dict]) -> list[float]:
+        """Evaluate multiple configurations in batch."""
+        return [self.predict(config) for config in configurations]
 
     def predict_runtime(
         self, configuration: dict[str, Union[str, int, float, bool]]
     ) -> float:
-        self._initialize_generator()
-        merged_config = self._merge_with_fidelities(configuration)
-        return self.generator(merged_config)[self.default_fidelities["epoch"]][
-            "runtime"
-        ]
+        """Return runtime for the given configuration."""
+        result = self._evaluate_jahs(configuration)
+        return result["runtime"]
+
+    def predict_runtime_batch(self, configurations: list[dict]) -> list[float]:
+        """Evaluate runtime for multiple configurations in batch."""
+        return [self.predict_runtime(config) for config in configurations]
 
 
 class YahpoGenerator(ObjectiveMetricGenerator):
@@ -277,22 +345,72 @@ class YahpoGenerator(ObjectiveMetricGenerator):
         Returns:
             Negative primary metric.
         """
-        filtered_configuration = self._get_filtered_configuration(configuration)
+        batch_results = self._batch_evaluate_configurations([configuration])
+        return self._extract_performance_metric(batch_results[0])
 
-        # Call the objective function
-        results = self.generator.objective_function(filtered_configuration, seed=1234)[
-            0
-        ]
-        if "val_accuracy" in results:
-            return -results["val_accuracy"]
-        elif "acc" in results:
-            return -results["acc"]
-        elif "auc" in results:
-            return -results["auc"]
+    def _batch_evaluate_configurations(self, configurations: list[dict]) -> list[dict]:
+        """Helper method to filter and evaluate multiple configurations in batch.
+
+        Args:
+            configurations: List of configuration dictionaries to evaluate.
+
+        Returns:
+            List of batch evaluation results.
+        """
+        filtered_configs = []
+        for config in configurations:
+            filtered_config = self._get_filtered_configuration(config)
+            filtered_configs.append(filtered_config)
+
+        return self.generator.objective_function(filtered_configs, seed=1234)
+
+    def _extract_performance_metric(self, result: dict) -> float:
+        """Extract performance metric from evaluation result.
+
+        Args:
+            result: Single evaluation result dictionary.
+
+        Returns:
+            Performance value (negated for minimization).
+        """
+        if "val_accuracy" in result:
+            return -result["val_accuracy"]
+        elif "acc" in result:
+            return -result["acc"]
+        elif "auc" in result:
+            return -result["auc"]
         else:
             raise ValueError(
-                f"No suitable metric found in results: {list(results.keys())}"
+                f"No suitable metric found in results: {list(result.keys())}"
             )
+
+    def _extract_runtime_metric(self, result: dict) -> float:
+        """Extract runtime metric from evaluation result.
+
+        Args:
+            result: Single evaluation result dictionary.
+
+        Returns:
+            Runtime value.
+        """
+        if "time" in result:
+            return result["time"]
+        elif "runtime" in result:
+            return result["runtime"]
+        else:
+            return result["timetrain"] + result["timepredict"]
+
+    def predict_batch(self, configurations: list[dict]) -> list[float]:
+        """Evaluate multiple configurations in batch for improved performance.
+
+        Args:
+            configurations: List of configuration dictionaries to evaluate.
+
+        Returns:
+            List of performance values (negated for minimization).
+        """
+        batch_results = self._batch_evaluate_configurations(configurations)
+        return [self._extract_performance_metric(result) for result in batch_results]
 
     def predict_runtime(
         self, configuration: dict[str, Union[str, int, float, bool]]
@@ -305,17 +423,20 @@ class YahpoGenerator(ObjectiveMetricGenerator):
         Returns:
             Runtime.
         """
-        filtered_configuration = self._get_filtered_configuration(configuration)
+        batch_results = self._batch_evaluate_configurations([configuration])
+        return self._extract_runtime_metric(batch_results[0])
 
-        results = self.generator.objective_function(filtered_configuration, seed=1234)[
-            0
-        ]
-        if "time" in results:
-            return results["time"]
-        elif "runtime" in results:
-            return results["runtime"]
-        else:
-            return results["timetrain"] + results["timepredict"]
+    def predict_runtime_batch(self, configurations: list[dict]) -> list[float]:
+        """Evaluate runtime for multiple configurations in batch.
+
+        Args:
+            configurations: List of configuration dictionaries to evaluate.
+
+        Returns:
+            List of runtime values.
+        """
+        batch_results = self._batch_evaluate_configurations(configurations)
+        return [self._extract_runtime_metric(result) for result in batch_results]
 
 
 class NAS301Generator(YahpoGenerator):

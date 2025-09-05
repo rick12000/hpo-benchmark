@@ -191,14 +191,14 @@ def dummy_processing_raw_data():
         ],
         "benchmark_identifier": ["lcbench"] * 38 + ["nahs201"] * 16,
         "dataset": [3945] * 19 + [7593] * 19 + ["cifar10"] * 8 + ["imagenet"] * 8,
-        "tuner": ["QGBM tuner 1"] * 10
-        + ["QGBM tuner 2"] * 9
-        + ["QGBM tuner 1"] * 10
-        + ["QGBM tuner 2"] * 9
-        + ["QGBM tuner 1"] * 4
-        + ["QGBM tuner 2"] * 4
-        + ["QGBM tuner 1"] * 4
-        + ["QGBM tuner 2"] * 4,
+        "tuner": ["tuner 1"] * 10
+        + ["tuner 2"] * 9
+        + ["tuner 1"] * 10
+        + ["tuner 2"] * 9
+        + ["tuner 1"] * 4
+        + ["tuner 2"] * 4
+        + ["tuner 1"] * 4
+        + ["tuner 2"] * 4,
         "repetition": [1] * 6
         + [2] * 4
         + [1] * 5
@@ -217,7 +217,14 @@ def dummy_processing_raw_data():
         + [2] * 2,
         "sampler": ["TS"] * 54,
         "confidence_level": [0.2] * 54,  # Empty strings for non-confopt tuners
-        "estimator_architecture": ["QGBM"] * 54,
+        "estimator_architecture": ["QGBM"] * 10
+        + ["QRF"] * 9
+        + ["QGBM"] * 10
+        + ["QRF"] * 9
+        + ["QGBM"] * 4
+        + ["QRF"] * 4
+        + ["QGBM"] * 4
+        + ["QRF"] * 4,
         # Added columns to match run_main_benchmark output format
         "searcher_tuning_framework": [""] * 54,
         "n_pre_conformal_trials": [32] * 54,

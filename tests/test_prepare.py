@@ -4,7 +4,7 @@ from hpobench.prepare import (
     setup_blackbox_configs,
     setup_nas301_configs,
 )
-from hpobench.config.types import (
+from hpobench.config.config_types import (
     ExperimentConfig,
 )
 from hpobench.config.benchmark_data import (
@@ -108,7 +108,7 @@ def test_yahpo_instance_configs_use_maximum_fidelity():
     """Test that YAHPO instance configs use maximum fidelity values."""
     test_cases = [
         ("lcbench", {"epoch": 50}),
-        ("rbv2_xgboost", {"repl": 10, "trainsize": 1.0}),
+        ("rbv2_aknn", {"repl": 10, "trainsize": 1.0}),
     ]
 
     for benchmark, expected_max_fidelity in test_cases:

@@ -78,9 +78,11 @@ def generate_configs_per_repetition(
             n_combinations=n_configs,
             random_state=base_seed + seed_offset + repetition,
         )
-        for combination in consistent_configs:
-            performance = objective_function.predict(combination)
+
+        performances = objective_function.predict_batch(consistent_configs)
+        for combination, performance in zip(consistent_configs, performances):
             configs.append((combination, performance))
+
         configs_per_repetition.append(configs)
     return configs_per_repetition
 

@@ -702,6 +702,7 @@ def smac_objective_function(
     config: Configuration,
     performance_generator: ObjectiveMetricGenerator,
     runtimes: list[datetime],
+    seed: int = 0,
 ) -> float:
     """Objective function for SMAC using a synthetic performance generator.
 

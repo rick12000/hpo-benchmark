@@ -67,7 +67,7 @@ def test_friedman_test_runner_identical_ranks(identical_ranks_data):
     )
 
     assert len(result) == 1
-    assert result["significant"].iloc[0]
+    assert not result["significant"].iloc[0]
 
     # Mathematical prediction: When all entities have identical ranks,
     # the sum of ranks for each entity is identical, so Σ(Ri²) is minimized
@@ -109,7 +109,7 @@ def test_friedman_test_runner_realistic_insignificant(realistic_insignificant_da
     )
 
     assert len(result) == 1
-    assert result["significant"].iloc[0]
+    assert not result["significant"].iloc[0]
     assert result["p_value"].iloc[0] > 0.05
 
 
@@ -136,15 +136,14 @@ def test_friedman_test_runner_with_breakout_groups(grouped_test_data):
 
 def test_friedman_test_runner_insufficient_data(insufficient_data):
     """Test Friedman test with insufficient data."""
-    result = friedman_test_runner(
-        data=insufficient_data,
-        across_col="dataset",
-        entity_col="entity",
-        rank_col="rank",
-        alpha=0.05,
-    )
-
-    assert len(result) == 0  # Should skip due to insufficient data
+    with pytest.raises(ValueError):
+        friedman_test_runner(
+            data=insufficient_data,
+            across_col="dataset",
+            entity_col="entity",
+            rank_col="rank",
+            alpha=0.05,
+        )
 
 
 def test_nemenyi_pairwise_test_extreme_significant(extreme_significant_data):
@@ -208,15 +207,14 @@ def test_nemenyi_pairwise_test_identical_ranks(identical_ranks_data):
 
 def test_nemenyi_pairwise_test_insufficient_data(insufficient_data):
     """Test Nemenyi test with insufficient data."""
-    result = nemenyi_pairwise_test(
-        data=insufficient_data,
-        across_col="dataset",
-        entity_col="entity",
-        rank_col="rank",
-        alpha=0.05,
-    )
-
-    assert len(result) == 0  # Should skip due to insufficient data
+    with pytest.raises(ValueError):
+        nemenyi_pairwise_test(
+            data=insufficient_data,
+            across_col="dataset",
+            entity_col="entity",
+            rank_col="rank",
+            alpha=0.05,
+        )
 
 
 def test_wilcoxon_pairwise_test_extreme_significant(extreme_significant_data):
@@ -639,7 +637,7 @@ def test_statistical_tests_edge_cases():
 
     # Test with empty DataFrame
     empty_data = pd.DataFrame(columns=["dataset", "entity", "rank"])
-    empty_result = friedman_test_runner(
-        data=empty_data, across_col="dataset", entity_col="entity", rank_col="rank"
-    )
-    assert len(empty_result) == 0
+    with pytest.raises(ValueError):
+        friedman_test_runner(
+            data=empty_data, across_col="dataset", entity_col="entity", rank_col="rank"
+        )

@@ -1,6 +1,6 @@
 import pytest
 from hpobench.utils import generate_hyperparameter_combinations
-from hpobench.config.types import IntRange, FloatRange, CategoricalRange
+from hpobench.config.config_types import IntRange, FloatRange, CategoricalRange
 
 
 @pytest.mark.parametrize("n_combinations", [1, 2, 3, 4, 5])

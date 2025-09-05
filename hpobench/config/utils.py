@@ -6,7 +6,6 @@ from copy import deepcopy
 from confopt.selection.sampling.bound_samplers import (
     LowerBoundSampler,
 )
-from confopt.selection.sampling.entropy_samplers import MaxValueEntropySearchSampler
 from confopt.selection.sampling.expected_improvement_samplers import (
     ExpectedImprovementSampler,
 )
@@ -167,7 +166,6 @@ def build_sampler_variation_configurations(
             ThompsonSampler,
             LowerBoundSampler,
             ExpectedImprovementSampler,
-            MaxValueEntropySearchSampler,
         ]
     ],
     quantile_arch: QuantileEstimatorArchitecture,
@@ -195,7 +193,6 @@ def build_sampler_variation_configurations(
             n_pre_conformal_trials=n_pre_conformal_trials,
             n_calibration_folds=5,
             calibration_split_strategy=calibration_split_strategy,
-            symmetric_adjustment=True,
         )
         config_id = create_sampler_config_id(searcher) + (
             f" stf={searcher_tuning_framework}" if searcher_tuning_framework else ""
@@ -218,7 +215,6 @@ def build_architecture_variation_configurations(
             ThompsonSampler,
             LowerBoundSampler,
             ExpectedImprovementSampler,
-            MaxValueEntropySearchSampler,
         ]
     ],
     n_pre_conformal_trials: int = 20,
@@ -247,7 +243,6 @@ def build_architecture_variation_configurations(
                 n_pre_conformal_trials=n_pre_conformal_trials,
                 n_calibration_folds=5,
                 calibration_split_strategy=calibration_split_strategy,
-                symmetric_adjustment=True,
             )
             config_id = create_sampler_config_id(searcher) + (
                 f" stf={searcher_tuning_framework}" if searcher_tuning_framework else ""
@@ -291,11 +286,11 @@ def get_external_tuning_configurations() -> List[TunerConfig]:
         #     searcher="cqr_thompson",
         #     config_identifier="CQR-THOMPSON",
         # ),
-        TunerConfig(
-            tuner="optuna",
-            searcher="random",
-            config_identifier="RS",
-        ),
+        # TunerConfig(
+        #     tuner="optuna",
+        #     searcher="random",
+        #     config_identifier="RS",
+        # ),
         # TunerConfig(
         #     tuner="smac",
         #     searcher="smac_rf_ei",

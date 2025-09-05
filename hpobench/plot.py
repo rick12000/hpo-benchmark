@@ -18,25 +18,38 @@ matplotlib.rcParams["font.family"] = "STIXGeneral"
 PLOT_DPI = 500
 PLOT_FORMATS = ["eps", "png"]
 DEFAULT_COLOR_PALETTE = [
-    "tab:orange",
-    "tab:grey",
-    "tab:red",
-    "tab:blue",
-    "tab:pink",
-    "tab:brown",
-    "tab:purple",
-    "tab:green",
-    "tab:cyan",
-    "tab:olive",
-    "yellow",
-    "magenta",
-    "black",
-    "teal",
-    "gold",
-    "deepskyblue",
-    "crimson",
-    "lime",
-    "darkorchid",
+    "#266489",
+    "#68B9C0",
+    "#90D585",
+    "#F3C151",
+    "#F37F64",
+    "#424856",
+    "#8F97A4",
+    "#DAC096",
+    "#76846E",
+    "#DABFAF",
+    "#A65B69",
+    "#97A69D",
+    "#E69F00",
+    "#56B4E9",
+    "#009E73",
+    "#F0E442",
+    "#0072B2",
+    "#D55E00",
+    "#CC79A7",
+    "#000000",
+    "#E74C3C",
+    "#3498DB",
+    "#2ECC71",
+    "#F39C12",
+    "#9B59B6",
+    "#1ABC9C",
+    "#E67E22",
+    "#34495E",
+    "#16A085",
+    "#27AE60",
+    "#2980B9",
+    "#8E44AD",
 ]
 
 
@@ -86,9 +99,18 @@ def _plot_tuner(
     y_col_lower,
     y_col_upper,
     legend_label,
+    marker="o",
+    add_markers=True,
 ):
+    marker_style = marker if add_markers else "None"
     ax.plot(
-        tuner_data[x_col], tuner_data[y_col], label=legend_label, alpha=0.8, color=color
+        tuner_data[x_col],
+        tuner_data[y_col],
+        label=legend_label,
+        alpha=0.8,
+        color=color,
+        marker=marker_style,
+        markersize=4,
     )
     if add_ci and y_col_lower and y_col_upper:
         ax.fill_between(
@@ -117,6 +139,8 @@ def plot_benchmark_data(
     row_measure_label: Optional[str] = None,
     share_y_axis: bool = False,
     entity_legend_mapping: Optional[dict] = None,
+    add_markers: bool = False,
+    hide_col_and_row_labels: bool = True,
 ) -> None:
     """
     Plots benchmark data in a grid of subplots, with rows and columns determined by specified measures.
@@ -136,6 +160,8 @@ def plot_benchmark_data(
         y_label: Custom label for the y-axis.
         col_measure_label: Custom label for the column measure (subplot title).
         row_measure_label: Custom label for the row measure (subplot title).
+        add_markers: Whether to add circular markers to the plotted lines.
+        hide_col_and_row_labels: Whether to hide the column and row measure labels, using only the axis labels.
 
     Raises:
         ValueError: If there are duplicate X-axis values for the same combination of row_measure, col_measure, and tuner.
@@ -224,6 +250,8 @@ def plot_benchmark_data(
                     y_col_lower=y_col_lower,
                     y_col_upper=y_col_upper,
                     legend_label=legend_label,
+                    marker="o",
+                    add_markers=add_markers,
                 )
 
             if share_y_axis:
@@ -234,29 +262,43 @@ def plot_benchmark_data(
                 buffer = 0.05 * y_range if y_range > 0 else 0.05
                 ax.set_ylim((y_min - buffer, y_max + buffer))
 
-            # Add titles and labels
-            if row_measure is not None and j == 0:
-                y_label_to_use = (
-                    y_label if y_label is not None else _get_label(None, y_col)
-                )
-                if single_row:
-                    row_title = f"{y_label_to_use}"
-                else:
-                    row_title = (
-                        f"{formatted_row_measure}: {row_value} \n\n{y_label_to_use}"
-                    )
-                ax.set_ylabel(
-                    row_title,
-                    fontsize=13,
-                )
+            # Add titles and labels following scientific multi-panel conventions
+            x_label_to_use = x_label if x_label is not None else _get_label(None, x_col)
+            y_label_to_use = y_label if y_label is not None else _get_label(None, y_col)
+            # Fallback to column name if no label is available
+            if y_label_to_use is None and y_col is not None:
+                y_label_to_use = y_col.replace("_", " ").title()
+
+            # Chart titles: top row only (i == 0)
             if col_measure is not None and i == 0:
                 if single_col:
-                    col_title = f"{formatted_col_measure}"
+                    col_title = ""
                 else:
-                    col_title = f"{formatted_col_measure}: {col_value}"
-                ax.set_title(col_title, fontsize=13)
-            x_label_to_use = x_label if x_label is not None else _get_label(None, x_col)
-            ax.set_xlabel(x_label_to_use, fontsize=13)
+                    if hide_col_and_row_labels:
+                        # Use only the column value, no measure label
+                        col_title = f"{col_value}"
+                    else:
+                        col_title = f"{formatted_col_measure}: {col_value}"
+                ax.set_title(col_title, fontsize=13, fontweight="bold")
+
+            # Y labels: left column only (j == 0)
+            if y_label_to_use is not None and j == 0:
+                if row_measure is not None:
+                    if single_row:
+                        row_title = f"{y_label_to_use}"
+                    else:
+                        if hide_col_and_row_labels:
+                            # Use only the y-axis label, no row measure information
+                            row_title = f"{row_value} \n\n{y_label_to_use}"
+                        else:
+                            row_title = f"{formatted_row_measure}: {row_value} \n\n{y_label_to_use}"
+                else:
+                    row_title = f"{y_label_to_use}"
+                ax.set_ylabel(row_title, fontsize=13, labelpad=10)
+
+            # X labels: bottom row only (i == len(row_values) - 1)
+            if i == len(row_values) - 1:
+                ax.set_xlabel(x_label_to_use, fontsize=13)
             ax.grid(True, which="both", linestyle="--", linewidth=0.5, alpha=0.7)
             # Thicker axis lines for academic style
             ax.spines["top"].set_linewidth(1.2)
@@ -283,7 +325,7 @@ def plot_benchmark_data(
     )
     # Tight layout for academic papers with extra bottom space for legend
     fig.subplots_adjust(
-        wspace=0.15, hspace=0.18, bottom=0.20, top=0.93, left=0.09, right=0.98
+        wspace=0.15, hspace=0.22, bottom=0.20, top=0.93, left=0.09, right=0.98
     )
 
     # Save the plot
@@ -319,6 +361,8 @@ def plot_and_save(
     row_measure_label: Optional[str] = None,
     share_y_axis: bool = False,
     entity_legend_mapping: Optional[dict] = None,
+    add_markers: bool = False,
+    hide_col_and_row_labels: bool = True,
 ):
     """Generates and saves plots for specified y-columns, saving to the correct path."""
 
@@ -363,6 +407,8 @@ def plot_and_save(
                 row_measure_label=row_measure_label,
                 share_y_axis=share_y_axis,
                 entity_legend_mapping=entity_legend_mapping,
+                add_markers=add_markers,
+                hide_col_and_row_labels=hide_col_and_row_labels,
             )
             time.sleep(1)
         except Exception as e:
@@ -376,6 +422,7 @@ def plot_critical_difference_diagram(
     significance_results: pd.DataFrame,
     alpha: float = 0.05,
     title: Optional[str] = None,
+    title_fontweight: str = "normal",
 ) -> None:
     """Plot a critical difference diagram using scikit-posthocs."""
     try:
@@ -414,8 +461,11 @@ def plot_critical_difference_diagram(
     # Apply formatting to remove circles, colors, and vertical grid lines
     _apply_cd_formatting(ax)
 
+    # Set aspect ratio to be rectangular like other plots
+    ax.set_aspect("auto")
+
     if title:
-        ax.set_title(title, fontsize=13)
+        ax.set_title(title, fontsize=13, fontweight=title_fontweight, pad=20)
 
 
 def _apply_cd_formatting(ax):
@@ -563,10 +613,12 @@ def plot_paired_rank_and_cd(
 
         # Format left plot consistent with plot_benchmark_data
         ax_rank.set_xlabel(_get_label(x_label, x_col), fontsize=13)
-        ax_rank.set_ylabel("Mean Rank (lower is better)", fontsize=13)
+        ax_rank.set_ylabel("Rank", fontsize=13, labelpad=10)
         ax_rank.set_title(
-            f"{_get_label(row_measure_label, row_measure)}: {row_value}\nRank Evolution",
+            f"{row_value}\nRank Evolution",
             fontsize=13,
+            fontweight="bold",
+            pad=20,
         )
         ax_rank.grid(True, which="both", linestyle="--", linewidth=0.5, alpha=0.7)
 
@@ -597,7 +649,8 @@ def plot_paired_rank_and_cd(
                 mean_ranks=mean_ranks,
                 significance_results=row_sig_data,
                 alpha=alpha,
-                title=f"{_get_label(row_measure_label, row_measure)}: {row_value}\nCritical Difference (Budget={cd_budget})",
+                title=f"{row_value}\nCritical Difference @{cd_budget}%",
+                title_fontweight="bold",
             )
         else:
             # Determine the reason for missing CD diagram
@@ -618,8 +671,10 @@ def plot_paired_rank_and_cd(
                 fontsize=10,
             )
             ax_cd.set_title(
-                f"{_get_label(row_measure_label, row_measure)}: {row_value}\nCritical Difference (Budget={cd_budget})",
+                f"Critical Difference @{cd_budget}%",
                 fontsize=13,
+                fontweight="bold",
+                pad=20,
             )
 
         # Clean up CD axis appearance to match overall style
@@ -642,9 +697,10 @@ def plot_paired_rank_and_cd(
             frameon=False,
         )
 
-    # Tight layout for academic papers with extra bottom space for legend (match plot_benchmark_data)
+    # Tight layout for academic papers with extra bottom space for legend
+    # Adjust top spacing to ensure titles are properly aligned
     fig.subplots_adjust(
-        wspace=0.15, hspace=0.18, bottom=0.20, top=0.93, left=0.09, right=0.98
+        wspace=0.15, hspace=0.22, bottom=0.20, top=0.90, left=0.09, right=0.98
     )
 
     # Save the plot using same format handling

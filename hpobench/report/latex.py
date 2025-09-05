@@ -37,8 +37,11 @@ def _parse_and_group_entities(df_block: pd.DataFrame) -> dict:
         if "unconformalized" in tuner_name.lower():
             method = "Unconformalized"
             adapter = "default"
-        elif "conformalized" in tuner_name.lower():
-            method = "Conformalized"
+        elif (
+            "split conformalized" in tuner_name.lower()
+            or "split_conformalized" in tuner_name.lower()
+        ):
+            method = "Split Conformalized"
             if "aci" in tuner_name.lower():
                 if "dtaci" in tuner_name.lower():
                     adapter = "DtACI"
@@ -47,10 +50,10 @@ def _parse_and_group_entities(df_block: pd.DataFrame) -> dict:
             else:
                 adapter = "default"
         elif (
-            "cross_validated" in tuner_name.lower()
-            or "cross validated" in tuner_name.lower()
+            "cross_conformalized" in tuner_name.lower()
+            or "cross conformalized" in tuner_name.lower()
         ):
-            method = "Cross Validated"
+            method = "Cross Conformalized"
             if "aci" in tuner_name.lower():
                 if "dtaci" in tuner_name.lower():
                     adapter = "DtACI"
@@ -116,7 +119,7 @@ def _build_calibration_metrics_table_block(df_block: pd.DataFrame, caption: str)
     grouped_entities = _parse_and_group_entities(df_block)
 
     # Define method order
-    method_order = ["Unconformalized", "Conformalized", "Cross Validated"]
+    method_order = ["Unconformalized", "Split Conformalized", "Cross Conformalized"]
 
     for method in method_order:
         if method not in grouped_entities:
