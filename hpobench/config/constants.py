@@ -10,12 +10,12 @@ class ExperimentParameters(BaseModel):
     n_warm_starts: int = 15
     n_coverage_warm_starts: int = 15
 
-    default_max_n_instances: int = 5
+    default_max_n_instances: int = 50
     static_data_sizes: List[int] = [50, 100, 500]
     tuning_iterations: List[int] = [0]
-    small_n_repetitions_per_tuner_config: int = 4
-    medium_n_repetitions_per_tuner_config: int = 4
-    large_n_repetitions_per_tuner_config: int = 4
+    small_n_repetitions_per_tuner_config: int = 2
+    medium_n_repetitions_per_tuner_config: int = 2
+    large_n_repetitions_per_tuner_config: int = 2
 
 
 class Aliases(BaseModel):

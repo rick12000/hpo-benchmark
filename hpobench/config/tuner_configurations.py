@@ -165,22 +165,24 @@ ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurati
 
 LIMITED_ARCHITECTURE_ADAPTER = "DtACI"
 LIMITED_ARCHITECTURE_N_QUANTILES = 6
-LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurations(
-    architectures=[
-        # "qgp",
-        "qgbm",
-        # "qens5",
-    ],
-    samplers=[
-        ThompsonSampler(
-            n_quantiles=LIMITED_ARCHITECTURE_N_QUANTILES,
-            enable_optimistic_sampling=True,
-            adapter=LIMITED_ARCHITECTURE_ADAPTER,
-        ),
-    ],
-    n_pre_conformal_trials=32,
-    searcher_tuning_framework=None,
-    calibration_split_strategy="train_test_split",
+LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS = (
+    build_architecture_variation_configurations(
+        architectures=[
+            "qgp",
+            "qgbm",
+            "qens5",
+        ],
+        samplers=[
+            ThompsonSampler(
+                n_quantiles=LIMITED_ARCHITECTURE_N_QUANTILES,
+                enable_optimistic_sampling=True,
+                adapter=LIMITED_ARCHITECTURE_ADAPTER,
+            ),
+        ],
+        n_pre_conformal_trials=32,
+        searcher_tuning_framework=None,
+        calibration_split_strategy="train_test_split",
+    )
 )
 
 
@@ -190,7 +192,6 @@ PRECONFORMAL_COMPARISON_CONFIGURATIONS = []
 for architecture in [
     "qgp",
     "qgbm",
-    "qrf",
     "qens5",
 ]:
     # Simulate normal pre-conformal cutoff vs. unreachable one:
@@ -213,6 +214,11 @@ for architecture in [
                         enable_optimistic_sampling=False,
                         adapter=adapter,
                     ),
+                    ThompsonSampler(
+                        n_quantiles=PRECONFORMAL_N_QUANTILES,
+                        enable_optimistic_sampling=True,
+                        adapter=adapter,
+                    ),
                 ],
                 n_pre_conformal_trials=pre_conformal_trials,
                 calibration_split_strategy="adaptive",
@@ -223,7 +229,7 @@ for architecture in [
 # 4. Create configurations feeding the quantile count variation plots:
 QUANTILE_COUNT_VARIATION_ADAPTER = "DtACI"
 QUANTILE_COUNT_VARIATION_CONFIGURATIONS = []
-QUANTILE_COUNT_VALUES = [4, 8, 16]
+QUANTILE_COUNT_VALUES = [4, 6, 8, 10, 20]
 
 for n_quantiles in QUANTILE_COUNT_VALUES:
     QUANTILE_COUNT_VARIATION_CONFIGURATIONS.extend(

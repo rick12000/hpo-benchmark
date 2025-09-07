@@ -140,9 +140,9 @@ def main():
         try:
             run_and_analyze_main_benchmark(
                 benchmarks=[
-                    # "jahs201",
+                    "jahs201",
                     "LCBench-L",
-                    # "rbv2_aknn-L",
+                    "rbv2_aknn-L",
                 ],
                 tuning_configurations=LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS
                 + EXTERNAL_TUNING_CONFIGURATIONS,

@@ -264,21 +264,21 @@ def get_external_tuning_configurations() -> List[TunerConfig]:
         List of external tuning configuration objects (e.g., for skopt, optuna).
     """
     return [
-        # TunerConfig(
-        #     tuner="gp_opt",
-        #     searcher="gp_opt_ei",
-        #     config_identifier="GP-EI",
-        # ),
-        # TunerConfig(
-        #     tuner="gp_opt",
-        #     searcher="gp_opt_ots",
-        #     config_identifier="GP-OBS",
-        # ),
-        # TunerConfig(
-        #     tuner="optuna",
-        #     searcher="tpe",
-        #     config_identifier="TPE",
-        # ),
+        TunerConfig(
+            tuner="gp_opt",
+            searcher="gp_opt_ei",
+            config_identifier="GP-EI",
+        ),
+        TunerConfig(
+            tuner="gp_opt",
+            searcher="gp_opt_ots",
+            config_identifier="GP-OBS",
+        ),
+        TunerConfig(
+            tuner="optuna",
+            searcher="tpe",
+            config_identifier="TPE",
+        ),
         # Syne-Tune CQR configurations using string searchers
         # TunerConfig(
         #     tuner="syne_tune_cqr",
