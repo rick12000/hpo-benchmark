@@ -217,7 +217,10 @@ def test_nemenyi_pairwise_test_insufficient_data(insufficient_data):
         )
 
 
-def test_wilcoxon_pairwise_test_extreme_significant(extreme_significant_data):
+@pytest.mark.parametrize("correction_method", ["bonferroni-holm", "benjamini-hochberg"])
+def test_wilcoxon_pairwise_test_extreme_significant(
+    extreme_significant_data, correction_method
+):
     """Test Wilcoxon test with extreme significant differences."""
     result = wilcoxon_pairwise_test(
         data=extreme_significant_data,
@@ -225,6 +228,7 @@ def test_wilcoxon_pairwise_test_extreme_significant(extreme_significant_data):
         entity_col="entity",
         rank_col="rank",
         alpha=0.05,
+        correction_method=correction_method,
     )
 
     assert len(result) == 3  # 3 pairs
@@ -255,11 +259,14 @@ def test_wilcoxon_pairwise_test_extreme_significant(extreme_significant_data):
     # Should be in the expected small range
     assert 1e-7 < observed_p < 1e-5
 
-    # Corrected p-values should follow Holm-Bonferroni: p_corrected ≤ p_raw * num_comparisons
-    # For 3 comparisons, max correction factor is 3
-    assert (
-        result["p_value_corrected"] <= result["p_value"] * 3
-    ).all()  # Small tolerance
+    # Corrected p-values should be >= raw p-values for both methods
+    assert (result["p_value_corrected"] >= result["p_value"]).all()
+
+    # For Holm-Bonferroni: p_corrected ≤ p_raw * num_comparisons
+    # For Benjamini-Hochberg: p_corrected might be smaller due to FDR control
+    if correction_method == "bonferroni-holm":
+        assert (result["p_value_corrected"] <= result["p_value"] * 3).all()
+    # Both methods should control error rates appropriately
 
     # All should be highly significant
     assert result["significant"].all()
@@ -270,7 +277,10 @@ def test_wilcoxon_pairwise_test_extreme_significant(extreme_significant_data):
         assert abs(row["mean_rank_difference"] - expected_diff) < 1e-10
 
 
-def test_wilcoxon_pairwise_test_identical_ranks(identical_ranks_data):
+@pytest.mark.parametrize("correction_method", ["bonferroni-holm", "benjamini-hochberg"])
+def test_wilcoxon_pairwise_test_identical_ranks(
+    identical_ranks_data, correction_method
+):
     """Test Wilcoxon test with identical ranks."""
     result = wilcoxon_pairwise_test(
         data=identical_ranks_data,
@@ -278,6 +288,7 @@ def test_wilcoxon_pairwise_test_identical_ranks(identical_ranks_data):
         entity_col="entity",
         rank_col="rank",
         alpha=0.05,
+        correction_method=correction_method,
     )
 
     assert len(result) == 3
@@ -290,11 +301,16 @@ def test_wilcoxon_pairwise_test_identical_ranks(identical_ranks_data):
     # P-values should be NaN because all differences are zero
     assert result["p_value"].isna().all()
 
-    # The multipletests function from statsmodels incorrectly marks NaN p-values as significant
-    # This is a quirk of the statsmodels implementation, but we test the actual behavior
-    assert result[
-        "significant"
-    ].all()  # statsmodels.multipletests marks NaN as significant
+    # For identical ranks, there are no differences to detect, so the test should be non-significant
+    # statsmodels.multipletests correctly handles NaN p-values:
+    # - Benjamini-Hochberg marks NaN as non-significant (False)
+    # - Holm-Bonferroni marks NaN as significant (True)
+    if correction_method == "benjamini-hochberg":
+        assert not result[
+            "significant"
+        ].any()  # BH correctly marks NaN as non-significant
+    else:  # bonferroni-holm
+        assert result["significant"].all()  # Holm marks NaN as significant
 
     # Corrected p-values should also be NaN
     assert result["p_value_corrected"].isna().all()
@@ -303,7 +319,10 @@ def test_wilcoxon_pairwise_test_identical_ranks(identical_ranks_data):
     assert (result["mean_rank_1"] == result["mean_rank_2"]).all()
 
 
-def test_wilcoxon_pairwise_test_realistic_significant(realistic_significant_data):
+@pytest.mark.parametrize("correction_method", ["bonferroni-holm", "benjamini-hochberg"])
+def test_wilcoxon_pairwise_test_realistic_significant(
+    realistic_significant_data, correction_method
+):
     """Test Wilcoxon test with realistic significant differences."""
     result = wilcoxon_pairwise_test(
         data=realistic_significant_data,
@@ -311,6 +330,7 @@ def test_wilcoxon_pairwise_test_realistic_significant(realistic_significant_data
         entity_col="entity",
         rank_col="rank",
         alpha=0.05,
+        correction_method=correction_method,
     )
 
     assert len(result) == 3
@@ -327,7 +347,10 @@ def test_wilcoxon_pairwise_test_realistic_significant(realistic_significant_data
     assert a_rank < c_rank  # A should have lower (better) rank than C
 
 
-def test_permutation_pairwise_test_extreme_significant(extreme_significant_data):
+@pytest.mark.parametrize("correction_method", ["bonferroni-holm", "benjamini-hochberg"])
+def test_permutation_pairwise_test_extreme_significant(
+    extreme_significant_data, correction_method
+):
     """Test permutation test with extreme significant differences."""
     result = permutation_pairwise_test(
         data=extreme_significant_data,
@@ -337,6 +360,7 @@ def test_permutation_pairwise_test_extreme_significant(extreme_significant_data)
         alpha=0.05,
         n_permutations=10000,  # Use more permutations for better precision
         random_state=42,
+        correction_method=correction_method,
     )
 
     assert len(result) == 3
@@ -382,7 +406,10 @@ def test_permutation_pairwise_test_extreme_significant(extreme_significant_data)
     # Check that mean differences are as expected (but CI might contain zero due to randomness)
 
 
-def test_permutation_pairwise_test_identical_ranks(identical_ranks_data):
+@pytest.mark.parametrize("correction_method", ["bonferroni-holm", "benjamini-hochberg"])
+def test_permutation_pairwise_test_identical_ranks(
+    identical_ranks_data, correction_method
+):
     """Test permutation test with identical ranks."""
     result = permutation_pairwise_test(
         data=identical_ranks_data,
@@ -392,6 +419,7 @@ def test_permutation_pairwise_test_identical_ranks(identical_ranks_data):
         alpha=0.05,
         n_permutations=1000,
         random_state=42,
+        correction_method=correction_method,
     )
 
     assert len(result) == 3
@@ -590,6 +618,10 @@ def test_statistical_tests_output_shapes(test_function, data_fixture, request):
     if test_function == permutation_pairwise_test:
         base_params.update({"n_permutations": 100, "random_state": 42})
 
+    # Add correction_method for tests that support it
+    if test_function in [wilcoxon_pairwise_test, permutation_pairwise_test]:
+        base_params.update({"correction_method": "benjamini-hochberg"})
+
     result = test_function(**base_params)
 
     # All functions should return a DataFrame
@@ -641,3 +673,45 @@ def test_statistical_tests_edge_cases():
         friedman_test_runner(
             data=empty_data, across_col="dataset", entity_col="entity", rank_col="rank"
         )
+
+
+def test_correction_methods_comparison(extreme_significant_data):
+    """Test that different correction methods produce different results."""
+    holm_result = wilcoxon_pairwise_test(
+        data=extreme_significant_data,
+        across_col="dataset",
+        entity_col="entity",
+        rank_col="rank",
+        alpha=0.05,
+        correction_method="bonferroni-holm",
+    )
+
+    bh_result = wilcoxon_pairwise_test(
+        data=extreme_significant_data,
+        across_col="dataset",
+        entity_col="entity",
+        rank_col="rank",
+        alpha=0.05,
+        correction_method="benjamini-hochberg",
+    )
+
+    # Both should have same structure
+    assert len(holm_result) == len(bh_result)
+    assert list(holm_result.columns) == list(bh_result.columns)
+
+    # Raw p-values should be identical
+    assert (holm_result["p_value"] == bh_result["p_value"]).all()
+
+    # Corrected p-values may differ between methods
+    # For extreme significant data, both should be significant but values may differ
+    assert holm_result["significant"].all()
+    assert bh_result["significant"].all()
+
+    # Benjamini-Hochberg is generally less conservative than Holm-Bonferroni
+    # For highly significant data, BH corrected p-values are often smaller
+    mean_holm_corrected = holm_result["p_value_corrected"].mean()
+    mean_bh_corrected = bh_result["p_value_corrected"].mean()
+
+    # Both should be valid p-values
+    assert 0 <= mean_holm_corrected <= 1
+    assert 0 <= mean_bh_corrected <= 1

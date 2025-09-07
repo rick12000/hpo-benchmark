@@ -353,11 +353,10 @@ def run_main_benchmark(
                     if sampler_name in aliases.sampler_aliases
                     else sampler_name
                 )
-                if (
-                    tuner.searcher.sampler.enable_optimistic_sampling
-                    and sampler_name == "ThompsonSampler"
-                ):
-                    aliased_sampler_name = "OBS"
+                if tuner.tuner == "confopt":
+                    if sampler_name == "ThompsonSampler":
+                        if tuner.searcher.sampler.enable_optimistic_sampling:
+                            aliased_sampler_name = "OBS"
                 historical_performance[
                     "estimator_architecture"
                 ] = aliased_estimator_architecture
@@ -841,7 +840,7 @@ def run_static_benchmark(
                                     experiment_config.benchmark_identifier
                                 ]
                                 if experiment_config.benchmark_identifier
-                                in aliases.benchmark_identifier
+                                in aliases.benchmark_aliases
                                 else experiment_config.benchmark_identifier
                             )
                             # Create dictionary with results:

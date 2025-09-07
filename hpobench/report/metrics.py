@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 import logging
-from typing import List, Optional
+from typing import List, Optional, Literal
 from scikit_posthocs import posthoc_nemenyi_friedman
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
@@ -189,12 +189,15 @@ def wilcoxon_pairwise_test(
     rank_col: str,
     breakout_col: Optional[List[str]] = None,
     alpha: float = 0.05,
+    correction_method: Literal[
+        "bonferroni-holm", "benjamini-hochberg"
+    ] = "benjamini-hochberg",
 ) -> pd.DataFrame:
-    """Performs Wilcoxon signed-rank pairwise tests with Holm-Bonferroni correction.
+    """Performs Wilcoxon signed-rank pairwise tests with multiple testing correction.
 
     For each algorithm pair, computes mean rank per dataset, then applies
-    Wilcoxon signed-rank test across datasets. Uses Holm-Bonferroni correction
-    to control for multiple comparisons.
+    Wilcoxon signed-rank test across datasets. Uses either Holm-Bonferroni (FWER)
+    or Benjamini-Hochberg (FDR) correction to control for multiple comparisons.
 
     Args:
         data: DataFrame with `across_col`, `entity_col`, `rank_col`,
@@ -204,6 +207,7 @@ def wilcoxon_pairwise_test(
         rank_col: Column with ranks (lower is better).
         breakout_col: Optional list of columns for grouping data.
         alpha: Significance level for determining statistical significance.
+        correction_method: Multiple testing correction method to use.
 
     Returns:
         DataFrame with pairwise comparison results including:
@@ -212,7 +216,7 @@ def wilcoxon_pairwise_test(
         - mean_rank_1, mean_rank_2: Mean ranks for each entity
         - mean_rank_difference: Difference in mean ranks (entity1 - entity2)
         - p_value: Raw p-value from Wilcoxon test
-        - p_value_corrected: Holm-Bonferroni corrected p-value
+        - p_value_corrected: Multiple testing corrected p-value
         - significant: Boolean indicator if corrected p_value < alpha
         - better_entity: Entity with lower (better) mean rank
     """
@@ -295,11 +299,12 @@ def wilcoxon_pairwise_test(
                         }
                     )
 
-        # Apply Holm-Bonferroni correction within this group
+        # Apply multiple testing correction within this group
         if pairwise_results:
             p_values = [result["p_value"] for result in pairwise_results]
+            method_map = {"bonferroni-holm": "holm", "benjamini-hochberg": "fdr_bh"}
             reject, p_corrected, _, _ = multipletests(
-                p_values, alpha=alpha, method="holm"
+                p_values, alpha=alpha, method=method_map[correction_method]
             )
 
             for i, result in enumerate(pairwise_results):
@@ -320,12 +325,16 @@ def permutation_pairwise_test(
     alpha: float = 0.05,
     n_permutations: int = 10000,
     random_state: Optional[int] = None,
+    correction_method: Literal[
+        "bonferroni-holm", "benjamini-hochberg"
+    ] = "benjamini-hochberg",
 ) -> pd.DataFrame:
-    """Performs permutation tests for pairwise comparisons with Holm-Bonferroni correction.
+    """Performs permutation tests for pairwise comparisons with multiple testing correction.
 
     For each dataset, computes mean rank difference between algorithms.
     Uses permutation test by randomly flipping signs of differences to build
-    null distribution. Applies Holm-Bonferroni correction across all pairs.
+    null distribution. Applies either Holm-Bonferroni (FWER) or Benjamini-Hochberg
+    (FDR) correction across all pairs.
 
     Args:
         data: DataFrame with `across_col`, `entity_col`, `rank_col`,
@@ -337,6 +346,7 @@ def permutation_pairwise_test(
         alpha: Significance level for determining statistical significance.
         n_permutations: Number of permutations for the test.
         random_state: Random seed for reproducible results.
+        correction_method: Multiple testing correction method to use.
 
     Returns:
         DataFrame with pairwise comparison results including:
@@ -345,7 +355,7 @@ def permutation_pairwise_test(
         - mean_rank_1, mean_rank_2: Mean ranks for each entity
         - mean_rank_difference: Difference in mean ranks (entity1 - entity2)
         - p_value: Two-sided p-value from permutation test
-        - p_value_corrected: Holm-Bonferroni corrected p-value
+        - p_value_corrected: Multiple testing corrected p-value
         - significant: Boolean indicator if corrected p_value < alpha
         - better_entity: Entity with lower (better) mean rank
         - ci_lower, ci_upper: Confidence interval from permutation distribution
@@ -448,11 +458,12 @@ def permutation_pairwise_test(
                         }
                     )
 
-        # Apply Holm-Bonferroni correction within this group
+        # Apply multiple testing correction within this group
         if pairwise_results:
             p_values = [result["p_value"] for result in pairwise_results]
+            method_map = {"bonferroni-holm": "holm", "benjamini-hochberg": "fdr_bh"}
             reject, p_corrected, _, _ = multipletests(
-                p_values, alpha=alpha, method="holm"
+                p_values, alpha=alpha, method=method_map[correction_method]
             )
 
             for i, result in enumerate(pairwise_results):

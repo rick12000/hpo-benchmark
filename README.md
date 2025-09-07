@@ -1,134 +1,63 @@
-# HPO Benchmark
+# HPO Benchmarker
 
-A comprehensive benchmarking framework for comparing various hyperparameter optimization (HPO) algorithms and analyzing their performance characteristics across different benchmark suites.
+A general benchmarking framework for evaluating hyperparameter optimization (HPO) algorithms.
 
-## Overview
+This repository serves as a reproducible track record for all analysis and figures used in the (TODO) paper. It is not intended as a standalone benchmarking utility and is not coded with the rigor of one.
 
-The HPO Benchmark package provides a systematic evaluation framework for hyperparameter optimization algorithms, focusing on:
-- Comparing different HPO algorithms (Optuna, Scikit-Optimize, Conformal Prediction methods)
-- Analyzing performance across multiple benchmark suites
-- Evaluating conformal prediction approaches for uncertainty quantification
-- Providing statistical analysis and visualization of results
+For source code pertaining to conformalized hyperparameter optimization, refer to the [confopt package](https://github.com/rick12000/confopt).
 
-## Main Components
+## Installation
 
-### Core Modules
+### 1. Repository:
+1. Clone repository:
+   ```bash
+   git clone https://github.com/rick12000/hpo-benchmark.git
+   cd hpo-benchmark
+   ```
 
-- **`hpobench.tune`**: Main tuning interface supporting multiple HPO frameworks
-- **`hpobench.prepare`**: Benchmark configuration and setup utilities
-- **`hpobench.process`**: Data processing and result handling
-- **`hpobench.report`**: Analysis, visualization, and reporting tools
-- **`hpobench.generation`**: Objective function generators and synthetic benchmarks
+2. Install as package:
+   ```bash
+   pip install .
+   ```
 
-### Configuration
+### 2. SMAC
 
-- **`hpobench.config.config`**: Main configuration parameters and tuning setups
-- **`hpobench.config.types`**: Type definitions for experiments and configurations
-- **`hpobench.config.benchmark_data`**: Benchmark-specific parameter spaces
+`smac` is not a package dependancy of the `hpobench` package, due to incompatibility issues, but it is required to run SMAC benchmarks.
 
-### Integrations
+To resolve this, you can clone the below fork with minor edits to SMAC's `ConfigSpace` dependancy:
+   ```bash
+   git clone https://github.com/rick12000/SMAC3-ConfigSpace-Amend
+   cd hpo-benchmark
+   ```
 
-- **`hpobench.syne_tune_integration`**: Syne-Tune framework integration for advanced methods
+And install it in your environment directly by navigating to it while your python environment is active and running:
+   ```bash
+   pip install .
+   ```
 
-## File Structure
+**NOTE**:
+SWIG is required to build the `pyrfr` dependency for SMAC. Install it using conda:
+   ```bash
+   conda install swig
+   ```
+SWIG must be installed in the same environment where you're installing the package dependencies.
 
-```
-hpo-benchmark/
-├── run.py                          # Main execution script
-├── requirements.txt                # Python dependencies
-├── pyproject.toml                  # Package configuration
-├── hpobench/                       # Main package
-│   ├── __init__.py
-│   ├── tune.py                     # HPO algorithm implementations
-│   ├── prepare.py                  # Benchmark setup
-│   ├── process.py                  # Data processing
-│   ├── plot.py                     # Visualization utilities
-│   ├── utils.py                    # General utilities
-│   ├── syne_tune_integration.py    # Syne-Tune integration
-│   ├── config/                     # Configuration files
-│   │   ├── config.py              # Main configuration
-│   │   ├── types.py               # Type definitions
-│   │   ├── benchmark_data.py      # Benchmark specifications
-│   │   └── utils.py               # Config utilities
-│   ├── generation/                 # Objective function generation
-│   │   ├── generate.py            # Objective generators
-│   │   └── black_box_functions.py # Synthetic functions
-│   └── report/                     # Analysis and reporting
-│       ├── orchestrate.py         # Main orchestration
-│       ├── analyze.py             # Statistical analysis
-│       ├── metrics.py             # Performance metrics
-│       └── utils.py               # Report utilities
-├── tests/                          # Test suite
-├── cache/                          # Experiment cache and results
-├── yahpo_bench_data/              # YAHPO benchmark data
-└── jahs_bench_data/               # JAHS-Bench-201 data
-```
+### 3. Confopt
 
-## Running Experiments
+To run confopt benchmarks, you must install the confopt package. For reproducible results that align to the paper, clone and install confopt from this branch (TODO):
 
-### Basic Usage
 
-Execute the main benchmark script:
+Failing that, confopt can be installed from [pypi](https://pypi.org/project/confopt/) using:
+   ```bash
+   pip install confopt
+   ```
+The closest version to the static branch used for analysis is 2.0.0.
 
-```bash
-python run.py
-```
+### 4. Benchmark Environment Setup
 
-### Configuration
+#### YAHPO Gym
 
-The `run.py` script contains a `run_sections` dictionary that controls which analyses to execute:
-
-```python
-run_sections = {
-    "run_coverage_analysis": False,
-    "run_sampler_variation_analysis": False,
-    "run_architecture_variation_analysis": False,
-    "run_external_tuning_analysis": True,
-    "run_preconformal_comparison_analysis": False,
-    "run_static_analysis": False,
-}
-```
-
-Set the desired sections to `True` to run specific analyses.
-
-### Key Parameters
-
-The main configuration parameters are defined in `hpobench/config/config.py`:
-
-- **`N_TRIALS`** (default: 100): Number of optimization trials per experiment
-- **`N_WARM_STARTS`** (default: 15): Number of random initial evaluations
-- **`N_REPETITIONS_PER_TUNER_CONFIG`** (default: 1): Number of repetitions per configuration
-- **`TIMEOUT`** (default: None): Time limit per experiment in seconds
-- **`DEFAULT_MAX_N_INSTANCES`** (default: 20): Maximum benchmark instances per suite
-- **`BASE_RANDOM_STATE`** (default: 42): Random seed for reproducibility
-
-### Analysis Types
-
-1. **Coverage Analysis**: Evaluates conformal prediction coverage properties
-2. **Sampler Variation Analysis**: Compares different sampling strategies
-3. **Architecture Variation Analysis**: Tests different model architectures
-4. **External Tuning Analysis**: Benchmarks against external HPO methods
-5. **Preconformal Comparison Analysis**: Analyzes pre-conformal vs conformal methods
-6. **Static Analysis**: Evaluates estimator performance without optimization
-
-### HPO Algorithm Support
-
-The framework supports multiple HPO algorithms:
-
-- **Optuna**: TPE, Random, CMA-ES, GP samplers
-- **Scikit-Optimize**: GP, Random Forest, Gradient Boosting
-- **Conformal Prediction**: Quantile-based conformal methods
-- **Syne-Tune**: Conformal Quantile Regression methods
-
-## Benchmark Suites
-
-### YAHPO Gym
-
-**Description**: Yet Another Hyperparameter Optimization Gym provides surrogate models for various machine learning benchmarks.
-
-**Supported Benchmarks**:
-- `rbv2_aknn`: Approximate Nearest Neighbours on OpenML datasets
-- `lcbench`: Learning Curve Benchmark
+(Currently limited to non-hierarchical benchmarks).
 
 **Setup Instructions**:
 1. Install the YAHPO Gym package (included in requirements.txt)
@@ -139,70 +68,52 @@ The framework supports multiple HPO algorithms:
    - `yahpo_bench_data/lcbench/`
    - `yahpo_bench_data/iaml_*/`
 
-### JAHS-Bench-201
+#### JAHS-Bench-201
 
-**Description**: Joint Architecture and Hyperparameter Search Benchmark for neural architecture search.
+1. Install JAHS-Bench package (included in requirements.txt)
+2. Data downloads automatically to `jahs_bench_data/` on first run
+3. Or manually: `python -m jahs_bench.download --target surrogates`
 
-**Supported Datasets**:
-- CIFAR-10
-- Fashion-MNIST
-- Colorectal Histology
 
-**Setup Instructions**:
-1. Install the JAHS-Bench package (included in requirements.txt)
-2. **Automatic Data Download**: The benchmark data will be automatically downloaded to the `jahs_bench_data/` folder upon first run, or execute `python -m jahs_bench.download --target surrogates` to load all benchmark datasets at once
 
-### Synthetic Benchmarks
+## Running Experiments
 
-**Description**: Mathematical optimization functions for controlled experiments.
+### Entry Point
 
-**Available Functions**:
-- Rastrigin
-- Shekel
-- Weierstrass
-- Griewank
-- Ackley
+Execute benchmarks via the main script:
 
-**Setup**: No additional setup required - functions are implemented directly in the package.
+```bash
+python run.py
+```
 
-## Installation
+### Experiment Configuration
+- Algorithm agnostic parameters can be set in `constants.py`
+- Algorithm configurations are set up in `tuner_configurations.py`
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/rick12000/hpo-benchmark.git
-   cd hpo-benchmark
-   ```
 
-2. **Install SWIG (Required for SMAC)**:
-   SWIG is required to build the `pyrfr` dependency for SMAC. Install it using conda:
-   ```bash
-   conda install swig
-   ```
+### Experiment Components
 
-   Note: SWIG must be installed in the same environment where you're installing the package dependencies.
+You can specify which types of analysis to run in `run.py` using the `run_sections` dictionary:
 
-3. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
+```python
+run_sections = {
+    "run_coverage_analysis": False,
+    "run_sampler_variation_analysis": False,
+    "run_architecture_variation_analysis": False,
+    "run_external_tuning_analysis": True,
+    "run_heteroscedastic_external_tuning_analysis": False,
+    "run_skew_external_tuning_analysis": False,
+    "run_preconformal_comparison_analysis": False,
+    "run_static_analysis": False,
+    "run_quantile_count_comparison": False,
+    "run_search_tuning_effect_comparison": False,
+}
+```
 
-4. Install the package:
-   ```bash
-   pip install -e .
-   ```
+## Supported HPO Packages:
 
-5. Set up benchmark data (see Benchmark Suites section above)
-
-## Results and Analysis
-
-- **Cache Directory**: All results are stored in the `cache/` folder with timestamped subdirectories
-- **Plots**: Generated visualizations are saved in `cache/plots/`
-- **Data**: Raw experiment data is stored in `cache/data/`
-- **Logs**: Execution logs are maintained in `cache/logs/`
-
-## Requirements
-
-- Python >= 3.10, < 3.11
-- Key dependencies: pandas, matplotlib, scikit-learn, optuna, scikit-optimize, yahpo_gym, jahs-bench, syne_tune
-
-See `requirements.txt` for complete dependency list.
+- **Optuna**: TPE, CMA-ES, GP, Random
+- **scikit-optimize**: GP, RF, GBRT
+- **SMAC**: RF (limited/experimental support)
+- **ConfOpt**: All surrogates
+- **syne-tune**: CQR (limited/experimental support)

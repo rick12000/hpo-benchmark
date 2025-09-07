@@ -55,7 +55,7 @@ class GPEstimator:
         kernel: Optional[Union[str, Kernel]] = None,
         noise_variance: Optional[Union[str, float]] = "optimize",
         alpha: float = 1e-10,
-        n_restarts_optimizer: int = 10,
+        n_restarts_optimizer: int = 5,
         random_state: Optional[int] = None,
         batch_size: Optional[int] = None,
         optimize_hyperparameters: bool = True,

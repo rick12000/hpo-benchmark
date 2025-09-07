@@ -27,10 +27,10 @@ experiment_params = ExperimentParameters()
 
 # Granular run section control
 run_sections = {
-    "run_coverage_analysis": True,
+    "run_coverage_analysis": False,
     "run_sampler_variation_analysis": False,
     "run_architecture_variation_analysis": False,
-    "run_external_tuning_analysis": False,
+    "run_external_tuning_analysis": True,
     "run_heteroscedastic_external_tuning_analysis": False,
     "run_skew_external_tuning_analysis": False,
     "run_preconformal_comparison_analysis": False,
@@ -140,10 +140,8 @@ def main():
         try:
             run_and_analyze_main_benchmark(
                 benchmarks=[
-                    "jahs201",
-                    # "nas301",
+                    # "jahs201",
                     "LCBench-L",
-                    "LCBench-H",
                     # "rbv2_aknn-L",
                 ],
                 tuning_configurations=LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS
@@ -174,10 +172,7 @@ def main():
         logger.info("Starting heteroscedastic external tuning analysis")
         try:
             run_and_analyze_main_benchmark(
-                benchmarks=[
-                    "LCBench-H",
-                    # "rbv2_aknn-H"
-                ],
+                benchmarks=["LCBench-H", "rbv2_aknn-H"],
                 tuning_configurations=LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS
                 + EXTERNAL_TUNING_CONFIGURATIONS,
                 n_warm_starts=experiment_params.n_warm_starts,
@@ -206,10 +201,7 @@ def main():
         logger.info("Starting skew external tuning analysis")
         try:
             run_and_analyze_main_benchmark(
-                benchmarks=[
-                    "LCBench-A",
-                    # "rbv2_aknn-A"
-                ],
+                benchmarks=["LCBench-A", "rbv2_aknn-A"],
                 tuning_configurations=LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS
                 + EXTERNAL_TUNING_CONFIGURATIONS,
                 n_warm_starts=experiment_params.n_warm_starts,

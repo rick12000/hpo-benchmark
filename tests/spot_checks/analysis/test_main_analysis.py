@@ -107,3 +107,97 @@ def test_analyze_main_benchmark(
         filename="raw_benchmark_data.csv",
         analysis_type="test-preconformal-trials-plot",
     )
+
+    # Real world raw benchmark data snippet:
+    toy_raw_benchmark_data = pd.read_csv(
+        "tests/spot_checks/analysis/toy_raw_benchmark_data.csv"
+    )
+    analyze_main_benchmark(
+        raw_benchmark_data=toy_raw_benchmark_data,
+        cache_path=cache_path,
+        run_start_str=run_start_str,
+        analysis_type="test-toy-data",
+        analysis_components=[
+            "friedman",
+            "nemenyi",
+            "wilcoxon",
+            "permutation_test",
+            "dataset_performances",
+            "rank_analysis",
+            "sampler_comparison",
+            "architecture_comparison",
+        ],
+        schema=benchmark_data_schema,
+        alpha=0.05,
+        starting_coverage_trial=None,
+        cd_significance_method="permutation_test",
+        n_bootstraps=50,
+    )
+
+    # Create toy data for rank analysis CD diagram testing with 10 datasets
+    base_data = dummy_processing_raw_data.copy()
+    # Create two tuners: tuner 1 with better performance, tuner 2 with worse performance
+    tuner1_data = base_data.copy()
+    tuner1_data[benchmark_data_schema.tuner_col] = "Tuner 1"
+    tuner1_data[benchmark_data_schema.estimator_architecture_col] = "Tuner 1"
+    tuner1_data[benchmark_data_schema.sampler_col] = "Sampler 1"
+    # Keep original performance for tuner 1 (better performance)
+
+    tuner2_data = base_data.copy()
+    tuner2_data[benchmark_data_schema.tuner_col] = "Tuner 2"
+    tuner2_data[benchmark_data_schema.estimator_architecture_col] = "Tuner 2"
+    tuner2_data[benchmark_data_schema.sampler_col] = "Sampler 2"
+    # Make tuner 2 have worse performance by adding a penalty
+    tuner2_data[benchmark_data_schema.perf_col] = (
+        tuner2_data[benchmark_data_schema.perf_col] + 20
+    )
+
+    tuner3_data = base_data.copy()
+    tuner3_data[benchmark_data_schema.tuner_col] = "Tuner 3"
+    tuner3_data[benchmark_data_schema.estimator_architecture_col] = "Tuner 3"
+    tuner3_data[benchmark_data_schema.sampler_col] = "Sampler 3"
+    tuner3_data[benchmark_data_schema.perf_col] = (
+        tuner3_data[benchmark_data_schema.perf_col] + 10
+    )
+
+    tuner4_data = base_data.copy()
+    tuner4_data[benchmark_data_schema.tuner_col] = "Tuner 4"
+    tuner4_data[benchmark_data_schema.estimator_architecture_col] = "Tuner 4"
+    tuner4_data[benchmark_data_schema.sampler_col] = "Sampler 4"
+    tuner4_data[benchmark_data_schema.perf_col] = (
+        tuner4_data[benchmark_data_schema.perf_col] + 5
+    )
+
+    # Combine tuner data
+    combined_data = pd.concat(
+        [tuner1_data, tuner2_data, tuner3_data, tuner4_data], ignore_index=True
+    )
+
+    # Create 15 datasets by copying the data with different dataset IDs
+    rank_analysis_data = []
+    for i in range(15):
+        dataset_data = combined_data.copy()
+        dataset_data[benchmark_data_schema.data_col] = f"dataset_{i}"
+        rank_analysis_data.append(dataset_data)
+
+    rank_analysis_data = pd.concat(rank_analysis_data, ignore_index=True)
+
+    analyze_main_benchmark(
+        raw_benchmark_data=rank_analysis_data,
+        cache_path=cache_path,
+        run_start_str=run_start_str,
+        analysis_type="test-rank-analysis-cd",
+        analysis_components=["rank_analysis"],
+        schema=benchmark_data_schema,
+        alpha=0.05,
+        starting_coverage_trial=None,
+        cd_significance_method="permutation_test",
+        n_bootstraps=50,
+    )
+    save_analysis_results(
+        df=rank_analysis_data,
+        cache_path=cache_path,
+        run_start_str=run_start_str,
+        filename="raw_benchmark_data.csv",
+        analysis_type="test-rank-analysis-cd",
+    )

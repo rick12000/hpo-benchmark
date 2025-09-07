@@ -1,4 +1,4 @@
-from typing import Union, Optional, List
+from typing import Union, Optional, List, Any
 from confopt.selection.acquisition import (
     QuantileConformalSearcher,
 )
@@ -10,7 +10,6 @@ from confopt.selection.sampling.expected_improvement_samplers import (
     ExpectedImprovementSampler,
 )
 from confopt.selection.sampling.thompson_samplers import ThompsonSampler
-from confopt.selection.acquisition import QuantileEstimatorArchitecture
 from hpobench.config.config_types import TunerConfig
 
 
@@ -113,7 +112,7 @@ def create_sampler_config_id(
 
 
 def build_static_tuning_configurations(
-    quantile_architectures: List[QuantileEstimatorArchitecture],
+    quantile_architectures: List[Any],
     searcher_tuning_frameworks: List[Optional[str]],
     n_pre_conformal_trials: int = 20,
 ) -> List[TunerConfig]:
@@ -168,7 +167,7 @@ def build_sampler_variation_configurations(
             ExpectedImprovementSampler,
         ]
     ],
-    quantile_arch: QuantileEstimatorArchitecture,
+    quantile_arch: Any,
     n_pre_conformal_trials: int = 20,
     searcher_tuning_framework: Optional[str] = None,
     calibration_split_strategy: str = "train_test_split",
@@ -209,7 +208,7 @@ def build_sampler_variation_configurations(
 
 
 def build_architecture_variation_configurations(
-    architectures: List[QuantileEstimatorArchitecture],
+    architectures: List[Any],
     samplers: List[
         Union[
             ThompsonSampler,
@@ -265,15 +264,15 @@ def get_external_tuning_configurations() -> List[TunerConfig]:
         List of external tuning configuration objects (e.g., for skopt, optuna).
     """
     return [
-        TunerConfig(
-            tuner="gp_opt",
-            searcher="gp_opt_ei",
-            config_identifier="GP-EI",
-        ),
         # TunerConfig(
         #     tuner="gp_opt",
-        #     searcher="gp_opt_ts",
-        #     config_identifier="GP-TS",
+        #     searcher="gp_opt_ei",
+        #     config_identifier="GP-EI",
+        # ),
+        # TunerConfig(
+        #     tuner="gp_opt",
+        #     searcher="gp_opt_ots",
+        #     config_identifier="GP-OBS",
         # ),
         # TunerConfig(
         #     tuner="optuna",
@@ -286,14 +285,19 @@ def get_external_tuning_configurations() -> List[TunerConfig]:
         #     searcher="cqr_thompson",
         #     config_identifier="CQR-THOMPSON",
         # ),
-        # TunerConfig(
-        #     tuner="optuna",
-        #     searcher="random",
-        #     config_identifier="RS",
-        # ),
+        TunerConfig(
+            tuner="optuna",
+            searcher="random",
+            config_identifier="RS",
+        ),
+        TunerConfig(
+            tuner="smac",
+            searcher="smac_rf_ei",
+            config_identifier="SMAC",
+        ),
         # TunerConfig(
         #     tuner="smac",
-        #     searcher="smac_rf_ei",
-        #     config_identifier="RF-EI",
+        #     searcher="smac_rf_ts",
+        #     config_identifier="SMAC-TS",
         # )
     ]

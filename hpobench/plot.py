@@ -7,6 +7,7 @@ import time
 import os
 import logging
 import numpy as np
+import math
 from hpobench.utils import AnalysisPathManager
 
 matplotlib.use("Agg")  # Use non-GUI backend
@@ -15,21 +16,10 @@ logger = logging.getLogger(__name__)
 matplotlib.rcParams["mathtext.fontset"] = "stix"
 matplotlib.rcParams["font.family"] = "STIXGeneral"
 
-PLOT_DPI = 500
+PLOT_DPI = 300
 PLOT_FORMATS = ["eps", "png"]
 DEFAULT_COLOR_PALETTE = [
-    "#266489",
-    "#68B9C0",
-    "#90D585",
-    "#F3C151",
-    "#F37F64",
-    "#424856",
-    "#8F97A4",
-    "#DAC096",
-    "#76846E",
-    "#DABFAF",
-    "#A65B69",
-    "#97A69D",
+    "#464646",
     "#E69F00",
     "#56B4E9",
     "#009E73",
@@ -37,7 +27,6 @@ DEFAULT_COLOR_PALETTE = [
     "#0072B2",
     "#D55E00",
     "#CC79A7",
-    "#000000",
     "#E74C3C",
     "#3498DB",
     "#2ECC71",
@@ -192,17 +181,14 @@ def plot_benchmark_data(
     )
     # Ensure axes is always 2D for easier iteration
     single_row = False
-    single_col = False
     if len(row_values) == 1 and len(col_values) == 1:
         axes = [[axes]]
         single_row = True
-        single_col = True
     elif len(row_values) == 1:
         axes = [axes]
         single_row = True
     elif len(col_values) == 1:
         axes = [[ax] for ax in axes]
-        single_col = True
 
     # Compute global y_min and y_max if sharing y axis
     if share_y_axis:
@@ -271,15 +257,14 @@ def plot_benchmark_data(
 
             # Chart titles: top row only (i == 0)
             if col_measure is not None and i == 0:
-                if single_col:
-                    col_title = ""
+                # if single_col:
+                #     col_title = ""
+                if hide_col_and_row_labels:
+                    # Use only the column value, no measure label
+                    col_title = f"{col_value}"
                 else:
-                    if hide_col_and_row_labels:
-                        # Use only the column value, no measure label
-                        col_title = f"{col_value}"
-                    else:
-                        col_title = f"{formatted_col_measure}: {col_value}"
-                ax.set_title(col_title, fontsize=13, fontweight="bold")
+                    col_title = f"{formatted_col_measure}: {col_value}"
+                ax.set_title(col_title, fontsize=13)
 
             # Y labels: left column only (j == 0)
             if y_label_to_use is not None and j == 0:
@@ -313,6 +298,31 @@ def plot_benchmark_data(
 
     # Add legend below the chart, ensuring no overlap with chart or x label
     handles, labels = ax.get_legend_handles_labels()
+
+    # Calculate positioning adjustments
+    num_subplot_rows = len(row_values) if row_measure else 1
+    num_legend_rows = math.ceil(len(labels) / 4)
+
+    # Adjust legend positioning to maintain consistent distance from bottom X label
+    # More subplot rows = X label is higher in figure coordinates = move legend up
+    base_legend_anchor_y = -0.16
+    base_bottom_margin = 0.20
+
+    # Adjust for subplot rows: each additional row moves the X label up in figure coordinates
+    subplot_row_adjustment = (
+        num_subplot_rows - 1
+    ) * 0.035  # Move legend up for each additional subplot row
+
+    # Adjust for legend rows: multi-row legends need more space
+    legend_row_adjustment = (
+        num_legend_rows - 1
+    ) * 0.06  # Additional space for multi-row legends
+
+    legend_anchor_y = (
+        base_legend_anchor_y + subplot_row_adjustment - legend_row_adjustment
+    )
+    legend_bottom_margin = base_bottom_margin + legend_row_adjustment
+
     # Use fig.legend for a single, consistent legend
     fig.legend(
         handles,
@@ -320,12 +330,17 @@ def plot_benchmark_data(
         loc="lower center",
         ncol=min(4, len(labels)),
         fontsize=12,
-        bbox_to_anchor=(0.5, -0.16),
+        bbox_to_anchor=(0.5, legend_anchor_y),
         frameon=False,
     )
     # Tight layout for academic papers with extra bottom space for legend
     fig.subplots_adjust(
-        wspace=0.15, hspace=0.22, bottom=0.20, top=0.93, left=0.09, right=0.98
+        wspace=0.15,
+        hspace=0.22,
+        bottom=legend_bottom_margin,
+        top=0.93,
+        left=0.09,
+        right=0.98,
     )
 
     # Save the plot
@@ -423,6 +438,7 @@ def plot_critical_difference_diagram(
     alpha: float = 0.05,
     title: Optional[str] = None,
     title_fontweight: str = "normal",
+    p_value_column: str = "p_value_corrected",
 ) -> None:
     """Plot a critical difference diagram using scikit-posthocs."""
     try:
@@ -442,7 +458,20 @@ def plot_critical_difference_diagram(
     for _, row in significance_results.iterrows():
         alg1, alg2 = row["entity1"], row["entity2"]
         if alg1 in algorithms and alg2 in algorithms:
-            p_val = row.get("p_value_corrected", row.get("p_value", 1.0))
+            # Use the specified p-value column, with fallback logic
+            if p_value_column in row and pd.notna(row[p_value_column]):
+                p_val = row[p_value_column]
+            elif p_value_column == "p_value_corrected" and "p_value" in row:
+                p_val = row[
+                    "p_value"
+                ]  # Fallback to uncorrected if corrected not available
+            elif p_value_column == "p_value" and "p_value_corrected" in row:
+                p_val = row[
+                    "p_value_corrected"
+                ]  # Fallback to corrected if uncorrected not available
+            else:
+                p_val = 1.0  # Default if neither available
+
             sig_matrix.loc[alg1, alg2] = p_val
             sig_matrix.loc[alg2, alg1] = p_val
 
@@ -515,9 +544,11 @@ def plot_paired_rank_and_cd(
 ) -> None:
     """Plot paired visualizations: rank evolution and critical difference diagrams.
 
-    Creates a two-column plot where:
+    Creates a plot where:
     - Left column: Rank evolution over budget (existing functionality)
-    - Right column: Critical difference diagram at specified budget
+    - Right column: Two critical difference diagrams stacked vertically
+      - Top: CD diagram with uncorrected p-values
+      - Bottom: CD diagram with corrected p-values
     - Shared legend at the bottom center
 
     Args:
@@ -543,28 +574,35 @@ def plot_paired_rank_and_cd(
     # Get unique row values
     row_values = data[row_measure].unique()
 
-    # Create figure with 2 columns for each row, match sizing logic from plot_benchmark_data
+    # Create figure with custom gridspec to accommodate rank plots and dual CD diagrams
     base_width = 4.0
-    base_height = 3.0
+    base_height = 4.5
     fig_width = base_width * 2  # 2 columns
+    # Keep original figure height scaling, but make each row taller
     fig_height = base_height * len(row_values)
 
-    fig, axes = plt.subplots(
-        nrows=len(row_values),
+    # Use GridSpec to create custom layout: left column for ranks, right column split for 2 CD diagrams
+    from matplotlib.gridspec import GridSpec
+
+    fig = plt.figure(figsize=(fig_width, fig_height), constrained_layout=True)
+    gs = GridSpec(
+        nrows=len(row_values) * 2,  # 2 rows per benchmark (for 2 CD diagrams)
         ncols=2,
-        figsize=(fig_width, fig_height),
-        sharex=False,
-        sharey=False,
-        constrained_layout=True,
+        figure=fig,
+        # height_ratios=[1.7, 1.7] * len(row_values),  # Taller CD diagrams (1.5x height per row)
     )
 
-    # Ensure axes is always 2D for easier iteration
-    if len(row_values) == 1:
-        axes = (
-            [[axes[0], axes[1]]]
-            if hasattr(axes, "__len__") and not isinstance(axes[0], list)
-            else [axes]
-        )
+    # Create axes manually using gridspec
+    axes = []
+    for i in range(len(row_values)):
+        # Left column: rank plot spans both CD diagram rows
+        ax_rank = fig.add_subplot(gs[i * 2 : (i + 1) * 2, 0])
+
+        # Right column: two separate CD diagrams
+        ax_cd_uncorrected = fig.add_subplot(gs[i * 2, 1])
+        ax_cd_corrected = fig.add_subplot(gs[i * 2 + 1, 1])
+
+        axes.append([ax_rank, ax_cd_uncorrected, ax_cd_corrected])
 
     # Collect legend information from first plot
     legend_handles = []
@@ -615,9 +653,8 @@ def plot_paired_rank_and_cd(
         ax_rank.set_xlabel(_get_label(x_label, x_col), fontsize=13)
         ax_rank.set_ylabel("Rank", fontsize=13, labelpad=10)
         ax_rank.set_title(
-            f"{row_value}\nRank Evolution",
+            f"{row_value}",
             fontsize=13,
-            fontweight="bold",
             pad=20,
         )
         ax_rank.grid(True, which="both", linestyle="--", linewidth=0.5, alpha=0.7)
@@ -634,8 +671,9 @@ def plot_paired_rank_and_cd(
             axis="both", which="minor", labelsize=9, length=3, width=1.0
         )
 
-        # Right plot: Critical difference diagram
-        ax_cd = axes[i][1]
+        # Right plots: Two Critical difference diagrams
+        ax_cd_uncorrected = axes[i][1]  # Top CD diagram
+        ax_cd_corrected = axes[i][2]  # Bottom CD diagram
 
         # Get mean ranks at the specified budget
         cd_data = row_data[row_data[x_col] == cd_budget]
@@ -644,13 +682,24 @@ def plot_paired_rank_and_cd(
         if not cd_data.empty and not row_sig_data.empty:
             mean_ranks = dict(zip(cd_data[entity_col], cd_data["rank"]))
 
+            # Top CD diagram: Uncorrected p-values
             plot_critical_difference_diagram(
-                ax=ax_cd,
+                ax=ax_cd_uncorrected,
                 mean_ranks=mean_ranks,
                 significance_results=row_sig_data,
                 alpha=alpha,
-                title=f"{row_value}\nCritical Difference @{cd_budget}%",
-                title_fontweight="bold",
+                title=f"CD@{cd_budget}% (Raw)",
+                p_value_column="p_value",  # Use uncorrected p-values
+            )
+
+            # Bottom CD diagram: Corrected p-values (current behavior)
+            plot_critical_difference_diagram(
+                ax=ax_cd_corrected,
+                mean_ranks=mean_ranks,
+                significance_results=row_sig_data,
+                alpha=alpha,
+                title=f"CD@{cd_budget}% (Benjamini-Hochberg)",
+                p_value_column="p_value_corrected",  # Use corrected p-values
             )
         else:
             # Determine the reason for missing CD diagram
@@ -661,46 +710,86 @@ def plot_paired_rank_and_cd(
                     "Insufficient datasets\nfor significance testing\n(<3 datasets)"
                 )
 
-            ax_cd.text(
-                0.5,
-                0.5,
-                reason,
-                ha="center",
-                va="center",
-                transform=ax_cd.transAxes,
-                fontsize=10,
-            )
-            ax_cd.set_title(
-                f"Critical Difference @{cd_budget}%",
-                fontsize=13,
-                fontweight="bold",
-                pad=20,
-            )
+            # Apply same message to both CD diagrams
+            for ax_cd, title_suffix in [
+                (ax_cd_uncorrected, "(Uncorrected)"),
+                (ax_cd_corrected, "(Corrected)"),
+            ]:
+                ax_cd.text(
+                    0.5,
+                    0.5,
+                    reason,
+                    ha="center",
+                    va="center",
+                    transform=ax_cd.transAxes,
+                    fontsize=10,
+                )
+                title = f"CD @{cd_budget}% {title_suffix}"
+                if ax_cd == ax_cd_uncorrected:
+                    title = f"{row_value}\n" + title
+                ax_cd.set_title(title, fontsize=13, pad=20)
 
         # Clean up CD axis appearance to match overall style
-        for spine in ["top", "right", "bottom", "left"]:
-            if spine in ax_cd.spines:
-                ax_cd.spines[spine].set_linewidth(1.2)
-        ax_cd.tick_params(axis="both", which="major", labelsize=11, length=6, width=1.2)
-        ax_cd.tick_params(axis="both", which="minor", labelsize=9, length=3, width=1.0)
+        for ax_cd in [ax_cd_uncorrected, ax_cd_corrected]:
+            for spine in ["top", "right", "bottom", "left"]:
+                if spine in ax_cd.spines:
+                    ax_cd.spines[spine].set_linewidth(1.2)
+            ax_cd.tick_params(
+                axis="both", which="major", labelsize=11, length=6, width=1.2
+            )
+            ax_cd.tick_params(
+                axis="both", which="minor", labelsize=9, length=3, width=1.0
+            )
 
     # Add shared legend at the bottom center (consistent with plot_benchmark_data)
     handles, labels = (legend_handles, legend_labels)
     if handles:
+        # Calculate positioning adjustments
+        num_subplot_rows = len(row_values)
+        num_legend_rows = math.ceil(len(labels) / 4)
+
+        # Adjust legend positioning to maintain consistent distance from bottom X label
+        # More subplot rows = X label is higher in figure coordinates = move legend up
+        base_legend_anchor_y = -0.16
+        base_bottom_margin = 0.20
+
+        # Adjust for subplot rows: each additional row moves the X label up in figure coordinates
+        subplot_row_adjustment = (
+            num_subplot_rows - 1
+        ) * 0.03  # Move legend up for each additional subplot row
+
+        # Adjust for legend rows: multi-row legends need more space
+        legend_row_adjustment = (
+            num_legend_rows - 1
+        ) * 0.06  # Additional space for multi-row legends
+
+        legend_anchor_y = (
+            base_legend_anchor_y + subplot_row_adjustment - legend_row_adjustment
+        )
+        legend_bottom_margin = base_bottom_margin + legend_row_adjustment
+
         fig.legend(
             handles,
             labels,
             loc="lower center",
             ncol=min(4, len(labels)),
             fontsize=12,
-            bbox_to_anchor=(0.5, -0.16),
+            bbox_to_anchor=(0.5, legend_anchor_y),
             frameon=False,
         )
 
     # Tight layout for academic papers with extra bottom space for legend
     # Adjust top spacing to ensure titles are properly aligned
+    legend_bottom_margin = (
+        legend_bottom_margin if "legend_bottom_margin" in locals() else 0.20
+    )
     fig.subplots_adjust(
-        wspace=0.15, hspace=0.22, bottom=0.20, top=0.90, left=0.09, right=0.98
+        wspace=0.15,
+        hspace=0.22,
+        bottom=legend_bottom_margin,
+        top=0.90,
+        left=0.09,
+        right=0.98,
     )
 
     # Save the plot using same format handling

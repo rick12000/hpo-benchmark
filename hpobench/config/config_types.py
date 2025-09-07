@@ -2,7 +2,6 @@ from pydantic import BaseModel, ConfigDict, model_validator
 from typing import Union, Literal, Optional
 from confopt.selection.acquisition import (
     QuantileConformalSearcher,
-    LocallyWeightedConformalSearcher,
 )
 from hpobench.generation.generate import ObjectiveMetricGenerator
 
@@ -59,7 +58,6 @@ class TunerConfig(BaseModel):
             "gp_opt_ots",
         ],
         QuantileConformalSearcher,
-        LocallyWeightedConformalSearcher,
     ]
     searcher_tuning_framework: Optional[Literal["reward_cost", "fixed"]] = None
     config_identifier: str

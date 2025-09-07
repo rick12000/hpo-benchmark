@@ -8,13 +8,12 @@ from hpobench.tune import (
     calculate_winkler_components,
 )
 from confopt.selection.acquisition import (
-    LocallyWeightedConformalSearcher,
     QuantileConformalSearcher,
     LowerBoundSampler,
     ThompsonSampler,
 )
 
-N_TRIALS = 30
+N_TRIALS = 40
 RANDOM_STATE = 1234
 
 
@@ -100,24 +99,6 @@ def test_optuna_tune_reproducibility(
     "estimator_class,estimator_params,sampler_class,sampler_params",
     [
         (
-            LocallyWeightedConformalSearcher,
-            {
-                "point_estimator_architecture": "gbm",
-                "variance_estimator_architecture": "gbm",
-            },
-            LowerBoundSampler,
-            {"interval_width": 0.9},
-        ),
-        (
-            LocallyWeightedConformalSearcher,
-            {
-                "point_estimator_architecture": "gbm",
-                "variance_estimator_architecture": "gbm",
-            },
-            ThompsonSampler,
-            {"n_quantiles": 4, "enable_optimistic_sampling": False},
-        ),
-        (
             QuantileConformalSearcher,
             {"quantile_estimator_architecture": "qknn"},
             LowerBoundSampler,
@@ -185,7 +166,12 @@ def test_confopt_tune_reproducibility(
             result2.iloc[i]["performance"]
         )
         assert result1.iloc[i]["configurations"] == result2.iloc[i]["configurations"]
-        assert result1.iloc[i]["breach_status"] == result2.iloc[i]["breach_status"]
+        breach_status_1 = result1.iloc[i]["breach_status"]
+        breach_status_2 = result2.iloc[i]["breach_status"]
+        # Handle cases where both breach statuses are NaN, as np.nan == np.nan is False
+        assert (pd.isna(breach_status_1) and pd.isna(breach_status_2)) or (
+            breach_status_1 == breach_status_2
+        )
 
 
 @pytest.mark.slow

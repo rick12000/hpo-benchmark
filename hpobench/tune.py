@@ -15,7 +15,6 @@ from skopt.space import Real, Integer as SKInteger, Categorical as SKCategorical
 from confopt.tuning import ConformalTuner
 from hpobench.generation.generate import ObjectiveMetricGenerator
 from confopt.selection.acquisition import (
-    LocallyWeightedConformalSearcher,
     QuantileConformalSearcher,
 )
 from confopt.selection.sampling.bound_samplers import (
@@ -54,14 +53,10 @@ from hpobench.gp_opt.acquisition_functions import (
     OptimisticThompsonSampling,
 )
 
-# Constants:
 SKOPT_GP_ACQ_FUNC = "EI"
 SKOPT_GP_ACQ_OPTIMIZER = "sampling"
-CONFOPT_USE_DYNAMIC_SAMPLING = True
-CONFOPT_RETRAINING_FREQUENCY = 1
-GP_OPT_USE_DYNAMIC_SAMPLING = True
-GP_OPT_RETRAINING_FREQUENCY = 1
-N_CANDIDATES = 2000  # 1000
+DEFAULT_RETRAINING_FREQUENCY = 1
+N_CANDIDATES = 2000
 
 
 def calculate_breach_status(
@@ -406,7 +401,7 @@ def setup_confopt_params(
 def confopt_tune(
     raw_params: dict[str, Union[IntRange, FloatRange, CategoricalRange]],
     performance_generator: ObjectiveMetricGenerator,
-    sampler: Union[QuantileConformalSearcher, LocallyWeightedConformalSearcher],
+    sampler: Union[QuantileConformalSearcher],
     warm_start_configs: Optional[list[tuple[dict, float]]] = None,
     random_state: Optional[int] = None,
     n_trials: Optional[int] = None,
@@ -436,7 +431,7 @@ def confopt_tune(
         minimize=True,
         n_candidates=N_CANDIDATES,
         warm_starts=warm_start_configs,
-        dynamic_sampling=CONFOPT_USE_DYNAMIC_SAMPLING,
+        dynamic_sampling=True,
     )
 
     adj_n_trials = n_trials
@@ -451,11 +446,11 @@ def confopt_tune(
         max_runtime=int(timeout) if timeout is not None else None,
         max_searches=adj_n_trials,
         n_random_searches=0,
-        conformal_retraining_frequency=CONFOPT_RETRAINING_FREQUENCY,
+        conformal_retraining_frequency=DEFAULT_RETRAINING_FREQUENCY,
         verbose=False,
         random_state=random_state,
         optimizer_framework=searcher_tuning_framework
-        if searcher_tuning_framework in ("reward_cost", "fixed")
+        if searcher_tuning_framework in ("decaying", "fixed")
         else None,
     )
 
@@ -576,8 +571,6 @@ def skopt_tune(
     Returns:
         DataFrame with tuning history.
     """
-    # TODO: Here until timeout implemented:
-
     skopt_params, param_names = setup_skopt_params(raw_params)
     if warm_start_configs is not None:
         x0 = [
@@ -588,7 +581,7 @@ def skopt_tune(
         x0 = []
         y0 = []
 
-    n_calls = (n_trials - len(warm_start_configs)) if warm_start_configs else n_trials
+    n_calls = n_trials
 
     runtimes: list[datetime] = []
     objective_fn = partial(
@@ -722,6 +715,34 @@ def smac_objective_function(
     return result
 
 
+class GlobalSearch(RandomSearch):
+    """Custom RandomSearch that evaluates acquisition function for both TS and EI."""
+
+    def _maximize(
+        self,
+        previous_configs: list,
+        n_points: int,
+        _sorted: bool = False,
+    ):
+        """Override to always evaluate acquisition function for TS."""
+        if n_points > 1:
+            rand_configs = self._configspace.sample_configuration(size=n_points)
+        else:
+            rand_configs = [self._configspace.sample_configuration()]
+
+        # For both TS and EI, we need to evaluate the acquisition function
+        if isinstance(self._acquisition_function, TS):
+            origin_name = "Acquisition Function Maximizer: TS Random Search"
+        else:
+            origin_name = "Acquisition Function Maximizer: EI Random Search"
+
+        for i in range(len(rand_configs)):
+            rand_configs[i].origin = origin_name
+
+        # Always evaluate acquisition function and sort by value
+        return self._sort_by_acquisition_value(rand_configs)
+
+
 def smac_tune(
     raw_params: dict[str, Union[IntRange, FloatRange, CategoricalRange]],
     performance_generator: ObjectiveMetricGenerator,
@@ -753,11 +774,25 @@ def smac_tune(
         DataFrame with tuning history.
     """
     # Disable SMAC logging to reduce noise
-    logging.getLogger("smac").setLevel(logging.ERROR)
-    logging.getLogger("smac.facade").setLevel(logging.ERROR)
-    logging.getLogger("smac.intensifier").setLevel(logging.ERROR)
-    logging.getLogger("smac.runhistory").setLevel(logging.ERROR)
-    logging.getLogger("smac.optimizer").setLevel(logging.ERROR)
+    smac_logger = logging.getLogger("smac")
+    smac_logger.setLevel(logging.ERROR)
+    smac_logger.propagate = False
+
+    smac_facade_logger = logging.getLogger("smac.facade")
+    smac_facade_logger.setLevel(logging.ERROR)
+    smac_facade_logger.propagate = False
+
+    smac_intensifier_logger = logging.getLogger("smac.intensifier")
+    smac_intensifier_logger.setLevel(logging.ERROR)
+    smac_intensifier_logger.propagate = False
+
+    smac_runhistory_logger = logging.getLogger("smac.runhistory")
+    smac_runhistory_logger.setLevel(logging.ERROR)
+    smac_runhistory_logger.propagate = False
+
+    smac_optimizer_logger = logging.getLogger("smac.optimizer")
+    smac_optimizer_logger.setLevel(logging.ERROR)
+    smac_optimizer_logger.propagate = False
 
     # Create configuration space
     configspace = setup_smac_configspace(raw_params, random_state)
@@ -772,19 +807,19 @@ def smac_tune(
     )
 
     # Configure acquisition function and maximizer based on sampler
-    # Use RandomSearch for both to disable local search and ensure fair comparison
+    # Use TSRandomSearch for both EI and TS to properly evaluate acquisition functions
     if sampler == "smac_rf_ei":
         acquisition_function = EI(xi=0.0, log=False)
-        acquisition_maximizer = RandomSearch(
+        acquisition_maximizer = GlobalSearch(
             configspace=configspace,
-            challengers=N_CANDIDATES,
+            acquisition_function=acquisition_function,
             seed=random_state,
         )
     elif sampler == "smac_rf_ts":
-        acquisition_function = TS(xi=0.0)  # xi not used for TS but kept for consistency
-        acquisition_maximizer = RandomSearch(
+        acquisition_function = TS()
+        acquisition_maximizer = GlobalSearch(
             configspace=configspace,
-            challengers=N_CANDIDATES,
+            acquisition_function=acquisition_function,
             seed=random_state,
         )
     else:
@@ -798,16 +833,16 @@ def smac_tune(
         runtimes=runtimes,
     )
 
-    # Create SMAC facade with vanilla settings (no racing, no random interleaving)
+    # Create SMAC facade with fair comparison settings
     smac = HyperparameterOptimizationFacade(
         scenario=scenario,
         target_function=objective_fn,
         model=HyperparameterOptimizationFacade.get_model(scenario),
         acquisition_function=acquisition_function,
         acquisition_maximizer=acquisition_maximizer,
-        # Disable racing: each configuration evaluated only once
+        # Disable racing: each configuration evaluated exactly once
         intensifier=HyperparameterOptimizationFacade.get_intensifier(
-            scenario, max_config_calls=1, max_incumbents=1
+            scenario, max_config_calls=1
         ),
         # Disable random interleaving: always use acquisition function
         random_design=HyperparameterOptimizationFacade.get_random_design(
@@ -836,9 +871,7 @@ def smac_tune(
         config = smac.runhistory.get_config(trial_key.config_id)
         config_dict = config.get_dictionary()  # Use proper ConfigSpace method
 
-        # Use runtime from our tracking if available, otherwise use a placeholder
-        end_time = runtimes[idx] if idx < len(runtimes) else datetime.now()
-
+        end_time = runtimes[idx]
         history.append(
             build_history_entry(
                 end_time=end_time,
@@ -935,7 +968,7 @@ def gp_opt_tune(
         minimize=True,
         n_candidates=N_CANDIDATES,
         warm_starts=warm_start_configs,
-        dynamic_sampling=GP_OPT_USE_DYNAMIC_SAMPLING,
+        dynamic_sampling=True,
     )
 
     adj_n_trials = n_trials
@@ -959,7 +992,7 @@ def gp_opt_tune(
         max_runtime=int(timeout) if timeout is not None else None,
         max_searches=adj_n_trials,
         n_random_searches=0,
-        retraining_frequency=GP_OPT_RETRAINING_FREQUENCY,
+        retraining_frequency=DEFAULT_RETRAINING_FREQUENCY,
         verbose=False,
         random_state=random_state,
     )
@@ -1022,7 +1055,7 @@ def tune(
     elif tuner_config.tuner == "confopt":
         if not isinstance(
             tuner_config.searcher,
-            (QuantileConformalSearcher, LocallyWeightedConformalSearcher),
+            (QuantileConformalSearcher),
         ):
             raise ValueError("Confopt tuner requires a conformal searcher instance.")
         history = confopt_tune(

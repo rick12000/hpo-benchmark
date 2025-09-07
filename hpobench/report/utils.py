@@ -8,7 +8,7 @@ from hpobench.utils import generate_hyperparameter_combinations
 import pandas as pd
 import logging
 import os
-from typing import List, Optional
+from typing import List, Optional, Literal
 
 from hpobench.utils import save_analysis_results, AnalysisPathManager
 from hpobench.process import block_bootstrap
@@ -164,8 +164,11 @@ def run_and_save_wilcoxon(
     filename: str,
     analysis_type: str,
     subfolder: str = "statistical_tests",
+    correction_method: Literal[
+        "bonferroni-holm", "benjamini-hochberg"
+    ] = "benjamini-hochberg",
 ) -> pd.DataFrame:
-    """Run Wilcoxon signed-rank pairwise tests with Holm-Bonferroni correction and save results.
+    """Run Wilcoxon signed-rank pairwise tests with multiple testing correction and save results.
 
     Args:
         data: DataFrame with rank data
@@ -179,6 +182,7 @@ def run_and_save_wilcoxon(
         filename: CSV filename to save
         analysis_type: Analysis type for path organization
         subfolder: Subfolder for saving results
+        correction_method: Multiple testing correction method to use
 
     Returns:
         DataFrame with pairwise comparison results
@@ -190,6 +194,7 @@ def run_and_save_wilcoxon(
         entity_col=entity_col,
         rank_col=rank_col,
         alpha=alpha,
+        correction_method=correction_method,
     )
     save_analysis_results(
         results_df,
@@ -216,8 +221,11 @@ def run_and_save_permutation_test(
     subfolder: str = "statistical_tests",
     n_permutations: int = 10000,
     random_state: Optional[int] = None,
+    correction_method: Literal[
+        "bonferroni-holm", "benjamini-hochberg"
+    ] = "benjamini-hochberg",
 ) -> pd.DataFrame:
-    """Run permutation tests with Holm-Bonferroni correction and save results.
+    """Run permutation tests with multiple testing correction and save results.
 
     Args:
         data: DataFrame with rank data
@@ -233,6 +241,7 @@ def run_and_save_permutation_test(
         subfolder: Subfolder for saving results
         n_permutations: Number of permutations for the test
         random_state: Random seed for reproducible results
+        correction_method: Multiple testing correction method to use
 
     Returns:
         DataFrame with pairwise comparison results
@@ -246,6 +255,7 @@ def run_and_save_permutation_test(
         alpha=alpha,
         n_permutations=n_permutations,
         random_state=random_state,
+        correction_method=correction_method,
     )
     save_analysis_results(
         results_df,
@@ -273,15 +283,38 @@ def run_statistical_tests_for_budget(
     analysis_type: str,
     random_state: Optional[int] = None,
     subfolder: str = "statistical_tests",
+    filename_prefix: str = "",
+    correction_method: Literal[
+        "bonferroni-holm", "benjamini-hochberg"
+    ] = "benjamini-hochberg",
 ) -> Optional[pd.DataFrame]:
     """Run the configured statistical tests for a single budget slice.
 
     Only tests benchmarks that have at least 3 datasets. Benchmarks with
     insufficient datasets are skipped gracefully and logged.
 
-    Returns the pairwise results DataFrame to be used for critical-difference
-    plotting if the chosen `cd_significance_method` produced results, otherwise
-    returns None.
+    Args:
+        data: DataFrame containing the benchmark data
+        budget: Budget value to analyze
+        norm_runtime_unit: Column name for normalized runtime
+        analysis_components: List of statistical tests to run
+        cd_significance_method: Method for critical difference analysis
+        bench_col: Column name for benchmark identifier
+        data_col: Column name for dataset identifier
+        tuner_col: Column name for tuner identifier
+        alpha: Significance level for tests
+        cache_path: Path for saving results
+        run_start_str: Run identifier string
+        analysis_type: Type of analysis
+        random_state: Random seed for reproducibility
+        subfolder: Subfolder for saving results
+        filename_prefix: Prefix for output filenames
+        correction_method: Multiple testing correction method to use
+
+    Returns:
+        The pairwise results DataFrame to be used for critical-difference
+        plotting if the chosen `cd_significance_method` produced results, otherwise
+        returns None.
     """
     logger = logging.getLogger(__name__)
     cd_results: Optional[pd.DataFrame] = None
@@ -331,7 +364,7 @@ def run_statistical_tests_for_budget(
                 alpha=alpha,
                 cache_path=cache_path,
                 run_start_str=run_start_str,
-                filename=f"friedman_test_budget_{budget}.csv",
+                filename=f"{filename_prefix}friedman_test_budget_{budget}.csv",
                 analysis_type=analysis_type,
                 subfolder=subfolder,
             )
@@ -353,7 +386,7 @@ def run_statistical_tests_for_budget(
             alpha=alpha,
             cache_path=cache_path,
             run_start_str=run_start_str,
-            filename=f"nemenyi_pairwise_budget_{budget}.csv",
+            filename=f"{filename_prefix}nemenyi_pairwise_budget_{budget}.csv",
             analysis_type=analysis_type,
             subfolder=subfolder,
         )
@@ -371,9 +404,10 @@ def run_statistical_tests_for_budget(
             alpha=alpha,
             cache_path=cache_path,
             run_start_str=run_start_str,
-            filename=f"wilcoxon_pairwise_budget_{budget}.csv",
+            filename=f"{filename_prefix}wilcoxon_pairwise_budget_{budget}.csv",
             analysis_type=analysis_type,
             subfolder=subfolder,
+            correction_method=correction_method,
         )
         results_df[norm_runtime_unit] = budget
         if cd_significance_method == "wilcoxon":
@@ -389,10 +423,11 @@ def run_statistical_tests_for_budget(
             alpha=alpha,
             cache_path=cache_path,
             run_start_str=run_start_str,
-            filename=f"permutation_pairwise_budget_{budget}.csv",
+            filename=f"{filename_prefix}permutation_pairwise_budget_{budget}.csv",
             analysis_type=analysis_type,
             subfolder=subfolder,
             random_state=random_state,
+            correction_method=correction_method,
         )
         results_df[norm_runtime_unit] = budget
         if cd_significance_method == "permutation_test":

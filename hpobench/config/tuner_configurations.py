@@ -27,7 +27,6 @@ STATIC_ANALYSIS_ESTIMATOR_ARCHITECTURES = [
     "ql",
     "qrf",
     "qgbm",
-    "qens1",
     "qens5",
 ]
 
@@ -109,7 +108,7 @@ for interval_width in COVERAGE_INTERVAL_WIDTHS:
 
 
 # 3. Create configurations feeding the comparative tuner rank plots:
-SAMPLER_VARIATION_N_DEFAULT_QUANTILES = 4
+SAMPLER_VARIATION_N_DEFAULT_QUANTILES = 6
 SAMPLER_VARIATION_DEFAULT_ADAPTER = "DtACI"
 SAMPLER_VARIATION_CONFIGURATIONS = build_sampler_variation_configurations(
     samplers=[
@@ -134,7 +133,7 @@ SAMPLER_VARIATION_CONFIGURATIONS = build_sampler_variation_configurations(
 )
 
 ARCHITECTURE_VARIATION_ADAPTER = "DtACI"
-ARCHITECTURE_VARIATION_N_QUANTILES = 4
+ARCHITECTURE_VARIATION_N_QUANTILES = 6
 ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurations(
     architectures=[
         "qknn",
@@ -142,13 +141,17 @@ ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurati
         "ql",
         "qrf",
         "qgbm",
-        "qens1",
         "qens5",
     ],
     samplers=[
         ExpectedImprovementSampler(
             n_quantiles=ARCHITECTURE_VARIATION_N_QUANTILES,
             num_ei_samples=1000,
+            adapter=ARCHITECTURE_VARIATION_ADAPTER,
+        ),
+        ThompsonSampler(
+            n_quantiles=ARCHITECTURE_VARIATION_N_QUANTILES,
+            enable_optimistic_sampling=False,
             adapter=ARCHITECTURE_VARIATION_ADAPTER,
         ),
         ThompsonSampler(
@@ -161,20 +164,14 @@ ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurati
 )
 
 LIMITED_ARCHITECTURE_ADAPTER = "DtACI"
-LIMITED_ARCHITECTURE_N_QUANTILES = 4
+LIMITED_ARCHITECTURE_N_QUANTILES = 6
 LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurations(
     architectures=[
         # "qgp",
         "qgbm",
-        # "qens1",
         # "qens5",
     ],
     samplers=[
-        # ExpectedImprovementSampler(
-        #     n_quantiles=LIMITED_ARCHITECTURE_N_QUANTILES,
-        #     num_ei_samples=1000,
-        #     adapter=LIMITED_ARCHITECTURE_ADAPTER,
-        # ),
         ThompsonSampler(
             n_quantiles=LIMITED_ARCHITECTURE_N_QUANTILES,
             enable_optimistic_sampling=True,
@@ -188,15 +185,13 @@ LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_con
 
 
 PRECONFORMAL_ADAPTER = "DtACI"
-PRECONFORMAL_N_QUANTILES = 4
+PRECONFORMAL_N_QUANTILES = 6
 PRECONFORMAL_COMPARISON_CONFIGURATIONS = []
 for architecture in [
     "qgp",
-    # "ql",
     "qgbm",
     "qrf",
-    # "qens1",
-    # "qens5",
+    "qens5",
 ]:
     # Simulate normal pre-conformal cutoff vs. unreachable one:
     for pre_conformal_trials in [32, 10000]:
@@ -215,12 +210,12 @@ for architecture in [
                     ),
                     ThompsonSampler(
                         n_quantiles=PRECONFORMAL_N_QUANTILES,
-                        enable_optimistic_sampling=True,
+                        enable_optimistic_sampling=False,
                         adapter=adapter,
                     ),
                 ],
                 n_pre_conformal_trials=pre_conformal_trials,
-                calibration_split_strategy="cv",
+                calibration_split_strategy="adaptive",
             )
         )
 
@@ -228,7 +223,7 @@ for architecture in [
 # 4. Create configurations feeding the quantile count variation plots:
 QUANTILE_COUNT_VARIATION_ADAPTER = "DtACI"
 QUANTILE_COUNT_VARIATION_CONFIGURATIONS = []
-QUANTILE_COUNT_VALUES = [4, 10]
+QUANTILE_COUNT_VALUES = [4, 8, 16]
 
 for n_quantiles in QUANTILE_COUNT_VALUES:
     QUANTILE_COUNT_VARIATION_CONFIGURATIONS.extend(
@@ -237,14 +232,19 @@ for n_quantiles in QUANTILE_COUNT_VALUES:
                 "qrf",  # Use single architecture
             ],
             samplers=[
-                ThompsonSampler(
-                    n_quantiles=n_quantiles,
-                    enable_optimistic_sampling=True,
-                    adapter=QUANTILE_COUNT_VARIATION_ADAPTER,
-                ),
                 ExpectedImprovementSampler(
                     n_quantiles=n_quantiles,
                     num_ei_samples=1000,
+                    adapter=QUANTILE_COUNT_VARIATION_ADAPTER,
+                ),
+                ThompsonSampler(
+                    n_quantiles=n_quantiles,
+                    enable_optimistic_sampling=False,
+                    adapter=QUANTILE_COUNT_VARIATION_ADAPTER,
+                ),
+                ThompsonSampler(
+                    n_quantiles=n_quantiles,
+                    enable_optimistic_sampling=True,
                     adapter=QUANTILE_COUNT_VARIATION_ADAPTER,
                 ),
             ],
@@ -257,7 +257,7 @@ for n_quantiles in QUANTILE_COUNT_VALUES:
 
 # 5. Create configurations feeding the search tuning effect plots:
 SEARCH_TUNING_EFFECT_ADAPTER = "DtACI"
-SEARCH_TUNING_EFFECT_N_QUANTILES = 4
+SEARCH_TUNING_EFFECT_N_QUANTILES = 6
 SEARCH_TUNING_EFFECT_CONFIGURATIONS = []
 
 # Use multiple architectures and vary searcher_tuning_framework (None vs "fixed")
