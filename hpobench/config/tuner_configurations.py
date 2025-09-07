@@ -20,7 +20,7 @@ from hpobench.config.utils import (
 )
 from hpobench.config.config_types import (
     TunerConfig,
-    TunerModelConfig,
+    ConfOptModel,
 )
 
 # 1. Static analysis configurations:
@@ -30,7 +30,7 @@ STATIC_ANALYSIS_ESTIMATOR_ARCHITECTURES = [
     "ql",
     "qrf",
     "qgbm",
-    "qens5",
+    # "qens5",
 ]
 
 # 2. Coverage analysis configurations:
@@ -60,9 +60,7 @@ for interval_width in COVERAGE_INTERVAL_WIDTHS:
         else:
             raise ValueError(f"Unknown adapter: {adapter}")
         split_conformal_config = TunerConfig(
-            tuner=TunerModelConfig(
-                backend="confopt", searcher=split_conformal_searcher
-            ),
+            tuner=ConfOptModel(backend="confopt", searcher=split_conformal_searcher),
             tuner_identifier=config_identifier,
             searcher_tuning_framework=None,
         )
@@ -86,7 +84,7 @@ for interval_width in COVERAGE_INTERVAL_WIDTHS:
         else:
             raise ValueError(f"Unknown adapter: {adapter}")
         cv_conformal_config = TunerConfig(
-            tuner=TunerModelConfig(backend="confopt", searcher=cv_conformal_searcher),
+            tuner=ConfOptModel(backend="confopt", searcher=cv_conformal_searcher),
             tuner_identifier=config_identifier,
             searcher_tuning_framework=None,
         )
@@ -106,7 +104,7 @@ for interval_width in COVERAGE_INTERVAL_WIDTHS:
         calibration_split_strategy="train_test_split",
     )
     non_conformal_config = TunerConfig(
-        tuner=TunerModelConfig(backend="confopt", searcher=non_conformal_searcher),
+        tuner=ConfOptModel(backend="confopt", searcher=non_conformal_searcher),
         tuner_identifier="Unconformalized",
         searcher_tuning_framework=None,
     )
@@ -149,7 +147,7 @@ ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurati
         "ql",
         "qrf",
         "qgbm",
-        "qens5",
+        # "qens5",
     ],
     samplers=[
         ExpectedImprovementSampler(
@@ -174,24 +172,22 @@ ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurati
 # 5. Limited architecture configurations:
 LIMITED_ARCHITECTURE_ADAPTER = "DtACI"
 LIMITED_ARCHITECTURE_N_QUANTILES = 6
-LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS = (
-    build_architecture_variation_configurations(
-        architectures=[
-            "qgp",
-            "qgbm",
-            "qens5",
-        ],
-        samplers=[
-            ThompsonSampler(
-                n_quantiles=LIMITED_ARCHITECTURE_N_QUANTILES,
-                enable_optimistic_sampling=True,
-                adapter=LIMITED_ARCHITECTURE_ADAPTER,
-            ),
-        ],
-        n_pre_conformal_trials=32,
-        searcher_tuning_framework=None,
-        calibration_split_strategy="train_test_split",
-    )
+LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurations(
+    architectures=[
+        "qgp",
+        "qgbm",
+        # "qens5",
+    ],
+    samplers=[
+        ThompsonSampler(
+            n_quantiles=LIMITED_ARCHITECTURE_N_QUANTILES,
+            enable_optimistic_sampling=True,
+            adapter=LIMITED_ARCHITECTURE_ADAPTER,
+        ),
+    ],
+    n_pre_conformal_trials=32,
+    searcher_tuning_framework=None,
+    calibration_split_strategy="train_test_split",
 )
 
 # 6. Pre-conformal comparison configurations:
@@ -201,7 +197,7 @@ PRECONFORMAL_COMPARISON_CONFIGURATIONS = []
 for architecture in [
     "qgp",
     "qgbm",
-    "qens5",
+    # "qens5",
 ]:
     # Simulate normal pre-conformal cutoff vs. unreachable one:
     for pre_conformal_trials in [32, 10000]:

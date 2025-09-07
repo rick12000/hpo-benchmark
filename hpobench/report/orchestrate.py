@@ -298,31 +298,37 @@ def run_main_benchmark(
                     "searcher_tuning_framework"
                 ] = tuner.searcher_tuning_framework
 
-                if tuner.backend == "confopt":
-                    sampler_name = tuner.tuner.sampler.__class__.__name__
+                if tuner.tuner.backend == "confopt":
+                    sampler_name = tuner.tuner.searcher.sampler.__class__.__name__
 
-                    if hasattr(tuner.tuner.sampler, "interval_width"):
-                        confidence_level = str(tuner.tuner.sampler.interval_width)
+                    if hasattr(tuner.tuner.searcher.sampler, "interval_width"):
+                        confidence_level = str(
+                            tuner.tuner.searcher.sampler.interval_width
+                        )
                     else:
                         confidence_level = ""
 
-                    estimator_architecture = tuner.tuner.quantile_estimator_architecture
+                    estimator_architecture = (
+                        tuner.tuner.searcher.quantile_estimator_architecture
+                    )
 
-                    if hasattr(tuner.tuner, "n_pre_conformal_trials"):
-                        n_pre_conformal_trials = tuner.tuner.n_pre_conformal_trials
+                    if hasattr(tuner.tuner.searcher, "n_pre_conformal_trials"):
+                        n_pre_conformal_trials = (
+                            tuner.tuner.searcher.n_pre_conformal_trials
+                        )
                     else:
                         n_pre_conformal_trials = ""
 
-                    if hasattr(tuner.tuner.sampler, "n_quantiles"):
-                        sampler_n_quantiles = tuner.tuner.sampler.n_quantiles
+                    if hasattr(tuner.tuner.searcher.sampler, "n_quantiles"):
+                        sampler_n_quantiles = tuner.tuner.searcher.sampler.n_quantiles
                     else:
                         sampler_n_quantiles = ""
 
-                    if hasattr(tuner.tuner.sampler, "adapter"):
-                        if tuner.tuner.sampler.adapter is None:
+                    if hasattr(tuner.tuner.searcher.sampler, "adapter"):
+                        if tuner.tuner.searcher.sampler.adapter is None:
                             sampler_adapter = "None"
                         else:
-                            sampler_adapter = str(tuner.tuner.sampler.adapter)
+                            sampler_adapter = str(tuner.tuner.searcher.sampler.adapter)
                     else:
                         sampler_adapter = ""
 
@@ -352,9 +358,9 @@ def run_main_benchmark(
                     if sampler_name in aliases.sampler_aliases
                     else sampler_name
                 )
-                if tuner.backend == "confopt":
+                if tuner.tuner.backend == "confopt":
                     if sampler_name == "ThompsonSampler":
-                        if tuner.tuner.sampler.enable_optimistic_sampling:
+                        if tuner.tuner.searcher.sampler.enable_optimistic_sampling:
                             aliased_sampler_name = "OBS"
                 historical_performance[
                     "estimator_architecture"

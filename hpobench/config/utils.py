@@ -1,5 +1,5 @@
 from typing import Union, Optional, List, Any
-from hpobench.config.config_types import TunerModelConfig
+from hpobench.config.config_types import ConfOptModel
 
 try:
     from confopt.selection.acquisition import (
@@ -139,7 +139,7 @@ def build_static_tuning_configurations(
     sampler_copy = deepcopy(placeholder_sampler)
     return [
         TunerConfig(
-            tuner=TunerModelConfig(
+            tuner=ConfOptModel(
                 backend="confopt",
                 searcher=QuantileConformalSearcher(
                     quantile_estimator_architecture=arch,
@@ -201,7 +201,7 @@ def build_sampler_variation_configurations(
         )
         configs.append(
             TunerConfig(
-                tuner=TunerModelConfig(backend="confopt", searcher=searcher),
+                tuner=ConfOptModel(backend="confopt", searcher=searcher),
                 tuner_identifier=config_id,
                 searcher_tuning_framework=searcher_tuning_framework,
             )
@@ -250,7 +250,7 @@ def build_architecture_variation_configurations(
             )
             configs.append(
                 TunerConfig(
-                    tuner=TunerModelConfig(backend="confopt", searcher=searcher),
+                    tuner=ConfOptModel(backend="confopt", searcher=searcher),
                     tuner_identifier=config_id,
                     searcher_tuning_framework=searcher_tuning_framework,
                 )
