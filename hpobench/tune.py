@@ -1,27 +1,37 @@
 import pandas as pd
 import optuna
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from hpobench.config.config_types import TunerConfig
 from hpobench.config.config_types import IntRange, FloatRange, CategoricalRange
-from typing import Union, Optional, Literal, Any
+from typing import Union, Optional, Any, Dict
 from optuna.samplers import TPESampler, RandomSampler, CmaEsSampler, GPSampler
 from hpobench.optuna_gp_integration import (
     StrippedGPSampler,
     ExpandedAcquisitionFunction,
 )
+from hpobench.config.config_types import (
+    ConfOptModel,
+    SkOptModel,
+    OptunaModel,
+    SMACModel,
+    CustomGPModel,
+)
 from skopt import forest_minimize, gbrt_minimize, gp_minimize
 from skopt.space import Real, Integer as SKInteger, Categorical as SKCategorical
-from confopt.tuning import ConformalTuner
-from hpobench.generation.generate import ObjectiveMetricGenerator
-from confopt.selection.acquisition import (
-    QuantileConformalSearcher,
-)
-from confopt.selection.sampling.bound_samplers import (
-    LowerBoundSampler,
-    PessimisticLowerBoundSampler,
-)
-from confopt import wrapping as ranges
+
+try:
+    from confopt.tuning import ConformalTuner
+    from hpobench.generation.generate import ObjectiveMetricGenerator
+    from confopt.selection.sampling.bound_samplers import (
+        LowerBoundSampler,
+        PessimisticLowerBoundSampler,
+    )
+    from confopt import wrapping as ranges
+except ImportError:
+    raise ImportError(
+        "confopt is a core dependency of this repository, but it is not automatically installed via pyproject.toml, please refer to the README.md for instructions on how to install this separately"
+    )
 from copy import deepcopy
 from functools import partial
 from hpobench.syne_tune_integration import syne_tune_cqr_tune
@@ -34,14 +44,20 @@ from ConfigSpace.hyperparameters import (
     UniformIntegerHyperparameter,
     CategoricalHyperparameter,
 )
-from smac.facade.hyperparameter_optimization_facade import (
-    HyperparameterOptimizationFacade,
-)
-from smac.acquisition.function.expected_improvement import EI
-from smac.acquisition.function.thompson import TS
-from smac.acquisition.maximizer.random_search import RandomSearch
-from smac.scenario import Scenario
-from smac.runhistory.dataclasses import TrialInfo, TrialValue
+
+try:
+    from smac.facade.hyperparameter_optimization_facade import (
+        HyperparameterOptimizationFacade,
+    )
+    from smac.acquisition.function.expected_improvement import EI
+    from smac.acquisition.function.thompson import TS
+    from smac.acquisition.maximizer.random_search import RandomSearch
+    from smac.scenario import Scenario
+    from smac.runhistory.dataclasses import TrialInfo, TrialValue
+except ImportError:
+    raise ImportError(
+        "smac is a core dependency of this repository, but it is not automatically installed via pyproject.toml, please refer to the README.md for instructions on how to install this separately"
+    )
 
 from hpobench.gp_opt.tuning import GPTuner
 from hpobench.gp_opt import wrapping as gp_opt_ranges
@@ -53,10 +69,57 @@ from hpobench.gp_opt.acquisition_functions import (
     OptimisticThompsonSampling,
 )
 
-SKOPT_GP_ACQ_FUNC = "EI"
-SKOPT_GP_ACQ_OPTIMIZER = "sampling"
-DEFAULT_RETRAINING_FREQUENCY = 1
 N_CANDIDATES = 2000
+
+
+def create_runtime_tracker() -> list[datetime]:
+    """Creates an empty list to track runtime timestamps during optimization.
+
+    Returns:
+        Empty list that will store datetime objects for runtime tracking.
+    """
+    return []
+
+
+def record_runtime(runtimes: list[datetime]) -> None:
+    """Records the current timestamp in the runtime tracking list.
+
+    Args:
+        runtimes: List of datetime objects to append the current timestamp to.
+    """
+    runtimes.append(datetime.now())
+
+
+def apply_retroactive_timestamps(
+    warm_start_configs: Optional[list[tuple[dict, float]]],
+    runtimes: list[datetime],
+) -> list[datetime]:
+    """Applies retroactive timestamps to warm-start configurations.
+
+    Creates timestamps for warm-start configurations by working backwards from the
+    earliest objective function runtime, ensuring warm-starts appear to have
+    occurred before optimization began.
+
+    Args:
+        warm_start_configs: List of (config, loss) tuples for warm-starting.
+        runtimes: List of datetime objects from actual objective function calls.
+
+    Returns:
+        Combined list of timestamps for warm-start configs followed by objective function runtimes.
+    """
+    if not warm_start_configs or not runtimes:
+        return runtimes
+
+    # Get the smallest timestamp from objective function calls
+    min_runtime = min(runtimes)
+
+    # Assign backwards timestamps to warm-start configs (reverse order)
+    warm_start_runtimes = []
+    for i in range(len(warm_start_configs)):
+        warm_start_runtimes.append(min_runtime - timedelta(seconds=i + 1))
+
+    # Combine warm-start runtimes with objective function runtimes
+    return warm_start_runtimes + runtimes
 
 
 def calculate_breach_status(
@@ -64,15 +127,15 @@ def calculate_breach_status(
     upper_bound: float,
     realization: float,
 ) -> int:
-    """Calculate breach status based on prediction interval and realization.
+    """Calculates whether the true performance breaches the prediction interval.
 
     Args:
-        lower_bound: Lower bound of prediction interval.
-        upper_bound: Upper bound of prediction interval.
-        realization: True realization (performance value).
+        lower_bound: Lower bound of the conformal prediction interval.
+        upper_bound: Upper bound of the conformal prediction interval.
+        realization: Actual observed performance value.
 
     Returns:
-        1 if breach occurred, 0 if not.
+        1 if the realization falls outside the prediction interval (breach), 0 otherwise.
     """
     return 1 if (realization < lower_bound or realization > upper_bound) else 0
 
@@ -83,16 +146,20 @@ def calculate_winkler_components(
     realization: float,
     alpha: float,
 ) -> tuple[float, float, float]:
-    """Calculate Winkler score components.
+    """Calculates components of the Winkler score for conformal prediction evaluation.
+
+    The Winkler score combines prediction interval width with penalties for miscoverage,
+    providing a balanced evaluation metric for uncertainty quantification quality.
 
     Args:
-        lower_bound: Lower bound of prediction interval.
-        upper_bound: Upper bound of prediction interval.
-        realization: True realization (performance value).
-        alpha: Miscoverage rate (1 - confidence_level).
+        lower_bound: Lower bound of the conformal prediction interval.
+        upper_bound: Upper bound of the conformal prediction interval.
+        realization: Actual observed performance value.
+        alpha: Miscoverage rate (1 - confidence level), typically 0.1 for 90% confidence.
 
     Returns:
-        Tuple of (winkler_score, width, miscoverage_penalty).
+        Tuple of (winkler_score, width, miscoverage_penalty) where winkler_score
+        is the sum of width and miscoverage_penalty.
     """
     if upper_bound < lower_bound:
         width = 0.0
@@ -127,23 +194,24 @@ def build_history_entry(
     tabularized_configuration: Optional[Any] = None,
     acquisition_source: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Standardizes the history entry structure for all tuners.
+    """Creates a standardized dictionary entry for tuning history records.
 
     Args:
-        end_time: Timestamp when the trial finished.
-        performance: Performance metric value.
-        configurations: Parameter configuration dictionary.
-        iteration: Iteration number (1-based).
-        estimator_error: Error from estimator, if available.
-        searcher_training_time: Time spent training the searcher, if available.
-        breach_status: Breach status (0 or 1) indicating if the prediction interval was breached.
-        winkler_score: Winkler score for the trial, indicating the quality of the prediction interval.
-        width: Width of the prediction interval.
-        miscoverage_penalty: Penalty for miscoverage, indicating the cost of the prediction interval not covering the true value.
-        tabularized_configuration: Tabularized configuration data, if available.
+        end_time: Timestamp when the trial completed.
+        performance: Observed performance metric value.
+        configurations: Dictionary of hyperparameter configuration.
+        iteration: Trial iteration number (1-based indexing).
+        estimator_error: Prediction error from surrogate model, if applicable.
+        searcher_training_time: Time spent training the searcher model.
+        breach_status: Binary indicator (0/1) of prediction interval breach.
+        winkler_score: Winkler score evaluating prediction interval quality.
+        width: Width of the conformal prediction interval.
+        miscoverage_penalty: Penalty for prediction interval not containing true value.
+        tabularized_configuration: Processed configuration data for analysis.
+        acquisition_source: Identifier for the acquisition function used.
 
     Returns:
-        Dictionary with standardized keys for tuning history.
+        Dictionary containing all trial information with standardized keys.
     """
     return {
         "end_time": end_time,
@@ -165,14 +233,15 @@ def set_optuna_params(
     trial: optuna.trial.Trial,
     raw_params: dict[str, Union[IntRange, FloatRange, CategoricalRange]],
 ) -> dict[str, Any]:
-    """Suggests parameter values for an Optuna trial based on parameter definitions.
+    """Suggests hyperparameter values for an Optuna trial based on parameter range definitions.
 
     Args:
-        trial: Optuna trial object.
-        raw_params: Dictionary mapping parameter names to IntRange, FloatRange, or CategoricalRange.
+        trial: Active Optuna trial object to suggest parameters for.
+        raw_params: Dictionary mapping parameter names to their range specifications
+            (IntRange, FloatRange, or CategoricalRange).
 
     Returns:
-        Dictionary mapping parameter names to suggested values.
+        Dictionary mapping parameter names to their suggested values for this trial.
     """
     optuna_params: dict[str, Any] = {}
     for name, param in raw_params.items():
@@ -197,30 +266,39 @@ def optuna_artificial_objective(
     trial: optuna.trial.Trial,
     params: dict[str, Union[IntRange, FloatRange, CategoricalRange]],
     performance_generator: ObjectiveMetricGenerator,
+    runtimes: list[datetime],
 ) -> float:
-    """Objective function for Optuna using a synthetic performance generator.
+    """Evaluates a hyperparameter configuration using synthetic performance generation for Optuna.
 
     Args:
-        trial: Optuna trial object.
-        params: Dictionary mapping parameter names to IntRange, FloatRange, or CategoricalRange.
-        performance_generator: ObjectiveMetricGenerator instance.
+        trial: Optuna trial object containing the hyperparameter suggestions.
+        params: Dictionary mapping parameter names to their range specifications.
+        performance_generator: Synthetic objective function that generates performance predictions.
+        runtimes: List to record timestamps for runtime tracking.
 
     Returns:
-        Predicted performance as a float.
+        Predicted performance value for the suggested hyperparameter configuration.
     """
-    return performance_generator.predict(configuration=set_optuna_params(trial, params))
+    result = performance_generator.predict(
+        configuration=set_optuna_params(trial, params)
+    )
+    record_runtime(runtimes)
+
+    return result
 
 
 def build_optuna_distributions(
     raw_params: dict[str, Union[IntRange, FloatRange, CategoricalRange]]
 ) -> dict[str, optuna.distributions.BaseDistribution]:
-    """Builds Optuna distributions for warm-start trials.
+    """Creates Optuna distribution objects for parameter spaces to support warm-start functionality.
 
     Args:
-        raw_params: Dictionary mapping parameter names to IntRange, FloatRange, or CategoricalRange.
+        raw_params: Dictionary mapping parameter names to their range specifications
+            (IntRange, FloatRange, or CategoricalRange).
 
     Returns:
-        Dictionary mapping parameter names to Optuna distributions.
+        Dictionary mapping parameter names to corresponding Optuna distribution objects
+        for use in warm-start trial creation.
     """
     dists: dict[str, optuna.distributions.BaseDistribution] = {}
     for name, param in raw_params.items():
@@ -256,39 +334,41 @@ def build_optuna_distributions(
 def optuna_tune(
     raw_params: dict[str, Union[IntRange, FloatRange, CategoricalRange]],
     performance_generator: ObjectiveMetricGenerator,
-    sampler: Union[str, Literal["tpe", "random", "cmaes"]],
+    tuner_model: OptunaModel,
     warm_start_configs: Optional[list[tuple[dict, float]]] = None,
     random_state: Optional[int] = None,
     n_trials: Optional[int] = None,
     timeout: Optional[float] = None,
 ) -> pd.DataFrame:
-    """Runs Optuna tuning with a synthetic objective.
+    """Runs hyperparameter optimization using Optuna with a synthetic objective function.
 
     Args:
-        raw_params: Dictionary mapping parameter names to IntRange, FloatRange, or CategoricalRange.
-        performance_generator: ObjectiveMetricGenerator instance.
-        sampler: Sampler name for Optuna.
-        warm_start_configs: Optional list of (config, loss) tuples for warm start.
-        random_state: Optional random seed.
-        n_trials: Optional number of trials.
-        timeout: Optional time budget in seconds.
+        raw_params: Dictionary mapping parameter names to their range specifications
+            (IntRange, FloatRange, or CategoricalRange).
+        performance_generator: Synthetic objective function for generating performance predictions.
+        tuner_model: OptunaModel configuration specifying the search algorithm and parameters.
+        warm_start_configs: Optional list of (configuration, loss) tuples for initialization.
+        random_state: Optional random seed for reproducible results.
+        n_trials: Optional maximum number of optimization trials.
+        timeout: Optional time budget in seconds for the optimization process.
 
     Returns:
-        DataFrame with tuning history.
+        DataFrame containing the complete tuning history with trial results and metadata.
     """
-    # NOTE: 0 start up trials because this benchmark repository uses warm-starting:
-    if sampler == "tpe":
+    searcher = tuner_model.searcher
+
+    if searcher == "TPE":
         initialized_sampler = TPESampler(
             seed=random_state, n_startup_trials=0, n_ei_candidates=N_CANDIDATES
         )
-    elif sampler == "random":
+    elif searcher == "random":
         initialized_sampler = RandomSampler(seed=random_state)
-    elif sampler == "cmaes":
+    elif searcher == "CMA-ES":
         initialized_sampler = CmaEsSampler(seed=random_state, n_startup_trials=0)
-    elif sampler == "gp":
+    elif searcher == "GP":
         initialized_sampler = GPSampler(seed=random_state, n_startup_trials=0)
-    elif sampler.startswith("confopt_gp_"):
-        acq_func_name = sampler.replace("confopt_gp_", "")
+    elif searcher.startswith("custom-GP-"):
+        acq_func_name = searcher.replace("custom-GP-", "")
         try:
             acq_func = ExpandedAcquisitionFunction(acq_func_name)
         except ValueError:
@@ -302,10 +382,14 @@ def optuna_tune(
             maximize=False,
         )
     else:
-        raise ValueError(f"Unknown optuna sampler: {sampler}")
+        raise ValueError(f"Unknown optuna sampler: {searcher}")
 
     study = optuna.create_study(direction="minimize", sampler=initialized_sampler)
     distributions = build_optuna_distributions(raw_params)
+
+    # Create runtime tracker
+    runtimes = create_runtime_tracker()
+
     if warm_start_configs:
         for config, loss in warm_start_configs:
             trial = optuna.trial.create_trial(
@@ -326,16 +410,19 @@ def optuna_tune(
 
     study.optimize(
         lambda trial: optuna_artificial_objective(
-            trial, raw_params, performance_generator
+            trial, raw_params, performance_generator, runtimes
         ),
         n_trials=adj_n_trials,
         timeout=timeout,
         n_jobs=1,
     )
 
+    # Apply retroactive timestamps for warm-start configurations
+    all_runtimes = apply_retroactive_timestamps(warm_start_configs, runtimes)
+
     history = [
         build_history_entry(
-            end_time=trial.datetime_complete,
+            end_time=all_runtimes[idx],
             performance=trial.value,
             configurations=trial.params,
             iteration=idx + 1,
@@ -354,30 +441,39 @@ def optuna_tune(
 
 def confopt_objective_function(
     performance_generator: ObjectiveMetricGenerator,
+    runtimes: list[datetime],
 ) -> Any:
-    """Returns a callable objective function for confopt.
+    """Creates a ConfOpt-compatible objective function that evaluates hyperparameter configurations.
 
     Args:
-        performance_generator: ObjectiveMetricGenerator instance.
+        performance_generator: Synthetic objective function for generating performance predictions.
+        runtimes: List to record timestamps for runtime tracking during optimization.
 
     Returns:
-        Callable that takes a configuration and returns predicted performance.
+        Callable objective function that takes a configuration dictionary and returns
+        the predicted performance value for use with ConfOpt tuners.
     """
-    return lambda configuration: performance_generator.predict(
-        configuration=configuration
-    )
+
+    def objective(configuration: Dict) -> float:
+        result = performance_generator.predict(configuration=configuration)
+        record_runtime(runtimes)
+
+        return result
+
+    return objective
 
 
 def setup_confopt_params(
     raw_params: dict[str, Union[IntRange, FloatRange, CategoricalRange]],
 ) -> dict[str, Any]:
-    """Builds confopt search space from parameter definitions.
+    """Converts parameter range specifications to ConfOpt-compatible search space definitions.
 
     Args:
-        raw_params: Dictionary mapping parameter names to IntRange, FloatRange, or CategoricalRange.
+        raw_params: Dictionary mapping parameter names to their range specifications
+            (IntRange, FloatRange, or CategoricalRange).
 
     Returns:
-        Dictionary mapping parameter names to confopt range objects.
+        Dictionary mapping parameter names to ConfOpt range objects for search space definition.
     """
     confopt_params: dict[str, Any] = {}
     for name, param in raw_params.items():
@@ -401,31 +497,34 @@ def setup_confopt_params(
 def confopt_tune(
     raw_params: dict[str, Union[IntRange, FloatRange, CategoricalRange]],
     performance_generator: ObjectiveMetricGenerator,
-    sampler: Union[QuantileConformalSearcher],
+    tuner_model: ConfOptModel,
     warm_start_configs: Optional[list[tuple[dict, float]]] = None,
     random_state: Optional[int] = None,
     n_trials: Optional[int] = None,
     timeout: Optional[float] = None,
     searcher_tuning_framework: Optional[str] = None,
 ) -> pd.DataFrame:
-    """Runs confopt tuning with a synthetic objective.
+    """Runs conformal hyperparameter optimization using the ConfOpt framework with synthetic objectives.
 
     Args:
-        raw_params: Dictionary mapping parameter names to IntRange, FloatRange, or CategoricalRange.
-        performance_generator: ObjectiveMetricGenerator instance.
-        sampler: Conformal searcher instance.
-        warm_start_configs: Optional list of (config, loss) tuples for warm start.
-        random_state: Optional random seed.
-        n_trials: Optional number of trials.
-        timeout: Optional time budget in seconds.
-        searcher_tuning_framework: Optional tuning framework string.
+        raw_params: Dictionary mapping parameter names to their range specifications
+            (IntRange, FloatRange, or CategoricalRange).
+        performance_generator: Synthetic objective function for generating performance predictions.
+        tuner_model: ConfOptModel configuration containing the conformal searcher and parameters.
+        warm_start_configs: Optional list of (configuration, loss) tuples for initialization.
+        random_state: Optional random seed for reproducible results.
+        n_trials: Optional maximum number of optimization trials.
+        timeout: Optional time budget in seconds for the optimization process.
+        searcher_tuning_framework: Optional framework identifier for searcher training ("decaying" or "fixed").
 
     Returns:
-        DataFrame with tuning history.
+        DataFrame containing the complete tuning history with conformal prediction intervals and metadata.
     """
-    objective_fn = confopt_objective_function(performance_generator)
+    runtimes = create_runtime_tracker()
+
+    objective_fn = confopt_objective_function(performance_generator, runtimes)
     confopt_params = setup_confopt_params(raw_params)
-    searcher = ConformalTuner(
+    conformal_tuner = ConformalTuner(
         objective_function=objective_fn,
         search_space=confopt_params,
         minimize=True,
@@ -435,18 +534,19 @@ def confopt_tune(
     )
 
     adj_n_trials = n_trials
+    searcher = tuner_model.searcher
 
-    sampler_copy = deepcopy(sampler)
+    searcher_copy = deepcopy(searcher)
     # NOTE: We take the original sampler's alpha, to avoid mutation later on:
-    if isinstance(sampler.sampler, (LowerBoundSampler, PessimisticLowerBoundSampler)):
-        alpha = sampler.sampler.alpha
+    if isinstance(searcher.sampler, (LowerBoundSampler, PessimisticLowerBoundSampler)):
+        alpha = searcher.sampler.alpha
     # NOTE: Zero random searches because this benchmark repository uses warm-starting:
-    searcher.tune(
-        searcher=sampler_copy,
+    conformal_tuner.tune(
+        searcher=searcher_copy,
         max_runtime=int(timeout) if timeout is not None else None,
         max_searches=adj_n_trials,
         n_random_searches=0,
-        conformal_retraining_frequency=DEFAULT_RETRAINING_FREQUENCY,
+        conformal_retraining_frequency=1,
         verbose=False,
         random_state=random_state,
         optimizer_framework=searcher_tuning_framework
@@ -454,12 +554,15 @@ def confopt_tune(
         else None,
     )
 
+    # Apply retroactive timestamps for warm-start configurations
+    all_runtimes = apply_retroactive_timestamps(warm_start_configs, runtimes)
+
     history = []
-    for idx, trial in enumerate(searcher.study.trials):
+    for idx, trial in enumerate(conformal_tuner.study.trials):
         # Only extract alpha and calculate metrics if sampler.sampler is LowerBoundSampler or PessimisticLowerBoundSampler
         if (
             isinstance(
-                sampler.sampler, (LowerBoundSampler, PessimisticLowerBoundSampler)
+                searcher.sampler, (LowerBoundSampler, PessimisticLowerBoundSampler)
             )
             and trial.lower_bound is not None
             and trial.upper_bound is not None
@@ -477,7 +580,7 @@ def confopt_tune(
             miscoverage_penalty = None
         history.append(
             build_history_entry(
-                end_time=trial.timestamp,
+                end_time=all_runtimes[idx],
                 performance=trial.performance,
                 configurations=trial.configuration,
                 iteration=idx + 1,
@@ -495,13 +598,16 @@ def confopt_tune(
 def setup_skopt_params(
     raw_params: dict[str, Union[IntRange, FloatRange, CategoricalRange]]
 ) -> tuple[list[Any], list[str]]:
-    """Creates skopt search space and parameter name list.
+    """Converts parameter range specifications to scikit-optimize compatible search space.
 
     Args:
-        raw_params: Dictionary mapping parameter names to IntRange, FloatRange, or CategoricalRange.
+        raw_params: Dictionary mapping parameter names to their range specifications
+            (IntRange, FloatRange, or CategoricalRange).
 
     Returns:
-        Tuple of (skopt space list, parameter name list).
+        Tuple containing:
+        - List of skopt dimension objects defining the search space
+        - List of parameter names in the same order as the dimensions
     """
     skopt_params: list[Any] = []
     skopt_param_names: list[str] = []
@@ -531,45 +637,46 @@ def skopt_objective(
     performance_generator: ObjectiveMetricGenerator,
     runtimes: list[datetime],
 ) -> float:
-    """Objective function for skopt using a synthetic performance generator.
+    """Evaluates a hyperparameter configuration for scikit-optimize using synthetic performance generation.
 
     Args:
-        param_values: List of parameter values.
-        param_names: List of parameter names.
-        performance_generator: ObjectiveMetricGenerator instance.
-        runtimes: List to append runtime timestamps.
+        param_values: List of parameter values in the same order as param_names.
+        param_names: List of parameter names corresponding to the values.
+        performance_generator: Synthetic objective function for generating performance predictions.
+        runtimes: List to record timestamps for runtime tracking.
 
     Returns:
-        Predicted performance as float.
+        Predicted performance value for the hyperparameter configuration.
     """
     params_dict = dict(zip(param_names, param_values))
     result = performance_generator.predict(configuration=params_dict)
-    runtimes.append(datetime.now())
+    record_runtime(runtimes)
     return result
 
 
 def skopt_tune(
     raw_params: dict[str, Union[IntRange, FloatRange, CategoricalRange]],
     performance_generator: ObjectiveMetricGenerator,
-    sampler: str,
+    tuner_model: SkOptModel,
     warm_start_configs: Optional[list[tuple[dict, float]]] = None,
     random_state: Optional[int] = None,
     n_trials: Optional[int] = None,
     timeout: Optional[float] = None,
 ) -> pd.DataFrame:
-    """Runs skopt tuning with a synthetic objective.
+    """Runs Bayesian optimization using scikit-optimize (skopt) with a synthetic objective function.
 
     Args:
-        raw_params: Dictionary mapping parameter names to IntRange, FloatRange, or CategoricalRange.
-        performance_generator: ObjectiveMetricGenerator instance.
-        sampler: Sampler name for skopt.
-        warm_start_configs: Optional list of (config, loss) tuples for warm start.
-        random_state: Optional random seed.
-        n_trials: Optional number of trials.
-        timeout: Optional time budget in seconds.
+        raw_params: Dictionary mapping parameter names to their range specifications
+            (IntRange, FloatRange, or CategoricalRange).
+        performance_generator: Synthetic objective function for generating performance predictions.
+        tuner_model: SkOptModel configuration specifying the optimization algorithm and parameters.
+        warm_start_configs: Optional list of (configuration, loss) tuples for initialization.
+        random_state: Optional random seed for reproducible results.
+        n_trials: Optional maximum number of optimization trials.
+        timeout: Optional time budget in seconds for the optimization process.
 
     Returns:
-        DataFrame with tuning history.
+        DataFrame containing the complete tuning history with trial results and metadata.
     """
     skopt_params, param_names = setup_skopt_params(raw_params)
     if warm_start_configs is not None:
@@ -581,9 +688,9 @@ def skopt_tune(
         x0 = []
         y0 = []
 
-    n_calls = n_trials
+    n_calls = (n_trials - len(warm_start_configs)) if warm_start_configs else n_trials
 
-    runtimes: list[datetime] = []
+    runtimes = create_runtime_tracker()
     objective_fn = partial(
         skopt_objective,
         param_names=param_names,
@@ -591,8 +698,10 @@ def skopt_tune(
         runtimes=runtimes,
     )
 
+    searcher = tuner_model.searcher
+
     # NOTE: n_initial_points is set to 0 because this benchmark repository uses warm-starting:
-    if sampler == "gp":
+    if searcher == "GP":
         result = gp_minimize(
             objective_fn,
             skopt_params,
@@ -601,11 +710,11 @@ def skopt_tune(
             x0=x0,
             y0=y0,
             random_state=random_state,
-            acq_func=SKOPT_GP_ACQ_FUNC,
-            acq_optimizer=SKOPT_GP_ACQ_OPTIMIZER,
+            acq_func="EI",
+            acq_optimizer="sampling",
             n_points=N_CANDIDATES,
         )
-    elif sampler == "forest":
+    elif searcher == "RF":
         result = forest_minimize(
             objective_fn,
             skopt_params,
@@ -614,10 +723,10 @@ def skopt_tune(
             x0=x0,
             y0=y0,
             random_state=random_state,
-            acq_func=SKOPT_GP_ACQ_FUNC,
+            acq_func="EI",
             n_points=N_CANDIDATES,
         )
-    elif sampler == "gbrt":
+    elif searcher == "GBRT":
         result = gbrt_minimize(
             objective_fn,
             skopt_params,
@@ -626,14 +735,16 @@ def skopt_tune(
             x0=x0,
             y0=y0,
             random_state=random_state,
-            acq_func=SKOPT_GP_ACQ_FUNC,
+            acq_func="EI",
             n_points=N_CANDIDATES,
         )
     else:
-        raise ValueError(f"Unknown scikit-opt method: {sampler}")
+        raise ValueError(f"Unknown scikit-opt method: {searcher}")
 
     if result is not None:
-        zipped = zip(result.func_vals, result.x_iters, runtimes)
+        # Apply retroactive timestamps for warm-start configurations
+        all_runtimes = apply_retroactive_timestamps(warm_start_configs, runtimes)
+        zipped = zip(result.func_vals, result.x_iters, all_runtimes)
     else:
         zipped = []
 
@@ -711,7 +822,7 @@ def smac_objective_function(
     # Convert Configuration to dict for the performance generator
     config_dict = dict(config)
     result = performance_generator.predict(configuration=config_dict)
-    runtimes.append(datetime.now())
+    record_runtime(runtimes)
     return result
 
 
@@ -746,13 +857,13 @@ class GlobalSearch(RandomSearch):
 def smac_tune(
     raw_params: dict[str, Union[IntRange, FloatRange, CategoricalRange]],
     performance_generator: ObjectiveMetricGenerator,
-    sampler: str,
+    tuner_model: SMACModel,
     warm_start_configs: Optional[list[tuple[dict, float]]] = None,
     random_state: Optional[int] = None,
     n_trials: Optional[int] = None,
     timeout: Optional[float] = None,
 ) -> pd.DataFrame:
-    """Runs vanilla SMAC tuning with Random Forest surrogate and specified acquisition function.
+    """Runs Bayesian optimization using SMAC3 with Random Forest surrogate and acquisition functions.
 
     Uses vanilla SMAC configuration for fair comparison with other tuners:
     - Each configuration evaluated exactly once (no racing)
@@ -762,16 +873,17 @@ def smac_tune(
     - Deterministic scenario
 
     Args:
-        raw_params: Dictionary mapping parameter names to IntRange, FloatRange, or CategoricalRange.
-        performance_generator: ObjectiveMetricGenerator instance.
-        sampler: Sampler name for SMAC (e.g., "smac_rf_ei", "smac_rf_ts").
-        warm_start_configs: Optional list of (config, loss) tuples for warm start.
-        random_state: Optional random seed.
-        n_trials: Optional number of trials.
-        timeout: Optional time budget in seconds.
+        raw_params: Dictionary mapping parameter names to their range specifications
+            (IntRange, FloatRange, or CategoricalRange).
+        performance_generator: Synthetic objective function for generating performance predictions.
+        tuner_model: SMACModel configuration specifying the acquisition function and parameters.
+        warm_start_configs: Optional list of (configuration, loss) tuples for initialization.
+        random_state: Optional random seed for reproducible results.
+        n_trials: Optional maximum number of optimization trials.
+        timeout: Optional time budget in seconds for the optimization process.
 
     Returns:
-        DataFrame with tuning history.
+        DataFrame containing the complete tuning history with trial results and metadata.
     """
     # Disable SMAC logging to reduce noise
     smac_logger = logging.getLogger("smac")
@@ -806,16 +918,19 @@ def smac_tune(
         n_workers=1,  # No parallelization
     )
 
+    searcher = tuner_model.searcher
     # Configure acquisition function and maximizer based on sampler
     # Use TSRandomSearch for both EI and TS to properly evaluate acquisition functions
-    if sampler == "smac_rf_ei":
+    if searcher == "SMAC-EI":
         acquisition_function = EI(xi=0.0, log=False)
         acquisition_maximizer = GlobalSearch(
             configspace=configspace,
             acquisition_function=acquisition_function,
             seed=random_state,
         )
-    elif sampler == "smac_rf_ts":
+    elif searcher == "SMAC-TS":
+        # TODO: Fix SMAC-TS
+        raise RuntimeError("SMAC-TS is unstable, SMAC-EI is recommended instead.")
         acquisition_function = TS()
         acquisition_maximizer = GlobalSearch(
             configspace=configspace,
@@ -823,10 +938,10 @@ def smac_tune(
             seed=random_state,
         )
     else:
-        raise ValueError(f"Unknown SMAC sampler: {sampler}")
+        raise ValueError(f"Unknown SMAC sampler: {searcher}")
 
     # Setup runtime tracking
-    runtimes: list[datetime] = []
+    runtimes = create_runtime_tracker()
     objective_fn = partial(
         smac_objective_function,
         performance_generator=performance_generator,
@@ -867,11 +982,15 @@ def smac_tune(
 
     # Build history from runhistory
     history = []
+
+    # Apply retroactive timestamps for warm-start configurations
+    all_runtimes = apply_retroactive_timestamps(warm_start_configs, runtimes)
+
     for idx, (trial_key, trial_value) in enumerate(smac.runhistory.items()):
         config = smac.runhistory.get_config(trial_key.config_id)
         config_dict = config.get_dictionary()  # Use proper ConfigSpace method
 
-        end_time = runtimes[idx]
+        end_time = all_runtimes[idx]
         history.append(
             build_history_entry(
                 end_time=end_time,
@@ -893,18 +1012,24 @@ def smac_tune(
 
 def gp_opt_objective_function(
     performance_generator: ObjectiveMetricGenerator,
+    runtimes: list[datetime],
 ) -> Any:
-    """Returns a callable objective function for confopt.
+    """Returns a callable objective function for gp_opt.
 
     Args:
         performance_generator: ObjectiveMetricGenerator instance.
+        runtimes: List to track runtime timestamps.
 
     Returns:
         Callable that takes a configuration and returns predicted performance.
     """
-    return lambda configuration: performance_generator.predict(
-        configuration=configuration
-    )
+
+    def objective(configuration: Dict) -> float:
+        result = performance_generator.predict(configuration=configuration)
+        record_runtime(runtimes)
+        return result
+
+    return objective
 
 
 def setup_gp_opt_params(
@@ -940,7 +1065,7 @@ def setup_gp_opt_params(
 def gp_opt_tune(
     raw_params: dict[str, Union[IntRange, FloatRange, CategoricalRange]],
     performance_generator: ObjectiveMetricGenerator,
-    sampler: str,
+    tuner_model: CustomGPModel,
     warm_start_configs: Optional[list[tuple[dict, float]]] = None,
     random_state: Optional[int] = None,
     n_trials: Optional[int] = None,
@@ -951,7 +1076,7 @@ def gp_opt_tune(
     Args:
         raw_params: Dictionary mapping parameter names to IntRange, FloatRange, or CategoricalRange.
         performance_generator: ObjectiveMetricGenerator instance.
-        sampler: Name of the surrogate model to use.
+        tuner_model: Name of the surrogate model to use.
         warm_start_configs: Optional list of (config, loss) tuples for warm start.
         random_state: Optional random seed.
         n_trials: Optional number of trials.
@@ -960,7 +1085,10 @@ def gp_opt_tune(
     Returns:
         DataFrame with tuning history.
     """
-    objective_fn = gp_opt_objective_function(performance_generator)
+    # Create runtime tracker
+    runtimes = create_runtime_tracker()
+
+    objective_fn = gp_opt_objective_function(performance_generator, runtimes)
     gp_opt_params = setup_gp_opt_params(raw_params)
     searcher = GPTuner(
         objective_function=objective_fn,
@@ -973,18 +1101,18 @@ def gp_opt_tune(
 
     adj_n_trials = n_trials
 
-    if sampler == "gp_opt_ei":
+    if tuner_model.searcher == "EI":
         acquisition_func = ExpectedImprovement()
-    elif sampler == "gp_opt_ts":
+    elif tuner_model.searcher == "TS":
         acquisition_func = ThompsonSampling()
-    elif sampler == "gp_opt_log_ei":
+    elif tuner_model.searcher == "log-EI":
         acquisition_func = LogExpectedImprovement()
-    elif sampler == "gp_opt_ucb":
+    elif tuner_model.searcher == "UCB":
         acquisition_func = UpperConfidenceBound()
-    elif sampler == "gp_opt_ots":
+    elif tuner_model.searcher == "OBS":
         acquisition_func = OptimisticThompsonSampling()
     else:
-        raise ValueError(f"Unknown gp_opt sampler: {sampler}")
+        raise ValueError(f"Unknown gp_opt sampler: {tuner_model}")
 
     # NOTE: Zero random searches because this benchmark repository uses warm-starting:
     searcher.tune(
@@ -992,16 +1120,19 @@ def gp_opt_tune(
         max_runtime=int(timeout) if timeout is not None else None,
         max_searches=adj_n_trials,
         n_random_searches=0,
-        retraining_frequency=DEFAULT_RETRAINING_FREQUENCY,
+        retraining_frequency=1,
         verbose=False,
         random_state=random_state,
     )
+
+    # Apply retroactive timestamps for warm-start configurations
+    all_runtimes = apply_retroactive_timestamps(warm_start_configs, runtimes)
 
     history = []
     for idx, trial in enumerate(searcher.study.trials):
         history.append(
             build_history_entry(
-                end_time=trial.timestamp,
+                end_time=all_runtimes[idx],
                 performance=trial.performance,
                 configurations=trial.configuration,
                 iteration=idx + 1,
@@ -1037,6 +1168,7 @@ def tune(
     """
     # Shared arguments for all tuner functions:
     shared_kwargs = {
+        "tuner_model": tuner_config.tuner,
         "raw_params": params,
         "performance_generator": performance_generator,
         "warm_start_configs": warm_start_configs,
@@ -1045,53 +1177,32 @@ def tune(
         "timeout": timeout,
     }
 
-    if tuner_config.tuner == "optuna":
-        if not isinstance(tuner_config.searcher, str):
-            raise ValueError("Optuna tuner requires a string searcher.")
+    if tuner_config.tuner.backend == "optuna":
         history = optuna_tune(
-            sampler=tuner_config.searcher,
             **shared_kwargs,
         )
-    elif tuner_config.tuner == "confopt":
-        if not isinstance(
-            tuner_config.searcher,
-            (QuantileConformalSearcher),
-        ):
-            raise ValueError("Confopt tuner requires a conformal searcher instance.")
+    elif tuner_config.tuner.backend == "confopt":
         history = confopt_tune(
-            sampler=tuner_config.searcher,
             searcher_tuning_framework=tuner_config.searcher_tuning_framework,
             **shared_kwargs,
         )
-    elif tuner_config.tuner == "skopt":
-        if not isinstance(tuner_config.searcher, str):
-            raise ValueError("Skopt tuner requires a string searcher.")
+    elif tuner_config.tuner.backend == "skopt":
         history = skopt_tune(
-            sampler=tuner_config.searcher,
             **shared_kwargs,
         )
-    elif tuner_config.tuner == "syne_tune_cqr":
-        if not isinstance(tuner_config.searcher, str):
-            raise ValueError("Syne-Tune CQR tuner requires a string searcher.")
+    elif tuner_config.tuner.backend == "syne_tune_cqr":
         history = syne_tune_cqr_tune(
-            sampler=tuner_config.searcher,
             **shared_kwargs,
         )
-    elif tuner_config.tuner == "smac":
-        if not isinstance(tuner_config.searcher, str):
-            raise ValueError("SMAC tuner requires a string searcher.")
+    elif tuner_config.tuner.backend == "smac":
         history = smac_tune(
-            sampler=tuner_config.searcher,
             **shared_kwargs,
         )
-    elif tuner_config.tuner == "gp_opt":
-        if not isinstance(tuner_config.searcher, str):
-            raise ValueError("GP-Opt tuner requires a string searcher.")
+    elif tuner_config.tuner.backend == "gp_opt":
         history = gp_opt_tune(
-            sampler=tuner_config.searcher,
             **shared_kwargs,
         )
     else:
-        raise ValueError(f"Unknown tuner: {tuner_config.tuner}")
+        raise ValueError(f"Unknown tuner: {tuner_config.tuner.backend}")
 
     return history

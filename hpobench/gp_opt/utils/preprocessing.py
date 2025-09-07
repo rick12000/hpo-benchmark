@@ -13,40 +13,25 @@ def train_val_split(
     ordinal: bool = False,
     random_state: int = None,
 ) -> Tuple[np.array, np.array, np.array, np.array]:
-    """
-    Split X and y data into training and validation sets.
+    """Split data into training and validation sets with optional normalization.
 
-    Splits can be carried out randomly or sequentially, with or without normalization.
+    Supports both random and sequential splitting, with the option to normalize
+    features based on the training set statistics.
 
-    Parameters
-    ----------
-    X :
-        Feature variables.
-    y :
-        Target variable.
-    train_split :
-        Percentage of training data to carve out of the overall
-        data. Values must be contained in the [0, 1] interval.
-    normalize :
-        Whether X features in both the training and validation
-        splits should be normalized according to the training split.
-    ordinal :
-        Whether the split should occur ordinally (only set to True
-        if the X and y data was passed according to some sequential
-        order, eg. sorted by date), else split will be random.
-    random_state :
-        Random seed.
+    Args:
+        X: Feature variables with shape (n_samples, n_features).
+        y: Target variable with shape (n_samples,).
+        train_split: Fraction of data to use for training, must be in [0, 1].
+        normalize: Whether to normalize features using training set statistics.
+        ordinal: Whether to split sequentially (for time-ordered data) or randomly.
+        random_state: Random seed for reproducible splitting.
 
-    Returns
-    -------
-    X_train :
-        X features training split.
-    y_train :
-        y target training split.
-    X_val :
-        X features validation split.
-    y_val :
-        y target validation split.
+    Returns:
+        Tuple of (X_train, y_train, X_val, y_val) where:
+        - X_train: Training features
+        - y_train: Training targets
+        - X_val: Validation features
+        - y_val: Validation targets
     """
     if random_state is not None:
         random.seed(random_state)

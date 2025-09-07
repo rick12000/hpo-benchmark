@@ -1,12 +1,3 @@
-"""
-Gaussian Process-based Hyperparameter Optimization Library
-
-This module provides a simplified hyperparameter optimization framework using
-Gaussian Processes with various acquisition functions. It's based on the CONFOPT
-library structure but focuses only on GP-based optimization without conformal
-prediction logic.
-"""
-
 import logging
 import copy
 import numpy as np

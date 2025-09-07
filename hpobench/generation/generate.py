@@ -18,11 +18,6 @@ from hpobench.generation.black_box_functions import (
 )
 
 
-# Delay YAHPO initialization to avoid multiprocessing conflicts
-# The initialization function is in utils.py to avoid circular imports
-
-# Import the initialization function - this may create a circular import
-# that needs to be resolved by late import
 def _ensure_yahpo_initialized():
     """Wrapper to avoid circular imports."""
     from hpobench.utils import ensure_yahpo_initialized

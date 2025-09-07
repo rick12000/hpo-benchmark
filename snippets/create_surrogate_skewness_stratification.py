@@ -10,7 +10,6 @@ from stratification_utils import (
     save_stratification,
 )
 
-# Configuration parameters
 BENCHMARKS = ["rbv2_aknn", "lcbench"]
 TOP_COUNT = 5
 TOP_PERCENT = None
@@ -76,7 +75,6 @@ def calculate_summary_stats(y: np.ndarray) -> dict:
         "iqr": np.quantile(y, 0.75) - np.quantile(y, 0.25),
     }
 
-    # Replace any non-finite values with 0
     for key in stats_dict:
         if not np.isfinite(stats_dict[key]):
             stats_dict[key] = 0.0
@@ -92,7 +90,6 @@ def create_skewness_stratification(
     max_perfect_acc_ratio: float = 0.01,
 ) -> list:
     """Create stratification based on highest conditional asymmetry datasets."""
-    # Process all tasks and get valid datasets
     scores = {}
     for task_id in task_ids:
         tabularized_configurations, accuracies, runtimes = sample_benchmark_data(
@@ -111,7 +108,6 @@ def create_skewness_stratification(
             if score > 0:
                 scores[task_id] = score
 
-    # Select top datasets based on scores
     return select_top_datasets(
         scores=scores, top_count=top_count, top_percent=top_percent
     )

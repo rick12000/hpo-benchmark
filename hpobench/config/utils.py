@@ -1,19 +1,31 @@
 from typing import Union, Optional, List, Any
-from confopt.selection.acquisition import (
-    QuantileConformalSearcher,
-)
-from copy import deepcopy
-from confopt.selection.sampling.bound_samplers import (
-    LowerBoundSampler,
-)
-from confopt.selection.sampling.expected_improvement_samplers import (
-    ExpectedImprovementSampler,
-)
-from confopt.selection.sampling.thompson_samplers import ThompsonSampler
+from hpobench.config.config_types import TunerModelConfig
+
+try:
+    from confopt.selection.acquisition import (
+        QuantileConformalSearcher,
+    )
+    from copy import deepcopy
+    from confopt.selection.sampling.bound_samplers import (
+        LowerBoundSampler,
+    )
+    from confopt.selection.sampling.expected_improvement_samplers import (
+        ExpectedImprovementSampler,
+    )
+    from confopt.selection.sampling.thompson_samplers import ThompsonSampler
+except ImportError:
+    raise ImportError(
+        "confopt is a core dependency of this repository, but it is not automatically installed via pyproject.toml, please refer to the README.md for instructions on how to install this separately"
+    )
 from hpobench.config.config_types import TunerConfig
+from hpobench.config.config_types import (
+    OptunaModel,
+    SMACModel,
+    CustomGPModel,
+)
 
 
-def create_sampler_config_id(
+def create_searcher_config_id(
     searcher: Union[QuantileConformalSearcher, str],
     custom_prefix: Optional[str] = None,
     searcher_tuning_framework: Optional[str] = None,
@@ -28,14 +40,11 @@ def create_sampler_config_id(
     Returns:
         A formatted string for the configuration ID.
     """
-    # Start with custom prefix if provided
     config_id = f"{custom_prefix}-" if custom_prefix else ""
 
-    # Handle string-based searchers (like "tpe")
     if isinstance(searcher, str):
         return searcher.upper()
 
-    # Extract relevant information
     if not hasattr(searcher, "quantile_estimator_architecture"):
         raise ValueError(
             "Input must be a QuantileConformalSearcher instance or a string"
@@ -49,11 +58,9 @@ def create_sampler_config_id(
         else None
     )
 
-    # Extract sampler acronym from class name (uppercase letters only)
     sampler_class_name = sampler.__class__.__name__
     sampler_acronym = "".join(c for c in sampler_class_name if c.isupper())
 
-    # Extract adapter name
     adapter_name = None
     if hasattr(sampler, "adapters") and sampler.adapters:
         adapter_name = sampler.adapters[0].__class__.__name__
@@ -63,7 +70,6 @@ def create_sampler_config_id(
         elif sampler.adapter is not None:
             adapter_name = sampler.adapter.__class__.__name__
 
-    # Build the config ID
     if quantile_arch:
         quantile_arch_upper = quantile_arch.upper()
         if adapter_name:
@@ -71,15 +77,12 @@ def create_sampler_config_id(
         else:
             config_id += f"{quantile_arch_upper} {sampler_acronym}"
     else:
-        # For non-quantile-based methods
         config_id += f"{sampler_acronym}"
 
-    # Add additional attributes based on sampler type
     if hasattr(sampler, "c"):
         config_id += f" c={sampler.c}"
 
     if hasattr(sampler, "beta_decay") and sampler.beta_decay:
-        # Convert snake_case to acronym (first letter of each word)
         decay_parts = sampler.beta_decay.split("_")
         decay_acronym = "".join(part[0] for part in decay_parts)
         config_id += f" {decay_acronym}"
@@ -96,16 +99,14 @@ def create_sampler_config_id(
     if hasattr(sampler, "num_ei_samples"):
         config_id += f" ns={sampler.num_ei_samples}"
 
-    # Add pre-conformal trials if specified and not default
     if n_pre_conformal_trials and n_pre_conformal_trials != 20:
         config_id += f" pre={n_pre_conformal_trials}"
 
-    # Add tuning framework suffix based on type
     if searcher_tuning_framework == "fixed":
         config_id += " TUNED-F"
     elif searcher_tuning_framework == "reward_cost":
         config_id += " TUNED-A"
-    elif searcher_tuning_framework:  # Any other non-None value
+    elif searcher_tuning_framework:
         config_id += " TUNED"
 
     return config_id
@@ -138,13 +139,15 @@ def build_static_tuning_configurations(
     sampler_copy = deepcopy(placeholder_sampler)
     return [
         TunerConfig(
-            tuner="confopt",
-            searcher=QuantileConformalSearcher(
-                quantile_estimator_architecture=arch,
-                sampler=sampler_copy,
-                n_pre_conformal_trials=n_pre_conformal_trials,
+            tuner=TunerModelConfig(
+                backend="confopt",
+                searcher=QuantileConformalSearcher(
+                    quantile_estimator_architecture=arch,
+                    sampler=sampler_copy,
+                    n_pre_conformal_trials=n_pre_conformal_trials,
+                ),
             ),
-            config_identifier=create_sampler_config_id(
+            tuner_identifier=create_searcher_config_id(
                 QuantileConformalSearcher(
                     quantile_estimator_architecture=arch,
                     sampler=sampler_copy,
@@ -193,14 +196,13 @@ def build_sampler_variation_configurations(
             n_calibration_folds=5,
             calibration_split_strategy=calibration_split_strategy,
         )
-        config_id = create_sampler_config_id(searcher) + (
+        config_id = create_searcher_config_id(searcher) + (
             f" stf={searcher_tuning_framework}" if searcher_tuning_framework else ""
         )
         configs.append(
             TunerConfig(
-                tuner="confopt",
-                searcher=searcher,
-                config_identifier=config_id,
+                tuner=TunerModelConfig(backend="confopt", searcher=searcher),
+                tuner_identifier=config_id,
                 searcher_tuning_framework=searcher_tuning_framework,
             )
         )
@@ -243,14 +245,13 @@ def build_architecture_variation_configurations(
                 n_calibration_folds=5,
                 calibration_split_strategy=calibration_split_strategy,
             )
-            config_id = create_sampler_config_id(searcher) + (
+            config_id = create_searcher_config_id(searcher) + (
                 f" stf={searcher_tuning_framework}" if searcher_tuning_framework else ""
             )
             configs.append(
                 TunerConfig(
-                    tuner="confopt",
-                    searcher=searcher,
-                    config_identifier=config_id,
+                    tuner=TunerModelConfig(backend="confopt", searcher=searcher),
+                    tuner_identifier=config_id,
                     searcher_tuning_framework=searcher_tuning_framework,
                 )
             )
@@ -265,39 +266,23 @@ def get_external_tuning_configurations() -> List[TunerConfig]:
     """
     return [
         TunerConfig(
-            tuner="gp_opt",
-            searcher="gp_opt_ei",
-            config_identifier="GP-EI",
+            tuner=CustomGPModel(backend="gp_opt", searcher="EI"),
+            tuner_identifier="GP-EI",
         ),
         TunerConfig(
-            tuner="gp_opt",
-            searcher="gp_opt_ots",
-            config_identifier="GP-OBS",
+            tuner=CustomGPModel(backend="gp_opt", searcher="OBS"),
+            tuner_identifier="GP-OBS",
         ),
         TunerConfig(
-            tuner="optuna",
-            searcher="tpe",
-            config_identifier="TPE",
-        ),
-        # Syne-Tune CQR configurations using string searchers
-        # TunerConfig(
-        #     tuner="syne_tune_cqr",
-        #     searcher="cqr_thompson",
-        #     config_identifier="CQR-THOMPSON",
-        # ),
-        TunerConfig(
-            tuner="optuna",
-            searcher="random",
-            config_identifier="RS",
+            tuner=OptunaModel(backend="optuna", searcher="TPE"),
+            tuner_identifier="TPE",
         ),
         TunerConfig(
-            tuner="smac",
-            searcher="smac_rf_ei",
-            config_identifier="SMAC",
+            tuner=OptunaModel(backend="optuna", searcher="random"),
+            tuner_identifier="RS",
         ),
-        # TunerConfig(
-        #     tuner="smac",
-        #     searcher="smac_rf_ts",
-        #     config_identifier="SMAC-TS",
-        # )
+        TunerConfig(
+            tuner=SMACModel(backend="smac", searcher="SMAC-EI"),
+            tuner_identifier="SMAC",
+        ),
     ]

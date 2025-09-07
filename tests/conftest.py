@@ -611,7 +611,7 @@ def processed_benchmark_data_with_ranks():
         "nahs201": ["cifar10", "imagenet", "colorectal_histology"],
     }
     tuners = ["QGBM_tuner_1", "QGBM_tuner_2", "QGBM_tuner_3"]
-    samplers = ["gbrt", "tpe", "random"]
+    samplers = ["GBRT", "TPE", "random"]
     architectures = ["QGBM", "MLP", "ResNet"]
     confidence_levels = [0.5, 0.75, 0.9]
 
@@ -952,8 +952,8 @@ def sampler_breakout_data():
 
     # Different tuner configurations per sampler
     sampler_configs = {
-        "gbrt": ["GBRT_standard", "GBRT_adaptive", "GBRT_optimized"],
-        "tpe": ["TPE_standard", "TPE_multivariate", "TPE_hyperband"],
+        "GBRT": ["GBRT_standard", "GBRT_adaptive", "GBRT_optimized"],
+        "TPE": ["TPE_standard", "TPE_multivariate", "TPE_hyperband"],
         "random": ["Random_uniform", "Random_sobol", "Random_lhs"],
     }
 
@@ -964,9 +964,9 @@ def sampler_breakout_data():
             for sampler, tuners in sampler_configs.items():
                 for i, tuner in enumerate(tuners):
                     # Different performance characteristics per sampler
-                    if sampler == "gbrt":
+                    if sampler == "GBRT":
                         base_rank = 1.5 + i * 0.3
-                    elif sampler == "tpe":
+                    elif sampler == "TPE":
                         base_rank = 2.0 + i * 0.3
                     else:  # random
                         base_rank = 2.5 + i * 0.3
@@ -1046,7 +1046,7 @@ def architecture_breakout_data():
                                 "benchmark_identifier": bench,
                                 "dataset": dataset,
                                 "tuner": tuner,
-                                "sampler": "gbrt",
+                                "sampler": "GBRT",
                                 "estimator_architecture": arch,
                                 "normalized_runtime": norm_runtime,
                                 "rank": rank,
@@ -1274,10 +1274,10 @@ def conformalization_effect_data():
 
     # Tuner configurations showing conformalization effect
     tuner_configs = [
-        ("Non_Conformalized_GBRT", "gbrt", "QGBM"),
-        ("Conformalized_GBRT", "gbrt", "QGBM"),
-        ("Non_Conformalized_TPE", "tpe", "MLP"),
-        ("Conformalized_TPE", "tpe", "MLP"),
+        ("Non_Conformalized_GBRT", "GBRT", "QGBM"),
+        ("Conformalized_GBRT", "GBRT", "QGBM"),
+        ("Non_Conformalized_TPE", "TPE", "MLP"),
+        ("Conformalized_TPE", "TPE", "MLP"),
     ]
 
     normalized_runtimes = [10, 25, 50, 75, 100]

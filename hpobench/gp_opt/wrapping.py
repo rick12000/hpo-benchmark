@@ -8,7 +8,7 @@ class IntRange(BaseModel):
 
     min_value: int
     max_value: int
-    log_scale: bool = False  # Whether to sample on a logarithmic scale
+    log_scale: bool = False
 
     @field_validator("max_value")
     def max_gt_min(cls, v, info: ValidationInfo):
@@ -37,7 +37,7 @@ class FloatRange(BaseModel):
 
     min_value: float
     max_value: float
-    log_scale: bool = False  # Whether to sample on a logarithmic scale
+    log_scale: bool = False
 
     @field_validator("max_value")
     def max_gt_min(cls, v, info: ValidationInfo):

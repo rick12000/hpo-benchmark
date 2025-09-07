@@ -4,13 +4,24 @@ from hpobench.tune import (
     optuna_tune,
     confopt_tune,
     skopt_tune,
+    smac_tune,
+    gp_opt_tune,
     calculate_breach_status,
     calculate_winkler_components,
 )
+from hpobench.syne_tune_integration import syne_tune_cqr_tune
 from confopt.selection.acquisition import (
     QuantileConformalSearcher,
     LowerBoundSampler,
     ThompsonSampler,
+)
+from hpobench.config.config_types import (
+    ConfOptModel,
+    SkOptModel,
+    OptunaModel,
+    SMACModel,
+    SyneTuneModel,
+    CustomGPModel,
 )
 
 N_TRIALS = 40
@@ -67,14 +78,14 @@ def test_calculate_winkler_components_penalty(
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("sampler", ["tpe", "random", "cmaes"])
+@pytest.mark.parametrize("sampler", ["TPE", "random", "CMA-ES"])
 def test_optuna_tune_reproducibility(
     small_param_space, performance_generator, warm_start_configs, sampler
 ):
     result1 = optuna_tune(
         raw_params=small_param_space,
         performance_generator=performance_generator,
-        sampler=sampler,
+        tuner_model=OptunaModel(backend="optuna", searcher=sampler),
         warm_start_configs=warm_start_configs,
         random_state=RANDOM_STATE,
         n_trials=N_TRIALS,
@@ -83,7 +94,7 @@ def test_optuna_tune_reproducibility(
     result2 = optuna_tune(
         raw_params=small_param_space,
         performance_generator=performance_generator,
-        sampler=sampler,
+        tuner_model=OptunaModel(backend="optuna", searcher=sampler),
         warm_start_configs=warm_start_configs,
         random_state=RANDOM_STATE,
         n_trials=N_TRIALS,
@@ -141,7 +152,7 @@ def test_confopt_tune_reproducibility(
     result1 = confopt_tune(
         raw_params=small_param_space,
         performance_generator=performance_generator,
-        sampler=sampler,
+        tuner_model=ConfOptModel(backend="confopt", searcher=sampler),
         warm_start_configs=warm_start_configs,
         random_state=RANDOM_STATE,
         n_trials=N_TRIALS,
@@ -155,7 +166,7 @@ def test_confopt_tune_reproducibility(
     result2 = confopt_tune(
         raw_params=small_param_space,
         performance_generator=performance_generator,
-        sampler=sampler_2,
+        tuner_model=ConfOptModel(backend="confopt", searcher=sampler_2),
         warm_start_configs=warm_start_configs,
         random_state=RANDOM_STATE,
         n_trials=N_TRIALS,
@@ -175,14 +186,14 @@ def test_confopt_tune_reproducibility(
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("sampler", ["gbrt", "forest", "gp"])
+@pytest.mark.parametrize("sampler", ["GBRT", "RF", "GP"])
 def test_skopt_tune_reproducibility(
     small_param_space, performance_generator, warm_start_configs, sampler
 ):
     result1 = skopt_tune(
         raw_params=small_param_space,
         performance_generator=performance_generator,
-        sampler=sampler,
+        tuner_model=SkOptModel(backend="skopt", searcher=sampler),
         warm_start_configs=warm_start_configs,
         random_state=RANDOM_STATE,
         n_trials=N_TRIALS,
@@ -191,7 +202,7 @@ def test_skopt_tune_reproducibility(
     result2 = skopt_tune(
         raw_params=small_param_space,
         performance_generator=performance_generator,
-        sampler=sampler,
+        tuner_model=SkOptModel(backend="skopt", searcher=sampler),
         warm_start_configs=warm_start_configs,
         random_state=RANDOM_STATE,
         n_trials=N_TRIALS,
@@ -218,7 +229,7 @@ def test_confopt_generates_breach_intervals(
     result = confopt_tune(
         raw_params=small_param_space,
         performance_generator=performance_generator,
-        sampler=sampler,
+        tuner_model=ConfOptModel(backend="confopt", searcher=sampler),
         warm_start_configs=warm_start_configs,
         random_state=RANDOM_STATE,
         n_trials=100,
@@ -258,7 +269,7 @@ def test_optuna_tune_core_functionality(
     result_df = optuna_tune(
         raw_params=small_param_space,
         performance_generator=performance_generator,
-        sampler="tpe",
+        tuner_model=OptunaModel(backend="optuna", searcher="TPE"),
         warm_start_configs=warm_start_configs,
         random_state=RANDOM_STATE,
         n_trials=N_TRIALS,
@@ -278,7 +289,7 @@ def test_confopt_tune_core_functionality(
     result_df = confopt_tune(
         raw_params=small_param_space,
         performance_generator=performance_generator,
-        sampler=searcher,
+        tuner_model=ConfOptModel(backend="confopt", searcher=searcher),
         warm_start_configs=warm_start_configs,
         random_state=RANDOM_STATE,
         n_trials=N_TRIALS,
@@ -293,7 +304,134 @@ def test_skopt_tune_core_functionality(
     result_df = skopt_tune(
         raw_params=small_param_space,
         performance_generator=performance_generator,
-        sampler="gp",
+        tuner_model=SkOptModel(backend="skopt", searcher="GP"),
+        warm_start_configs=warm_start_configs,
+        random_state=RANDOM_STATE,
+        n_trials=N_TRIALS,
+    )
+
+    _verify_tune_core_functionality(result_df, N_TRIALS, warm_start_configs)
+
+
+@pytest.mark.slow
+def test_smac_tune_reproducibility(
+    small_param_space, performance_generator, warm_start_configs
+):
+    result1 = smac_tune(
+        raw_params=small_param_space,
+        performance_generator=performance_generator,
+        tuner_model=SMACModel(backend="smac", searcher="SMAC-EI"),
+        warm_start_configs=warm_start_configs,
+        random_state=RANDOM_STATE,
+        n_trials=N_TRIALS,
+    )
+
+    result2 = smac_tune(
+        raw_params=small_param_space,
+        performance_generator=performance_generator,
+        tuner_model=SMACModel(backend="smac", searcher="SMAC-EI"),
+        warm_start_configs=warm_start_configs,
+        random_state=RANDOM_STATE,
+        n_trials=N_TRIALS,
+    )
+
+    for i in range(len(result1)):
+        assert result1.iloc[i]["performance"] == result2.iloc[i]["performance"]
+        assert result1.iloc[i]["configurations"] == result2.iloc[i]["configurations"]
+
+
+@pytest.mark.slow
+def test_syne_tune_cqr_tune_reproducibility(
+    small_param_space, performance_generator, warm_start_configs
+):
+    result1 = syne_tune_cqr_tune(
+        raw_params=small_param_space,
+        performance_generator=performance_generator,
+        tuner_model=SyneTuneModel(backend="syne_tune_cqr", searcher="CQR-TS"),
+        warm_start_configs=warm_start_configs,
+        random_state=RANDOM_STATE,
+        n_trials=N_TRIALS,
+    )
+
+    result2 = syne_tune_cqr_tune(
+        raw_params=small_param_space,
+        performance_generator=performance_generator,
+        tuner_model=SyneTuneModel(backend="syne_tune_cqr", searcher="CQR-TS"),
+        warm_start_configs=warm_start_configs,
+        random_state=RANDOM_STATE,
+        n_trials=N_TRIALS,
+    )
+
+    for i in range(len(result1)):
+        assert result1.iloc[i]["performance"] == result2.iloc[i]["performance"]
+        assert result1.iloc[i]["configurations"] == result2.iloc[i]["configurations"]
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("sampler", ["EI", "TS", "log-EI", "UCB", "OBS"])
+def test_gp_opt_tune_reproducibility(
+    small_param_space, performance_generator, warm_start_configs, sampler
+):
+    result1 = gp_opt_tune(
+        raw_params=small_param_space,
+        performance_generator=performance_generator,
+        tuner_model=CustomGPModel(backend="gp_opt", searcher=sampler),
+        warm_start_configs=warm_start_configs,
+        random_state=RANDOM_STATE,
+        n_trials=N_TRIALS,
+    )
+
+    result2 = gp_opt_tune(
+        raw_params=small_param_space,
+        performance_generator=performance_generator,
+        tuner_model=CustomGPModel(backend="gp_opt", searcher=sampler),
+        warm_start_configs=warm_start_configs,
+        random_state=RANDOM_STATE,
+        n_trials=N_TRIALS,
+    )
+
+    for i in range(len(result1)):
+        assert result1.iloc[i]["performance"] == result2.iloc[i]["performance"]
+        assert result1.iloc[i]["configurations"] == result2.iloc[i]["configurations"]
+
+
+def test_smac_tune_core_functionality(
+    small_param_space, performance_generator, warm_start_configs
+):
+    result_df = smac_tune(
+        raw_params=small_param_space,
+        performance_generator=performance_generator,
+        tuner_model=SMACModel(backend="smac", searcher="SMAC-EI"),
+        warm_start_configs=warm_start_configs,
+        random_state=RANDOM_STATE,
+        n_trials=N_TRIALS,
+    )
+
+    _verify_tune_core_functionality(result_df, N_TRIALS, warm_start_configs)
+
+
+def test_syne_tune_cqr_tune_core_functionality(
+    small_param_space, performance_generator, warm_start_configs
+):
+    result_df = syne_tune_cqr_tune(
+        raw_params=small_param_space,
+        performance_generator=performance_generator,
+        tuner_model=SyneTuneModel(backend="syne_tune_cqr", searcher="CQR-TS"),
+        warm_start_configs=warm_start_configs,
+        random_state=RANDOM_STATE,
+        n_trials=N_TRIALS,
+    )
+
+    _verify_tune_core_functionality(result_df, N_TRIALS, warm_start_configs)
+
+
+def test_gp_opt_tune_core_functionality(
+    small_param_space, performance_generator, warm_start_configs
+):
+    result_df = gp_opt_tune(
+        raw_params=small_param_space,
+        performance_generator=performance_generator,
+        tuner_model=CustomGPModel(backend="gp_opt", searcher="EI"),
         warm_start_configs=warm_start_configs,
         random_state=RANDOM_STATE,
         n_trials=N_TRIALS,

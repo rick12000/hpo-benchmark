@@ -30,12 +30,12 @@ run_sections = {
     "run_coverage_analysis": False,
     "run_sampler_variation_analysis": False,
     "run_architecture_variation_analysis": False,
-    "run_external_tuning_analysis": True,
+    "run_external_tuning_analysis": False,
     "run_heteroscedastic_external_tuning_analysis": False,
     "run_skew_external_tuning_analysis": False,
     "run_preconformal_comparison_analysis": False,
-    "run_static_analysis": False,
-    "run_quantile_count_comparison": False,
+    "run_static_analysis": True,
+    "run_quantile_count_comparison": True,
     "run_search_tuning_effect_comparison": False,
 }
 
@@ -306,9 +306,10 @@ def main():
                 data_size_range=experiment_params.static_data_sizes,
                 estimator_architectures=STATIC_ANALYSIS_ESTIMATOR_ARCHITECTURES,
                 n_repetitions_per_estimator=experiment_params.medium_n_repetitions_per_tuner_config,
-                tuning_iterations_range=experiment_params.tuning_iterations,
+                tuning_iterations_range=experiment_params.static_tuning_iterations,
                 alpha=0.2,
-                n_pre_conformal_trials=min(experiment_params.tuning_iterations) - 1,
+                n_pre_conformal_trials=min(experiment_params.static_tuning_iterations)
+                - 1,
                 max_n_instances=experiment_params.default_max_n_instances,
                 base_random_state=BASE_RANDOM_STATE,
             )

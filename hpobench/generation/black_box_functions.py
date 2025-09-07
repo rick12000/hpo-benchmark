@@ -2,12 +2,32 @@ import numpy as np
 
 
 def rastrigin(x, A=20):
+    """Rastrigin function - multimodal optimization benchmark.
+
+    Args:
+        x: Input vector with shape (n_dimensions,).
+        A: Amplitude parameter (default: 20).
+
+    Returns:
+        Function value at point x.
+    """
     n = len(x)
     rastrigin_value = A * n + np.sum(x**2 - A * np.cos(2 * np.pi * x))
     return rastrigin_value
 
 
 def ackley(x, a=20, b=0.2, c=2 * np.pi):
+    """Ackley function - multimodal optimization benchmark.
+
+    Args:
+        x: Input vector with shape (n_dimensions,).
+        a: Amplitude parameter (default: 20).
+        b: Exponential decay parameter (default: 0.2).
+        c: Oscillation frequency parameter (default: 2π).
+
+    Returns:
+        Function value at point x.
+    """
     n = len(x)
     term1 = -a * np.exp(-b * np.sqrt(np.sum(x**2) / n))
     term2 = -np.exp(np.sum(np.cos(c * x)) / n)
@@ -16,6 +36,14 @@ def ackley(x, a=20, b=0.2, c=2 * np.pi):
 
 
 def griewank(x):
+    """Griewank function - multimodal optimization benchmark.
+
+    Args:
+        x: Input vector with shape (n_dimensions,).
+
+    Returns:
+        Function value at point x.
+    """
     n = len(x)
     term1 = np.sum(x**2) / 4000
     term2 = 1
@@ -26,6 +54,17 @@ def griewank(x):
 
 
 def weierstrass(x, a=0.5, b=3, kmax=20):
+    """Weierstrass function - fractal optimization benchmark.
+
+    Args:
+        x: Input vector with shape (n_dimensions,).
+        a: Amplitude parameter (default: 0.5).
+        b: Frequency multiplier parameter (default: 3).
+        kmax: Maximum summation index (default: 20).
+
+    Returns:
+        Function value at point x.
+    """
     n = len(x)
     weierstrass_value = 0
     for i in range(n):
@@ -36,7 +75,16 @@ def weierstrass(x, a=0.5, b=3, kmax=20):
     return weierstrass_value
 
 
-def shekel(x, m=10):  # m is the number of local minima
+def shekel(x, m=10):
+    """Shekel function - multimodal optimization benchmark with variable local minima.
+
+    Args:
+        x: Input vector with shape (n_dimensions,).
+        m: Number of local minima (default: 10).
+
+    Returns:
+        Function value at point x (negated for minimization).
+    """
     n = len(x)
     A = np.random.rand(m, n) * 10  # random A matrix for each run
     C = np.random.rand(m) * 10
@@ -47,6 +95,14 @@ def shekel(x, m=10):  # m is the number of local minima
 
 
 def hartmann6(x):
+    """Hartmann 6-dimensional function - optimization benchmark.
+
+    Args:
+        x: Input vector with shape (6,).
+
+    Returns:
+        Function value at point x.
+    """
     alpha = [1.0, 1.2, 3.0, 3.2]
     A = np.array(
         [

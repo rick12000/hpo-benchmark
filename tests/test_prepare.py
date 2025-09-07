@@ -12,14 +12,14 @@ from hpobench.config.benchmark_data import (
     BLACK_BOX_SEARCH_SPACE,
     NAS301_SEARCH_SPACE,
 )
-from hpobench.config.tuner_configurations import SEARCHER, TunerConfig
-from hpobench.config.utils import create_sampler_config_id
+from hpobench.config.config_types import TunerModelConfig
+from hpobench.config.tuner_configurations import cv_conformal_searcher, TunerConfig
+from hpobench.config.utils import create_searcher_config_id
 
 DEV_TUNING_CONFIGURATIONS = [
     TunerConfig(
-        tuner="confopt",
-        searcher=SEARCHER,
-        config_identifier=create_sampler_config_id(SEARCHER),
+        tuner=TunerModelConfig(backend="confopt", searcher=cv_conformal_searcher),
+        tuner_identifier=create_searcher_config_id(cv_conformal_searcher),
         searcher_tuning_framework=None,
     )
 ]

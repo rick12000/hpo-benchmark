@@ -193,7 +193,7 @@ def setup_yahpo_instance_configs(
             ExperimentConfig(
                 search_space=filtered_op_space_dict,
                 objective_function=experiment_generator,
-                tuning_configurations=tuning_configurations,
+                tuner_configurations=tuning_configurations,
                 n_warm_starts=n_warm_starts,
                 n_trials=n_trials,
                 timeout=timeout,
@@ -232,7 +232,7 @@ def setup_jahs201_configs(
             ExperimentConfig(
                 search_space=JAHS201_SEARCH_SPACE,
                 objective_function=Jahs201Generator(dataset=dataset, lazy=True),
-                tuning_configurations=tuning_configurations,
+                tuner_configurations=tuning_configurations,
                 n_warm_starts=n_warm_starts,
                 n_trials=n_trials,
                 timeout=timeout,
@@ -269,7 +269,7 @@ def setup_blackbox_configs(
             ExperimentConfig(
                 search_space=BLACK_BOX_SEARCH_SPACE,
                 objective_function=BlackBoxGenerator(generator=function),
-                tuning_configurations=tuning_configurations,
+                tuner_configurations=tuning_configurations,
                 n_warm_starts=n_warm_starts,
                 n_trials=n_trials,
                 timeout=timeout,
@@ -329,7 +329,7 @@ def setup_nas301_configs(
                     fidelity_space=fidelity_dict,
                     config_space=full_config_space,
                 ),
-                tuning_configurations=tuning_configurations,
+                tuner_configurations=tuning_configurations,
                 n_warm_starts=n_warm_starts,
                 n_trials=n_trials,
                 timeout=timeout,

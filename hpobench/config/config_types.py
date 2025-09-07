@@ -1,12 +1,26 @@
 from pydantic import BaseModel, ConfigDict, model_validator
 from typing import Union, Literal, Optional
-from confopt.selection.acquisition import (
-    QuantileConformalSearcher,
-)
+
+try:
+    from confopt.selection.acquisition import (
+        QuantileConformalSearcher,
+    )
+except ImportError:
+    raise ImportError(
+        "confopt is a core dependency of this repository, but it is not automatically installed via pyproject.toml, please refer to the README.md for instructions on how to install this separately"
+    )
 from hpobench.generation.generate import ObjectiveMetricGenerator
 
 
 class FloatRange(BaseModel):
+    """Configuration for floating-point parameter ranges in hyperparameter search spaces.
+
+    Args:
+        lower: Minimum value for the parameter range.
+        upper: Maximum value for the parameter range.
+        log: Whether to use log scale for sampling. Defaults to False.
+    """
+
     model_config = ConfigDict()
 
     lower: float
@@ -15,6 +29,14 @@ class FloatRange(BaseModel):
 
 
 class IntRange(BaseModel):
+    """Configuration for integer parameter ranges in hyperparameter search spaces.
+
+    Args:
+        lower: Minimum value for the parameter range.
+        upper: Maximum value for the parameter range.
+        log: Whether to use log scale for sampling. Defaults to False.
+    """
+
     model_config = ConfigDict()
 
     lower: int
@@ -23,50 +45,167 @@ class IntRange(BaseModel):
 
 
 class CategoricalRange(BaseModel):
+    """Configuration for categorical parameter choices in hyperparameter search spaces.
+
+    Args:
+        choices: List of possible categorical values (strings, integers, or booleans).
+    """
+
     model_config = ConfigDict()
 
     choices: list[Union[str, int, bool]]
 
 
-class TunerConfig(BaseModel):
+class TunerModelConfig(BaseModel):
+    """Base configuration for hyperparameter optimization tuner models.
+
+    Args:
+        backend: Name of the optimization backend framework.
+        searcher: Name of the search algorithm within the backend.
+    """
+
+    backend: str
+    searcher: str
+
+
+class OptunaModel(TunerModelConfig):
+    """Configuration for Optuna-based hyperparameter optimization.
+
+    Args:
+        backend: Must be "optuna".
+        searcher: Optuna sampler algorithm (TPE, random, CMA-ES, etc.).
+    """
+
+    backend: Literal["optuna"]
+    searcher: Literal[
+        "TPE",
+        "random",
+        "CMA-ES",
+        "GBRT",
+        "RF",
+        "GP",
+        "custom-GP-EI",
+        "custom-GP-log-EI",
+        "custom-GP-TS",
+        "custom-GP-UCB",
+    ]
+
+
+class SyneTuneModel(TunerModelConfig):
+    """Configuration for Syne Tune CQR-based hyperparameter optimization.
+
+    Args:
+        backend: Must be "syne_tune_cqr".
+        searcher: Syne Tune CQR search algorithm.
+    """
+
+    backend: Literal["syne_tune_cqr"]
+    searcher: Literal[
+        "CQR-TS",
+    ]
+
+
+class SMACModel(TunerModelConfig):
+    """Configuration for SMAC-based hyperparameter optimization.
+
+    Args:
+        backend: Must be "smac".
+        searcher: SMAC acquisition function (EI or TS).
+    """
+
+    backend: Literal["smac"]
+    searcher: Literal[
+        "SMAC-EI",
+        "SMAC-TS",
+    ]
+
+
+class CustomGPModel(TunerModelConfig):
+    """Configuration for custom Gaussian Process-based hyperparameter optimization.
+
+    Args:
+        backend: Must be "gp_opt".
+        searcher: GP acquisition function (EI, TS, log-EI, UCB, or OBS).
+    """
+
+    backend: Literal["gp_opt"]
+    searcher: Literal[
+        "EI",
+        "TS",
+        "log-EI",
+        "UCB",
+        "OBS",
+    ]
+
+
+class SkOptModel(TunerModelConfig):
+    """Configuration for scikit-optimize-based hyperparameter optimization.
+
+    Args:
+        backend: Must be "skopt".
+        searcher: Scikit-optimize surrogate model (GP, RF, or GBRT).
+    """
+
+    backend: Literal["skopt"]
+    searcher: Literal["GP", "RF", "GBRT"]
+
+
+class ConfOptModel(BaseModel):
+    """Configuration for conformal prediction-based hyperparameter optimization.
+
+    Args:
+        backend: Must be "confopt".
+        searcher: Quantile conformal searcher instance.
+    """
+
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    tuner: Literal["confopt", "optuna", "skopt", "syne_tune_cqr", "smac", "gp_opt"]
-    searcher: Union[
-        Literal[
-            "tpe",
-            "random",
-            "cmaes",
-            "gbrt",
-            "forest",
-            "gp",
-            "confopt_gp_expected_improvement",
-            "confopt_gp_log_expected_improvement",
-            "confopt_gp_thompson_sampling",
-            "confopt_gp_confidence_bound",
-            "confopt_gp_max_value_entropy_search",
-            "cqr_thompson",
-            "cqr_ucb",
-            "cqr_optimistic",
-            "cqr_pessimistic",
-            "smac_rf_ei",
-            "smac_rf_ts",
-            "gp_opt_ei",
-            "gp_opt_ts",
-            "gp_opt_log_ei",
-            "gp_opt_ucb",
-            "gp_opt_ots",
-        ],
+    backend: Literal["confopt"]
+    searcher: QuantileConformalSearcher
+
+
+class TunerConfig(BaseModel):
+    """Complete configuration for a hyperparameter optimization tuner.
+
+    Args:
+        tuner: The tuner model configuration (backend-specific).
+        tuner_identifier: Human-readable identifier for the tuner configuration.
+        searcher_tuning_framework: Framework for tuning the search algorithm itself.
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    tuner: Union[
+        OptunaModel,
+        SyneTuneModel,
+        SMACModel,
+        CustomGPModel,
+        SkOptModel,
         QuantileConformalSearcher,
+        ConfOptModel,
     ]
+    tuner_identifier: str
     searcher_tuning_framework: Optional[Literal["reward_cost", "fixed"]] = None
-    config_identifier: str
 
 
 class ExperimentConfig(BaseModel):
+    """Complete configuration for a hyperparameter optimization experiment.
+
+    Args:
+        search_space: Dictionary mapping parameter names to their ranges.
+        objective_function: Generator for objective function values.
+        tuner_configurations: List of tuner configurations to compare.
+        n_warm_starts: Number of random trials before optimization begins.
+        benchmark_identifier: Name of the benchmark suite.
+        dataset_identifier: Specific dataset within the benchmark.
+        metric: Optimization metric name (if applicable).
+        n_trials: Maximum number of optimization trials.
+        timeout: Maximum experiment duration in seconds.
+    """
+
     search_space: dict[str, Union[IntRange, FloatRange, CategoricalRange]]
     objective_function: ObjectiveMetricGenerator
-    tuning_configurations: list[TunerConfig]
+    tuner_configurations: list[TunerConfig]
     n_warm_starts: int
     benchmark_identifier: str
     dataset_identifier: str
@@ -79,6 +218,17 @@ class ExperimentConfig(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def check_timeout_or_n_trials(cls, values):
+        """Validate that either n_trials or timeout is specified.
+
+        Args:
+            values: Dictionary of field values to validate.
+
+        Returns:
+            Validated values dictionary.
+
+        Raises:
+            ValueError: If neither n_trials nor timeout is specified.
+        """
         if isinstance(values, dict):
             if values.get("n_trials") is None and values.get("timeout") is None:
                 raise ValueError(

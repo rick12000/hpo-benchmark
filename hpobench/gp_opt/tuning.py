@@ -71,6 +71,16 @@ class GPTuner:
         warm_starts: Optional[List[Tuple[Dict, float]]] = None,
         dynamic_sampling: bool = True,
     ) -> None:
+        """Initialize the GP-based hyperparameter tuner.
+
+        Args:
+            objective_function: Callable that evaluates hyperparameter configurations.
+            search_space: Dictionary mapping parameter names to their range specifications.
+            minimize: Whether to minimize (True) or maximize (False) the objective.
+            n_candidates: Number of candidate configurations to consider for acquisition optimization.
+            warm_starts: Optional list of (configuration, objective_value) tuples for initialization.
+            dynamic_sampling: Whether to use dynamic candidate sampling during optimization.
+        """
         self.objective_function = objective_function
         self.check_objective_function()
 

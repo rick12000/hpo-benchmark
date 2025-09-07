@@ -10,13 +10,11 @@ from ConfigSpace import Configuration
 import ConfigSpace as CS
 import logging
 
-# Set random seeds for reproducibility
 np.random.seed(42)
 warnings.filterwarnings("ignore")
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
 
-# Configure yahpo_gym data path
 local_config.init_config()
 local_config.set_data_path("yahpo_bench_data")
 
@@ -112,7 +110,6 @@ def preprocess_configurations(
     X_categorical = []
 
     for config in configs:
-        # Process numeric features
         numeric_row = []
         for param in numeric_features:
             value = config.get(param, 0)
@@ -125,7 +122,6 @@ def preprocess_configurations(
             numeric_row.append(float(value))
         X_numeric.append(numeric_row)
 
-        # Process categorical features
         categorical_row = []
         for param in categorical_features:
             value = config.get(param, categorical_choices[param][0])
@@ -208,7 +204,6 @@ def sample_benchmark_data(
     performances = []
     runtimes = []
     for result in batch_results:
-        # Extract accuracy using benchmark-specific prioritization
         if benchmark_name.startswith("rbv2"):
             performance = result.get("acc")
         elif benchmark_name == "lcbench":
@@ -216,7 +211,6 @@ def sample_benchmark_data(
         else:
             performance = result.get("auc")
 
-        # Extract runtime
         if "time" in result:
             runtime = result["time"]
         elif "runtime" in result:

@@ -1,13 +1,18 @@
-from confopt.selection.acquisition import (
-    QuantileConformalSearcher,
-)
-from confopt.selection.sampling.bound_samplers import (
-    LowerBoundSampler,
-)
-from confopt.selection.sampling.expected_improvement_samplers import (
-    ExpectedImprovementSampler,
-)
-from confopt.selection.sampling.thompson_samplers import ThompsonSampler
+try:
+    from confopt.selection.acquisition import (
+        QuantileConformalSearcher,
+    )
+    from confopt.selection.sampling.bound_samplers import (
+        LowerBoundSampler,
+    )
+    from confopt.selection.sampling.expected_improvement_samplers import (
+        ExpectedImprovementSampler,
+    )
+    from confopt.selection.sampling.thompson_samplers import ThompsonSampler
+except ImportError:
+    raise ImportError(
+        "confopt is a core dependency of this repository, but it is not automatically installed via pyproject.toml, please refer to the README.md for instructions on how to install this separately"
+    )
 from hpobench.config.utils import (
     get_external_tuning_configurations,
     build_sampler_variation_configurations,
@@ -15,12 +20,10 @@ from hpobench.config.utils import (
 )
 from hpobench.config.config_types import (
     TunerConfig,
+    TunerModelConfig,
 )
 
-# Environment variables used only in configuration:
-DEFAULT_INTERVAL_WIDTH = 0.9
-
-# 1. Create configurations feeding the static tuning charts and tables:
+# 1. Static analysis configurations:
 STATIC_ANALYSIS_ESTIMATOR_ARCHITECTURES = [
     "qknn",
     "qgp",
@@ -30,24 +33,23 @@ STATIC_ANALYSIS_ESTIMATOR_ARCHITECTURES = [
     "qens5",
 ]
 
-
-# 2. Create configurations feeding the coverage charts:
+# 2. Coverage analysis configurations:
 COVERAGE_ANALYSIS_CONFIGURATIONS = []
 COVERAGE_PLOT_CONFIGURATIONS = []
-COVERAGE_INTERVAL_WIDTHS = [0.25, 0.5, 0.75]  # 0.25, 0.5, 0.75
+COVERAGE_INTERVAL_WIDTHS = [0.25, 0.5, 0.75]
 ADAPTERS = ["ACI", "DtACI", None]
 COVERAGE_ANALYSIS_ARCHITECTURE = "qgbm"
 
 for interval_width in COVERAGE_INTERVAL_WIDTHS:
     for adapter in ADAPTERS:
-        SAMPLER = LowerBoundSampler(
+        split_conformal_sampler = LowerBoundSampler(
             interval_width=interval_width,
             adapter=adapter,
             c=0,
         )
-        SEARCHER = QuantileConformalSearcher(
+        split_conformal_searcher = QuantileConformalSearcher(
             quantile_estimator_architecture=COVERAGE_ANALYSIS_ARCHITECTURE,
-            sampler=SAMPLER,
+            sampler=split_conformal_sampler,
             n_calibration_folds=5,
             calibration_split_strategy="train_test_split",
         )
@@ -57,17 +59,23 @@ for interval_width in COVERAGE_INTERVAL_WIDTHS:
             config_identifier = f"Split Conformalized + {adapter}"
         else:
             raise ValueError(f"Unknown adapter: {adapter}")
-        config = TunerConfig(
-            tuner="confopt",
-            searcher=SEARCHER,
-            config_identifier=config_identifier,
+        split_conformal_config = TunerConfig(
+            tuner=TunerModelConfig(
+                backend="confopt", searcher=split_conformal_searcher
+            ),
+            tuner_identifier=config_identifier,
             searcher_tuning_framework=None,
         )
-        COVERAGE_ANALYSIS_CONFIGURATIONS.append(config)
+        COVERAGE_ANALYSIS_CONFIGURATIONS.append(split_conformal_config)
 
-        SEARCHER = QuantileConformalSearcher(
+        cv_conformal_sampler = LowerBoundSampler(
+            interval_width=interval_width,
+            adapter=adapter,
+            c=0,
+        )
+        cv_conformal_searcher = QuantileConformalSearcher(
             quantile_estimator_architecture=COVERAGE_ANALYSIS_ARCHITECTURE,
-            sampler=SAMPLER,
+            sampler=cv_conformal_sampler,
             n_calibration_folds=5,
             calibration_split_strategy="cv",
         )
@@ -77,34 +85,33 @@ for interval_width in COVERAGE_INTERVAL_WIDTHS:
             config_identifier = f"Cross Conformalized + {adapter}"
         else:
             raise ValueError(f"Unknown adapter: {adapter}")
-        config = TunerConfig(
-            tuner="confopt",
-            searcher=SEARCHER,
-            config_identifier=config_identifier,
+        cv_conformal_config = TunerConfig(
+            tuner=TunerModelConfig(backend="confopt", searcher=cv_conformal_searcher),
+            tuner_identifier=config_identifier,
             searcher_tuning_framework=None,
         )
-        COVERAGE_ANALYSIS_CONFIGURATIONS.append(config)
-        COVERAGE_PLOT_CONFIGURATIONS.append(config)
+        COVERAGE_ANALYSIS_CONFIGURATIONS.append(cv_conformal_config)
+        COVERAGE_PLOT_CONFIGURATIONS.append(cv_conformal_config)
 
-    # Manually add the unconformalized configuration for each interval width:
-    config = TunerConfig(
-        tuner="confopt",
-        searcher=QuantileConformalSearcher(
-            quantile_estimator_architecture=COVERAGE_ANALYSIS_ARCHITECTURE,
-            sampler=LowerBoundSampler(
-                interval_width=interval_width,
-                adapter=None,
-                c=0,
-            ),
-            n_pre_conformal_trials=10000,
-            n_calibration_folds=3,
-            calibration_split_strategy="train_test_split",
+    # Add the unconformalized configuration for each interval width:
+    non_conformal_searcher = QuantileConformalSearcher(
+        quantile_estimator_architecture=COVERAGE_ANALYSIS_ARCHITECTURE,
+        sampler=LowerBoundSampler(
+            interval_width=interval_width,
+            adapter=None,
+            c=0,
         ),
-        config_identifier="Unconformalized",
+        n_pre_conformal_trials=10000,
+        n_calibration_folds=3,
+        calibration_split_strategy="train_test_split",
+    )
+    non_conformal_config = TunerConfig(
+        tuner=TunerModelConfig(backend="confopt", searcher=non_conformal_searcher),
+        tuner_identifier="Unconformalized",
         searcher_tuning_framework=None,
     )
-    COVERAGE_ANALYSIS_CONFIGURATIONS.append(config)
-    COVERAGE_PLOT_CONFIGURATIONS.append(config)
+    COVERAGE_ANALYSIS_CONFIGURATIONS.append(non_conformal_config)
+    COVERAGE_PLOT_CONFIGURATIONS.append(non_conformal_config)
 
 
 # 3. Create configurations feeding the comparative tuner rank plots:
@@ -132,6 +139,7 @@ SAMPLER_VARIATION_CONFIGURATIONS = build_sampler_variation_configurations(
     calibration_split_strategy="train_test_split",
 )
 
+# 4. Architecture variation configurations:
 ARCHITECTURE_VARIATION_ADAPTER = "DtACI"
 ARCHITECTURE_VARIATION_N_QUANTILES = 6
 ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurations(
@@ -163,6 +171,7 @@ ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurati
     calibration_split_strategy="train_test_split",
 )
 
+# 5. Limited architecture configurations:
 LIMITED_ARCHITECTURE_ADAPTER = "DtACI"
 LIMITED_ARCHITECTURE_N_QUANTILES = 6
 LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS = (
@@ -185,7 +194,7 @@ LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS = (
     )
 )
 
-
+# 6. Pre-conformal comparison configurations:
 PRECONFORMAL_ADAPTER = "DtACI"
 PRECONFORMAL_N_QUANTILES = 6
 PRECONFORMAL_COMPARISON_CONFIGURATIONS = []
@@ -226,7 +235,7 @@ for architecture in [
         )
 
 
-# 4. Create configurations feeding the quantile count variation plots:
+# 7. Quantile count variation configurations:
 QUANTILE_COUNT_VARIATION_ADAPTER = "DtACI"
 QUANTILE_COUNT_VARIATION_CONFIGURATIONS = []
 QUANTILE_COUNT_VALUES = [4, 6, 8, 10, 20]
@@ -235,7 +244,7 @@ for n_quantiles in QUANTILE_COUNT_VALUES:
     QUANTILE_COUNT_VARIATION_CONFIGURATIONS.extend(
         build_architecture_variation_configurations(
             architectures=[
-                "qrf",  # Use single architecture
+                "qrf",  # NOTE: Use single architecture for this configuration, analysis doesn't support multiple
             ],
             samplers=[
                 ExpectedImprovementSampler(
@@ -261,12 +270,11 @@ for n_quantiles in QUANTILE_COUNT_VALUES:
     )
 
 
-# 5. Create configurations feeding the search tuning effect plots:
+# 8. Search tuning effect configurations:
 SEARCH_TUNING_EFFECT_ADAPTER = "DtACI"
 SEARCH_TUNING_EFFECT_N_QUANTILES = 6
 SEARCH_TUNING_EFFECT_CONFIGURATIONS = []
 
-# Use multiple architectures and vary searcher_tuning_framework (None vs "fixed")
 for searcher_tuning_framework in [None, "fixed"]:
     SEARCH_TUNING_EFFECT_CONFIGURATIONS.extend(
         build_architecture_variation_configurations(
@@ -286,6 +294,5 @@ for searcher_tuning_framework in [None, "fixed"]:
             calibration_split_strategy="train_test_split",
         )
     )
-
 
 EXTERNAL_TUNING_CONFIGURATIONS = get_external_tuning_configurations()

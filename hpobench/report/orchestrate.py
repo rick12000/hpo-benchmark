@@ -6,8 +6,14 @@ from typing import Literal, Optional
 import gc
 import numpy as np
 from sklearn.metrics import mean_pinball_loss
-from confopt.selection.conformalization import QuantileConformalEstimator
-from confopt.utils.configurations.encoding import ConfigurationEncoder
+
+try:
+    from confopt.selection.conformalization import QuantileConformalEstimator
+    from confopt.utils.configurations.encoding import ConfigurationEncoder
+except ImportError:
+    raise ImportError(
+        "confopt is a core dependency of this repository, but it is not automatically installed via pyproject.toml, please refer to the README.md for instructions on how to install this separately"
+    )
 from hpobench.config.config_types import (
     ExperimentConfig,
     TunerConfig,
@@ -84,8 +90,7 @@ def load_experiment_configs(
         timeout: Maximum time in seconds allowed for each individual hyperparameter
             evaluation. None for no timeout limit.
         max_n_instances_per_benchmark: Maximum number of dataset instances to use per
-            benchmark. For JAHS-Bench-201, this limits how many of the 3 available
-            datasets are selected.
+            benchmark.
         datasets_per_benchmark: Optional list of lists, each containing specific dataset
             identifiers to use for the corresponding benchmark. If provided, overrides
             the default dataset selection logic for benchmarks.
@@ -254,7 +259,7 @@ def run_main_benchmark(
             f"Generated {len(warm_start_configs_per_repetition[0])} warm start configurations."
         )
 
-        for tuner in experiment_config.tuning_configurations:
+        for tuner in experiment_config.tuner_configurations:
             logger.info(f"Loop Level | Tuner: {tuner}")
             for repetition in range(n_repetitions):
                 logger.info(f"Loop Level | Repetition: {repetition}")
@@ -271,7 +276,6 @@ def run_main_benchmark(
                     random_state=base_random_state + repetition,
                 )
 
-                # NOTE: Assumes single thread execution:
                 historical_performance = add_runtime(
                     experiment_log=historical_performance,
                     tune_start=tune_start,
@@ -288,45 +292,40 @@ def run_main_benchmark(
                     "benchmark_identifier"
                 ] = aliased_benchmark_identifier
                 historical_performance["dataset"] = dataset_name
-                historical_performance["tuner"] = tuner.config_identifier
+                historical_performance["tuner"] = tuner.tuner_identifier
                 historical_performance["repetition"] = repetition + 1
                 historical_performance[
                     "searcher_tuning_framework"
                 ] = tuner.searcher_tuning_framework
 
-                if tuner.tuner == "confopt":
-                    sampler_name = tuner.searcher.sampler.__class__.__name__
+                if tuner.backend == "confopt":
+                    sampler_name = tuner.tuner.sampler.__class__.__name__
 
-                    if hasattr(tuner.searcher.sampler, "interval_width"):
-                        confidence_level = str(tuner.searcher.sampler.interval_width)
+                    if hasattr(tuner.tuner.sampler, "interval_width"):
+                        confidence_level = str(tuner.tuner.sampler.interval_width)
                     else:
                         confidence_level = ""
 
-                    estimator_architecture = (
-                        tuner.searcher.quantile_estimator_architecture
-                    )
+                    estimator_architecture = tuner.tuner.quantile_estimator_architecture
 
-                    if hasattr(tuner.searcher, "n_pre_conformal_trials"):
-                        n_pre_conformal_trials = tuner.searcher.n_pre_conformal_trials
+                    if hasattr(tuner.tuner, "n_pre_conformal_trials"):
+                        n_pre_conformal_trials = tuner.tuner.n_pre_conformal_trials
                     else:
                         n_pre_conformal_trials = ""
 
-                    # Extract sampler's n_quantiles
-                    if hasattr(tuner.searcher.sampler, "n_quantiles"):
-                        sampler_n_quantiles = tuner.searcher.sampler.n_quantiles
+                    if hasattr(tuner.tuner.sampler, "n_quantiles"):
+                        sampler_n_quantiles = tuner.tuner.sampler.n_quantiles
                     else:
                         sampler_n_quantiles = ""
 
-                    # Extract sampler's adapter (convert None to string "None")
-                    if hasattr(tuner.searcher.sampler, "adapter"):
-                        if tuner.searcher.sampler.adapter is None:
+                    if hasattr(tuner.tuner.sampler, "adapter"):
+                        if tuner.tuner.sampler.adapter is None:
                             sampler_adapter = "None"
                         else:
-                            sampler_adapter = str(tuner.searcher.sampler.adapter)
+                            sampler_adapter = str(tuner.tuner.sampler.adapter)
                     else:
                         sampler_adapter = ""
 
-                    # Extract tuner config's searcher_tuning_framework
                     if tuner.searcher_tuning_framework is None:
                         tuner_searcher_tuning_framework = "None"
                     else:
@@ -353,9 +352,9 @@ def run_main_benchmark(
                     if sampler_name in aliases.sampler_aliases
                     else sampler_name
                 )
-                if tuner.tuner == "confopt":
+                if tuner.backend == "confopt":
                     if sampler_name == "ThompsonSampler":
-                        if tuner.searcher.sampler.enable_optimistic_sampling:
+                        if tuner.tuner.sampler.enable_optimistic_sampling:
                             aliased_sampler_name = "OBS"
                 historical_performance[
                     "estimator_architecture"
@@ -628,7 +627,7 @@ def run_static_benchmark(
         logger.info(f"Processing benchmark: {benchmark}")
         experiment_configs = []
         if benchmark == "LCBench-L":
-            # Below we use setup function as shortcut, but we are only interested in
+            # NOTE: Below we use setup function as shortcut, but we are only interested in
             # the yahpo generator and param space generation, the other inputs are
             # just placeholders:
             yahpo_configs = setup_yahpo_instance_configs(
@@ -697,7 +696,7 @@ def run_static_benchmark(
             experiment_configs.extend(yahpo_configs)
 
         elif benchmark == "jahs201":
-            # Use setup function as shortcut, but we are only interested in
+            # NOTE: Use setup function as shortcut, but we are only interested in
             # the objective function and search space generation, the other inputs are
             # just placeholders:
             all_datasets = ["cifar10", "fashion_mnist", "colorectal_histology"]

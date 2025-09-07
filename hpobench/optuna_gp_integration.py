@@ -1,30 +1,3 @@
-"""
-Extension of the Optuna GP sampler to work with additional acquisition functions.
-Optuna is licensed under:
-
-MIT License
-
-Copyright (c) 2018 Preferred Networks, Inc.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -110,11 +83,11 @@ class StrippedGPSampler(BaseSampler):
         self,
         *,
         acquisition_function: ExpandedAcquisitionFunction = ExpandedAcquisitionFunction.LOG_EXPECTED_IMPROVEMENT,
-        n_candidates: int = 2048,  # Match Optuna's n_preliminary_samples default
+        n_candidates: int = 2048,
         seed: int | None = None,
         independent_sampler: BaseSampler | None = None,
-        n_startup_trials: int = 10,  # Match Optuna's default
-        deterministic_objective: bool = False,  # Match Optuna's default
+        n_startup_trials: int = 10,
+        deterministic_objective: bool = False,
         maximize: bool = False,
         beta: float = 2.0,
         xi: float = 0.01,
@@ -135,16 +108,13 @@ class StrippedGPSampler(BaseSampler):
         self._kernel_params_cache_list: list[gp.KernelParamsTensor] | None = None
         self._deterministic = deterministic_objective
 
-        # Direction handling (follow Optuna's approach)
         self._maximize = maximize
 
-        # CONFOPT-specific parameters
         self._beta = beta  # For confidence bounds
         self._xi = xi  # For EI
         self._n_samples = n_samples  # For Monte Carlo methods
 
-        # Simplified optimization parameters (uniform sampling only)
-        self._n_preliminary_samples: int = 2048  # Number of uniform random candidates
+        self._n_preliminary_samples: int = 2000
 
         logger.info(
             f"Initialized CONFOPTGPSampler with acquisition function: {acquisition_function.value}"
@@ -444,7 +414,16 @@ class StrippedGPSampler(BaseSampler):
         trial: FrozenTrial,
         search_space: dict[str, BaseDistribution],
     ) -> dict[str, Any]:
-        """Sample parameters using GP with CONFOPT acquisition functions."""
+        """Sample hyperparameter values using GP-based acquisition function optimization.
+
+        Args:
+            study: Optuna study object containing trial history.
+            trial: Current frozen trial for conditional parameter sampling.
+            search_space: Dictionary mapping parameter names to their distributions.
+
+        Returns:
+            Dictionary mapping parameter names to sampled values.
+        """
         if search_space == {}:
             return {}
 

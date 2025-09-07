@@ -8,6 +8,7 @@ import os
 import logging
 import numpy as np
 import math
+import re
 from hpobench.utils import AnalysisPathManager
 
 matplotlib.use("Agg")  # Use non-GUI backend
@@ -43,6 +44,15 @@ DEFAULT_COLOR_PALETTE = [
 
 
 def _get_label(label: Optional[str], default: Optional[str]) -> Optional[str]:
+    """Get formatted label text with fallback to default value.
+
+    Args:
+        label: Primary label text to use.
+        default: Fallback label text (will be formatted).
+
+    Returns:
+        Formatted label string or None if both inputs are None.
+    """
     if label is not None:
         return label
     elif default is not None:
@@ -51,7 +61,39 @@ def _get_label(label: Optional[str], default: Optional[str]) -> Optional[str]:
         return None
 
 
+def _sort_legend_items(handles, labels):
+    """Sort legend items: numerically if starts with number, otherwise alphabetically."""
+
+    def sort_key(label):
+        label = str(label)
+        # Check if label starts with a number
+        if label and label[0].isdigit():
+            # Extract the numeric part and the rest
+            match = re.match(r"^(\d+(?:\.\d+)?)(.*)", label)
+            if match:
+                num_part = float(match.group(1))
+                rest_part = match.group(2)
+                return (0, num_part, rest_part.lower())  # 0 for numeric sort first
+        # Alphabetical sort for non-numeric
+        return (1, label.lower())
+
+    # Sort both handles and labels together
+    combined = list(zip(handles, labels))
+    combined.sort(key=lambda x: sort_key(x[1]))
+    sorted_handles, sorted_labels = zip(*combined)
+    return list(sorted_handles), list(sorted_labels)
+
+
 def _get_axis_values(data: pd.DataFrame, measure: Optional[str]) -> list:
+    """Extract unique values from a DataFrame column for axis configuration.
+
+    Args:
+        data: DataFrame containing the data.
+        measure: Column name to extract unique values from.
+
+    Returns:
+        List of unique values from the column, or [None] if measure is None.
+    """
     if measure is None:
         return [None]
     else:
@@ -82,7 +124,6 @@ def _plot_tuner(
     tuner_data,
     x_col,
     y_col,
-    tuner,
     color,
     add_ci,
     y_col_lower,
@@ -130,6 +171,7 @@ def plot_benchmark_data(
     entity_legend_mapping: Optional[dict] = None,
     add_markers: bool = False,
     hide_col_and_row_labels: bool = True,
+    x_axis_start: Optional[float] = None,
 ) -> None:
     """
     Plots benchmark data in a grid of subplots, with rows and columns determined by specified measures.
@@ -151,6 +193,7 @@ def plot_benchmark_data(
         row_measure_label: Custom label for the row measure (subplot title).
         add_markers: Whether to add circular markers to the plotted lines.
         hide_col_and_row_labels: Whether to hide the column and row measure labels, using only the axis labels.
+        x_axis_start: Starting value for the x-axis. If None, the axis starts at the minimum data value.
 
     Raises:
         ValueError: If there are duplicate X-axis values for the same combination of row_measure, col_measure, and tuner.
@@ -228,7 +271,6 @@ def plot_benchmark_data(
                     tuner_data=entity_data,
                     x_col=x_col,
                     y_col=y_col,
-                    tuner=entity,
                     color=DEFAULT_COLOR_PALETTE[
                         entity_idx % len(DEFAULT_COLOR_PALETTE)
                     ],
@@ -247,6 +289,11 @@ def plot_benchmark_data(
                 y_range = y_max - y_min
                 buffer = 0.05 * y_range if y_range > 0 else 0.05
                 ax.set_ylim((y_min - buffer, y_max + buffer))
+
+            # Set x-axis start if specified
+            if x_axis_start is not None:
+                current_xlim = ax.get_xlim()
+                ax.set_xlim(left=x_axis_start, right=current_xlim[1])
 
             # Add titles and labels following scientific multi-panel conventions
             x_label_to_use = x_label if x_label is not None else _get_label(None, x_col)
@@ -298,6 +345,8 @@ def plot_benchmark_data(
 
     # Add legend below the chart, ensuring no overlap with chart or x label
     handles, labels = ax.get_legend_handles_labels()
+    # Sort legend items: numerically if starts with number, otherwise alphabetically
+    handles, labels = _sort_legend_items(handles, labels)
 
     # Calculate positioning adjustments
     num_subplot_rows = len(row_values) if row_measure else 1
@@ -378,8 +427,38 @@ def plot_and_save(
     entity_legend_mapping: Optional[dict] = None,
     add_markers: bool = False,
     hide_col_and_row_labels: bool = True,
+    x_axis_start: Optional[float] = None,
 ):
-    """Generates and saves plots for specified y-columns, saving to the correct path."""
+    """Generate and save plots for multiple y-columns with proper path organization.
+
+    Creates faceted plots for each y-column specified, organizing them by analysis
+    type and saving to appropriate cache directories. Supports confidence intervals
+    and custom labeling.
+
+    Args:
+        data: DataFrame containing the plotting data.
+        x_col: Column name for x-axis values.
+        y_cols: List of column names for y-axis values (one plot per column).
+        entity_col: Column name for grouping/coloring entities.
+        cache_path: Base cache directory path.
+        run_start_str: Timestamp identifier for the current run.
+        filename_prefix: Prefix for generated plot filenames.
+        analysis_type: Analysis category for path organization.
+        subfolder: Optional subfolder within analysis directory.
+        col_measure: Column for subplot columns.
+        row_measure: Column for subplot rows.
+        y_cols_lower: Optional list of lower confidence bound columns.
+        y_cols_upper: Optional list of upper confidence bound columns.
+        x_label: Custom x-axis label.
+        y_label: Custom y-axis label.
+        col_measure_label: Custom column facet label.
+        row_measure_label: Custom row facet label.
+        share_y_axis: Whether to share y-axis across subplots.
+        entity_legend_mapping: Dictionary mapping entity values to display names.
+        add_markers: Whether to add markers to lines.
+        hide_col_and_row_labels: Whether to hide facet labels.
+        x_axis_start: Optional starting value for x-axis.
+    """
 
     path_manager = AnalysisPathManager(cache_path, run_start_str)
     output_path = path_manager.get_analysis_path(analysis_type, "plots", subfolder)
@@ -424,6 +503,7 @@ def plot_and_save(
                 entity_legend_mapping=entity_legend_mapping,
                 add_markers=add_markers,
                 hide_col_and_row_labels=hide_col_and_row_labels,
+                x_axis_start=x_axis_start,
             )
             time.sleep(1)
         except Exception as e:
@@ -540,7 +620,7 @@ def plot_paired_rank_and_cd(
     cd_budget: int = 100,
     alpha: float = 0.05,
     x_label: Optional[str] = None,
-    row_measure_label: Optional[str] = None,
+    x_axis_start: Optional[float] = None,
 ) -> None:
     """Plot paired visualizations: rank evolution and critical difference diagrams.
 
@@ -659,6 +739,11 @@ def plot_paired_rank_and_cd(
         )
         ax_rank.grid(True, which="both", linestyle="--", linewidth=0.5, alpha=0.7)
 
+        # Set x-axis start if specified
+        if x_axis_start is not None:
+            current_xlim = ax_rank.get_xlim()
+            ax_rank.set_xlim(left=x_axis_start, right=current_xlim[1])
+
         # Thicker axis lines for academic style (match plot_benchmark_data)
         for spine in ["top", "right", "bottom", "left"]:
             ax_rank.spines[spine].set_linewidth(1.2)
@@ -743,6 +828,8 @@ def plot_paired_rank_and_cd(
 
     # Add shared legend at the bottom center (consistent with plot_benchmark_data)
     handles, labels = (legend_handles, legend_labels)
+    # Sort legend items: numerically if starts with number, otherwise alphabetically
+    handles, labels = _sort_legend_items(handles, labels)
     if handles:
         # Calculate positioning adjustments
         num_subplot_rows = len(row_values)

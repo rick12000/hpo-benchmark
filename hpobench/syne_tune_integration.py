@@ -1,16 +1,10 @@
-"""
-Integration module for Syne-Tune's Conformal Quantile Regression (CQR) searcher
-into the HPO benchmark framework.
-
-This module adapts Syne-Tune's CQR implementation to work with the standardized
-tuning interface, allowing fair comparison with other HPO methods.
-"""
-
 import pandas as pd
 from datetime import datetime
 from typing import Union, Optional, Any, Dict, List, Tuple
 import logging
+import numpy as np
 
+from hpobench.config.config_types import SyneTuneModel
 from syne_tune.config_space import Domain, Float, Integer, Categorical
 from syne_tune.optimizer.schedulers.searchers.conformal.conformal_quantile_regression_searcher import (
     ConformalQuantileRegression,
@@ -35,7 +29,24 @@ def build_history_entry(
     miscoverage_penalty: Optional[float] = None,
     tabularized_configuration: Optional[Any] = None,
 ) -> dict[str, Any]:
-    """Standardizes the history entry structure for syne-tune integration."""
+    """Creates a standardized dictionary entry for SyneTune tuning history records.
+
+    Args:
+        end_time: Timestamp when the trial completed.
+        performance: Observed performance metric value.
+        configurations: Dictionary of hyperparameter configuration.
+        iteration: Trial iteration number (1-based indexing).
+        estimator_error: Prediction error from surrogate model, if applicable.
+        searcher_training_time: Time spent training the searcher model.
+        breach_status: Binary indicator (0/1) of prediction interval breach.
+        winkler_score: Winkler score evaluating prediction interval quality.
+        width: Width of the conformal prediction interval.
+        miscoverage_penalty: Penalty for prediction interval not containing true value.
+        tabularized_configuration: Processed configuration data for analysis.
+
+    Returns:
+        Dictionary containing all trial information with standardized keys.
+    """
     return {
         "end_time": end_time,
         "performance": performance,
@@ -51,7 +62,6 @@ def build_history_entry(
     }
 
 
-# Constants for CQR configuration
 DEFAULT_NUM_INIT_RANDOM_DRAWS = 5
 DEFAULT_UPDATE_FREQUENCY = 1
 DEFAULT_MAX_FIT_SAMPLES = 1000
@@ -66,13 +76,9 @@ def _create_cqr_params(num_warm_starts: int = 0) -> dict[str, Any]:
     Returns:
         Dictionary with CQR configuration parameters.
     """
-    # Use a reasonable number of initial random draws
-    # The CQR model needs sufficient data to fit properly
     if num_warm_starts >= DEFAULT_NUM_INIT_RANDOM_DRAWS:
-        # If we have enough warm starts, use fewer additional random draws
-        num_init_random_draws = 2  # Still do a few to ensure model stability
+        num_init_random_draws = 0
     else:
-        # If we have few or no warm starts, use the default
         num_init_random_draws = DEFAULT_NUM_INIT_RANDOM_DRAWS
 
     return {
@@ -100,7 +106,7 @@ def convert_params_to_syne_tune_config_space(
     for name, param in raw_params.items():
         if isinstance(param, IntRange):
             # Note: syne-tune Integer doesn't support loguniform, so we use uniform for int parameters
-            # regardless of the log flag. This is a limitation of syne-tune.
+            # regardless of the log flag. This is a limitation.
             domain = Integer(lower=param.lower, upper=param.upper)
             config_space[name] = domain
         elif isinstance(param, FloatRange):
@@ -137,6 +143,13 @@ class FixedConformalQuantileRegression(ConformalQuantileRegression):
         logger.debug(f"Filtered surrogate_kwargs: {safe_surrogate_kwargs}")
 
         try:
+            # Ensure numpy random state is set before fitting surrogate model
+            if self.random_state is not None:
+                np.random.seed(self.random_state)
+                logger.debug(
+                    f"Set numpy random seed to {self.random_state} before fitting surrogate model"
+                )
+
             self.surrogate_model = self.surrogate_cls(
                 config_space=self.config_space,
                 max_fit_samples=self.max_fit_samples,
@@ -184,6 +197,11 @@ class SyneTuneCQRWrapper:
         self.performance_generator = performance_generator
         self.random_seed = random_seed
         self.cqr_params = cqr_params
+
+        # Set numpy random state for reproducibility
+        if random_seed is not None:
+            np.random.seed(random_seed)
+            logger.debug(f"Set numpy random seed to {random_seed}")
 
         # Convert parameter space to Syne-Tune format
         self.syne_tune_config_space = convert_params_to_syne_tune_config_space(
@@ -238,6 +256,9 @@ class SyneTuneCQRWrapper:
                 logger.warning(
                     "Searcher returned None, falling back to random sampling"
                 )
+                # Ensure numpy random state is set for reproducible random sampling
+                if self.random_seed is not None:
+                    np.random.seed(self.random_seed)
                 syne_tune_config = self.searcher.sample_random()
 
         except Exception as e:
@@ -245,6 +266,9 @@ class SyneTuneCQRWrapper:
             logger.error(
                 f"Searcher failed with error: {e}, falling back to random sampling"
             )
+            # Ensure numpy random state is set for reproducible random sampling
+            if self.random_seed is not None:
+                np.random.seed(self.random_seed)
             syne_tune_config = self.searcher.sample_random()
 
         logger.debug(
@@ -311,37 +335,33 @@ class SyneTuneCQRWrapper:
 def syne_tune_cqr_tune(
     raw_params: dict[str, Union[IntRange, FloatRange, CategoricalRange]],
     performance_generator: ObjectiveMetricGenerator,
-    sampler: str,
+    tuner_model: SyneTuneModel,
     warm_start_configs: Optional[List[Tuple[dict, float]]] = None,
     random_state: Optional[int] = None,
     n_trials: Optional[int] = None,
     timeout: Optional[float] = None,
 ) -> pd.DataFrame:
-    """
-    Runs Syne-Tune CQR tuning with a synthetic objective.
+    """Runs hyperparameter optimization using SyneTune's Conformal Quantile Regression.
 
     Args:
-        raw_params: Dictionary mapping parameter names to IntRange, FloatRange, or CategoricalRange.
-        performance_generator: ObjectiveMetricGenerator instance.
-        sampler: String identifier for the CQR sampler (only "cqr_thompson" is supported since CQR uses Thompson sampling).
-        warm_start_configs: Optional list of (config, loss) tuples for warm start.
-        random_state: Optional random seed.
-        n_trials: Optional number of trials.
-        timeout: Optional time budget in seconds.
+        raw_params: Dictionary mapping parameter names to their range specifications
+            (IntRange, FloatRange, or CategoricalRange).
+        performance_generator: Synthetic objective function for generating performance predictions.
+        tuner_model: SyneTuneModel configuration specifying the CQR searcher parameters.
+        warm_start_configs: Optional list of (configuration, loss) tuples for initialization.
+        random_state: Optional random seed for reproducible results.
+        n_trials: Optional maximum number of optimization trials.
+        timeout: Optional time budget in seconds for the optimization process.
 
     Returns:
         DataFrame with tuning history.
     """
 
-    # Syne-Tune CQR only supports Thompson sampling (random sampling from quantiles)
-    # All the different "acquisition strategies" map to the same implementation
     supported_samplers = {
-        "cqr_thompson",
-        "cqr_ucb",
-        "cqr_optimistic",
-        "cqr_pessimistic",
+        "CQR-TS",
     }
 
+    sampler = tuner_model.searcher
     if sampler not in supported_samplers:
         raise ValueError(
             f"Unknown Syne-Tune CQR sampler: {sampler}. Supported: {supported_samplers}"
@@ -368,13 +388,10 @@ def syne_tune_cqr_tune(
     )
 
     # Calculate number of trials to run
+    # Syne-Tune handles warm starts internally through points_to_evaluate,
+    # so we don't need to subtract them from n_trials
     if n_trials is not None:
-        # Follow the same pattern as other tuners: subtract warm start configs from total
-        # since warm start configs count as trials but are handled through points_to_evaluate
-        if warm_start_configs is not None:
-            adj_n_trials = n_trials - len(warm_start_configs)
-        else:
-            adj_n_trials = n_trials
+        adj_n_trials = n_trials
     else:
         adj_n_trials = 100  # Default number of trials
 

@@ -17,6 +17,12 @@ class BenchmarkDataProcessor:
     """
 
     def __init__(self, schema: BenchmarkDataSchema = None):
+        """Initialize the benchmark data processor with column schema configuration.
+
+        Args:
+            schema: BenchmarkDataSchema defining column names and structure.
+                Uses default schema if None provided.
+        """
         if schema is None:
             schema = BenchmarkDataSchema()
         self.schema = schema
@@ -30,13 +36,15 @@ class BenchmarkDataProcessor:
         self.sampler_col = schema.sampler_col
         self.confidence_level_col = schema.confidence_level_col
         self.estimator_architecture_col = schema.estimator_architecture_col
-        self.sampler_n_quantiles = schema.sampler_n_quantiles
-        self.sampler_adapter = schema.sampler_adapter
-        self.tuner_searcher_tuning_framework = schema.tuner_searcher_tuning_framework
-        self.n_pre_conformal_trials = schema.n_pre_conformal_trials
+        self.sampler_n_quantiles = schema.sampler_n_quantiles_col
+        self.sampler_adapter = schema.sampler_adapter_col
+        self.tuner_searcher_tuning_framework = (
+            schema.tuner_searcher_tuning_framework_col
+        )
+        self.n_pre_conformal_trials = schema.n_pre_conformal_trials_col
         self.runtime_unit = schema.runtime_unit
         self.iter_unit = schema.iter_unit
-        self.breach_column = schema.breach_column
+        self.breach_column = schema.breach_col
         self.cumulative_coverage_error_col = schema.cumulative_coverage_error_col
         self.rolling_coverage_error_col = schema.rolling_coverage_error_col
 
@@ -75,8 +83,16 @@ class BenchmarkDataProcessor:
         ]
 
     def _validate_and_clean_data(self, data: pd.DataFrame) -> pd.DataFrame:
-        """
-        Validates and cleans data by filling NaN or None values with empty strings.
+        """Validate and clean benchmark data by handling missing values.
+
+        Args:
+            data: Raw benchmark data DataFrame.
+
+        Returns:
+            Cleaned DataFrame with NaN values filled in tuner columns.
+
+        Raises:
+            ValueError: If required columns are missing from input data.
         """
         data_copy = data.copy()
 
@@ -514,10 +530,25 @@ class BenchmarkDataProcessor:
         collapse_datasets: bool = False,
         n_bootstraps: int = 1000,
     ) -> pd.DataFrame:
-        """
-        Main entry point for processing HPO benchmark data.
+        """Process HPO benchmark data through complete analysis pipeline.
 
-        Orchestrates the complete processing pipeline based on budget type.
+        Main entry point that orchestrates data processing based on budget type,
+        handling both iteration-based and runtime-based budgets.
+
+        Args:
+            raw_benchmark_data: Raw experimental results DataFrame.
+            budget_unit: Type of budget unit (iteration or runtime).
+            extra_ranking_cols: Additional columns to include in ranking.
+            relativize_budget: Whether to normalize budget to percentage scale.
+            collapse_repetitions: Whether to aggregate across repetitions.
+            collapse_datasets: Whether to aggregate across datasets.
+            n_bootstraps: Number of bootstrap samples for confidence intervals.
+
+        Returns:
+            Processed DataFrame with performance metrics and rankings.
+
+        Raises:
+            ValueError: If budget_unit is not supported.
         """
         data_cleaned = self._validate_and_clean_data(raw_benchmark_data)
 

@@ -14,7 +14,12 @@ logger = logging.getLogger(__name__)
 
 
 def ensure_yahpo_initialized():
-    """Ensure YAHPO config is initialized. Called lazily when needed."""
+    """Initialize YAHPO benchmark configuration and data paths.
+
+    Sets up the YAHPO Gym environment for hyperparameter optimization benchmarking.
+    Creates the necessary data directory and initializes the configuration lazily
+    to avoid import issues. Includes fallback handling for multiprocessing contexts.
+    """
     from yahpo_gym import local_config  # Import here to avoid issues
 
     yahpo_data_path = "yahpo_bench_data"
@@ -58,6 +63,15 @@ class AnalysisPathManager:
 
 
 def get_group_dict(breakout_col, within_group):
+    """Create a dictionary mapping breakout columns to their values within a group.
+
+    Args:
+        breakout_col: Column names for grouping, can be None for no grouping.
+        within_group: Values corresponding to the breakout columns.
+
+    Returns:
+        Dictionary mapping column names to values, or empty dict if no breakout columns.
+    """
     if breakout_col is None:
         return {}
     if isinstance(within_group, tuple):
@@ -70,6 +84,16 @@ def generate_hyperparameter_combinations(
     n_combinations: int,
     random_state: Optional[int] = None,
 ):
+    """Generate random hyperparameter configurations from parameter ranges.
+
+    Args:
+        params: Dictionary mapping parameter names to their range specifications.
+        n_combinations: Number of random configurations to generate.
+        random_state: Optional random seed for reproducible generation.
+
+    Returns:
+        List of dictionaries, each containing a random hyperparameter configuration.
+    """
     random.seed(random_state)
     combinations = []
     for _ in range(n_combinations):
@@ -137,6 +161,16 @@ def add_runtime(
     tune_start,
     performance_generator: "ObjectiveMetricGenerator",
 ):
+    """Add runtime predictions to experiment log DataFrame.
+
+    Args:
+        experiment_log: DataFrame containing experiment trial data.
+        tune_start: Start time of the tuning process.
+        performance_generator: Generator for predicting performance and runtime.
+
+    Returns:
+        DataFrame with additional runtime columns.
+    """
     experiment_log_copy = experiment_log.copy()
 
     experiment_log_copy["generator_runtime"] = experiment_log_copy[
@@ -157,6 +191,15 @@ def add_runtime(
 
 
 def setup_environment(cache_path: str = "cache/") -> tuple[str, logging.Logger]:
+    """Set up the experimental environment with logging and cache directories.
+
+    Args:
+        cache_path: Base directory path for storing experimental outputs and logs.
+
+    Returns:
+        Tuple of (run_start_str, logger) where run_start_str is a timestamp
+        identifier for the current run and logger is the configured logging instance.
+    """
     if not os.path.exists(cache_path):
         os.makedirs(cache_path)
 

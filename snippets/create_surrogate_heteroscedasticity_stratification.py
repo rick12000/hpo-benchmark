@@ -16,7 +16,6 @@ import random
 random.seed(42)
 np.random.seed(42)
 
-# Configuration parameters
 BENCHMARKS = ["rbv2_aknn", "lcbench"]
 TOP_COUNT = 5
 TOP_PERCENT = None
@@ -152,7 +151,6 @@ def create_heteroscedasticity_stratification(
     max_perfect_acc_ratio: float = 0.01,
 ) -> list:
     """Create stratification based on highest heteroscedasticity datasets."""
-    # Process all tasks and get valid datasets
     scores = {}
     for task_id in task_ids:
         tabularized_configurations, accuracies, runtimes = sample_benchmark_data(
@@ -171,7 +169,6 @@ def create_heteroscedasticity_stratification(
             if score > 0:
                 scores[task_id] = score
 
-    # Select top datasets based on scores
     return select_top_datasets(
         scores=scores, top_count=top_count, top_percent=top_percent
     )

@@ -102,17 +102,7 @@ def analyze_main_benchmark(
     - Conformalization effect assessment for conformal vs non-conformal methods
 
     Args:
-        raw_benchmark_data: DataFrame containing benchmark results with columns:
-            - benchmark_identifier: Unique identifier for benchmark suite
-            - dataset: Dataset name within benchmark
-            - tuner: HPO algorithm/configuration identifier
-            - repetition: Experimental repetition number
-            - sampler: Sampling strategy used (e.g., TPE, Random)
-            - confidence_level: Confidence level for conformal prediction
-            - estimator_architecture: ML model architecture type
-            - performance: Objective function value achieved
-            - runtime: Wall-clock time elapsed
-            - iteration: Number of optimization iterations
+        raw_benchmark_data: DataFrame containing benchmark results.
         cache_path: Root directory path for saving analysis outputs and plots.
         run_start_str: Timestamp string identifying this experimental run for file organization.
         analysis_type: Category label for analysis (e.g., "coverage_analysis", "sampler_variation").
@@ -156,10 +146,10 @@ def analyze_main_benchmark(
     iter_unit = schema.iter_unit
     norm_runtime_unit = schema.norm_runtime_unit
     norm_iter_unit = schema.norm_iter_unit
-    breach_col = schema.breach_column
-    n_pre_conformal_trials_col = schema.n_pre_conformal_trials
-    n_quantiles_col = schema.sampler_n_quantiles
-    searcher_tuning_framework_col = schema.tuner_searcher_tuning_framework
+    breach_col = schema.breach_col
+    n_pre_conformal_trials_col = schema.n_pre_conformal_trials_col
+    n_quantiles_col = schema.sampler_n_quantiles_col
+    searcher_tuning_framework_col = schema.tuner_searcher_tuning_framework_col
 
     processor = BenchmarkDataProcessor(schema=schema)
 
@@ -528,110 +518,139 @@ def analyze_main_benchmark(
             x_label="% Budget Used",
         )
 
-    # 2.1 Significance Analysis:
-    dataset_relative_runtime_results = create_default_plotting_identifier(
-        df=dataset_relative_runtime_results,
-        tuner_col=tuner_col,
-        estimator_architecture_col=estimator_architecture_col,
-        sampler_col=sampler_col,
-    )
-    significance_results_for_cd = {}
-    for budget in [50, 100]:
-        budget_data = dataset_relative_runtime_results[
-            dataset_relative_runtime_results[norm_runtime_unit] == budget
-        ]
-
-        # Check if ANY benchmark has at least 3 datasets (rather than all datasets across all benchmarks)
-        datasets_per_benchmark = budget_data.groupby(bench_col)[data_col].nunique()
-        benchmarks_with_sufficient_datasets = (datasets_per_benchmark >= 3).sum()
-
-        if benchmarks_with_sufficient_datasets == 0:
-            logger.info(
-                f"Skipping statistical tests for budget={budget}: no benchmark has at least 3 datasets. "
-                f"Dataset counts per benchmark: {datasets_per_benchmark.to_dict()}"
-            )
-            continue
-
-        cd_df = run_statistical_tests_for_budget(
-            data=budget_data,
-            budget=budget,
-            norm_runtime_unit=norm_runtime_unit,
-            analysis_components=analysis_components,
-            cd_significance_method=cd_significance_method,
-            bench_col=bench_col,
-            data_col=data_col,
-            tuner_col="plotting_identifier",
-            alpha=alpha,
-            cache_path=cache_path,
-            run_start_str=run_start_str,
-            analysis_type=analysis_type,
-            random_state=42,
-            filename_prefix="",
-            correction_method=correction_method,
+        # 2.1 Significance Analysis:
+        dataset_relative_runtime_results = create_default_plotting_identifier(
+            df=dataset_relative_runtime_results,
+            tuner_col=tuner_col,
+            estimator_architecture_col=estimator_architecture_col,
+            sampler_col=sampler_col,
         )
-        if cd_df is not None:
-            significance_results_for_cd[budget] = cd_df
+        significance_results_for_cd = {}
+        for budget in [50, 100]:
+            budget_data = dataset_relative_runtime_results[
+                dataset_relative_runtime_results[norm_runtime_unit] == budget
+            ]
 
-    global_dataset_relative_runtime_results = create_default_plotting_identifier(
-        df=global_dataset_relative_runtime_results,
-        tuner_col=tuner_col,
-        estimator_architecture_col=estimator_architecture_col,
-        sampler_col=sampler_col,
-    )
-    global_significance_results_for_cd = {}
-    for budget in [50, 100]:
-        global_budget_data = global_dataset_relative_runtime_results[
-            global_dataset_relative_runtime_results[norm_runtime_unit] == budget
-        ]
+            # Check if ANY benchmark has at least 3 datasets (rather than all datasets across all benchmarks)
+            datasets_per_benchmark = budget_data.groupby(bench_col)[data_col].nunique()
+            benchmarks_with_sufficient_datasets = (datasets_per_benchmark >= 3).sum()
 
-        if global_budget_data[data_col].nunique() < 3:
-            logger.info(
-                f"Skipping statistical tests for budget={budget}: no benchmark has at least 3 datasets. "
+            if benchmarks_with_sufficient_datasets == 0:
+                logger.info(
+                    f"Skipping statistical tests for budget={budget}: no benchmark has at least 3 datasets. "
+                    f"Dataset counts per benchmark: {datasets_per_benchmark.to_dict()}"
+                )
+                continue
+
+            cd_df = run_statistical_tests_for_budget(
+                data=budget_data,
+                budget=budget,
+                norm_runtime_unit=norm_runtime_unit,
+                analysis_components=analysis_components,
+                cd_significance_method=cd_significance_method,
+                bench_col=bench_col,
+                data_col=data_col,
+                tuner_col="plotting_identifier",
+                alpha=alpha,
+                cache_path=cache_path,
+                run_start_str=run_start_str,
+                analysis_type=analysis_type,
+                random_state=42,
+                filename_prefix="",
+                correction_method=correction_method,
             )
-            continue
+            if cd_df is not None:
+                significance_results_for_cd[budget] = cd_df
 
-        global_cd_df = run_statistical_tests_for_budget(
-            data=global_budget_data,
-            budget=budget,
-            norm_runtime_unit=norm_runtime_unit,
-            analysis_components=list(set(analysis_components + ["wilcoxon"])),
-            cd_significance_method="wilcoxon",
-            bench_col=bench_col,
-            data_col=data_col,
-            tuner_col="plotting_identifier",
-            alpha=alpha,
-            cache_path=cache_path,
-            run_start_str=run_start_str,
-            analysis_type=analysis_type,
-            random_state=42,
-            filename_prefix="global_",
-            correction_method=correction_method,
+        global_dataset_relative_runtime_results = create_default_plotting_identifier(
+            df=global_dataset_relative_runtime_results,
+            tuner_col=tuner_col,
+            estimator_architecture_col=estimator_architecture_col,
+            sampler_col=sampler_col,
         )
-        if global_cd_df is not None:
-            global_significance_results_for_cd[budget] = global_cd_df
+        global_significance_results_for_cd = {}
+        for budget in [50, 100]:
+            global_budget_data = global_dataset_relative_runtime_results[
+                global_dataset_relative_runtime_results[norm_runtime_unit] == budget
+            ]
 
-        cd_budget = 100
-        if cd_significance_method in analysis_components:
-            # Plot CD diagrams if we have significance results for this budget
-            if cd_budget in significance_results_for_cd:
-                # NOTE: entity_col must uniquely identify the variants (not going to
-                # use confidence_col, estimator_architecture_col or other identifiers
-                # as in process.py):
-                # TODO: Fix this and align with process.py
-                bench_relative_runtime_results = create_default_plotting_identifier(
-                    df=bench_relative_runtime_results,
-                    tuner_col=tuner_col,
-                    estimator_architecture_col=estimator_architecture_col,
-                    sampler_col=sampler_col,
+            if global_budget_data[data_col].nunique() < 3:
+                logger.info(
+                    f"Skipping statistical tests for budget={budget}: no benchmark has at least 3 datasets. "
+                )
+                continue
+
+            global_cd_df = run_statistical_tests_for_budget(
+                data=global_budget_data,
+                budget=budget,
+                norm_runtime_unit=norm_runtime_unit,
+                analysis_components=list(set(analysis_components + ["wilcoxon"])),
+                cd_significance_method="wilcoxon",
+                bench_col=bench_col,
+                data_col=data_col,
+                tuner_col="plotting_identifier",
+                alpha=alpha,
+                cache_path=cache_path,
+                run_start_str=run_start_str,
+                analysis_type=analysis_type,
+                random_state=42,
+                filename_prefix="global_",
+                correction_method=correction_method,
+            )
+            if global_cd_df is not None:
+                global_significance_results_for_cd[budget] = global_cd_df
+
+            cd_budget = 100
+            if cd_significance_method in analysis_components:
+                # Plot CD diagrams if we have significance results for this budget
+                if cd_budget in significance_results_for_cd:
+                    # NOTE: entity_col must uniquely identify the variants (not going to
+                    # use confidence_col, estimator_architecture_col or other identifiers
+                    # as in process.py):
+                    # TODO: Fix this and align with process.py
+                    bench_relative_runtime_results = create_default_plotting_identifier(
+                        df=bench_relative_runtime_results,
+                        tuner_col=tuner_col,
+                        estimator_architecture_col=estimator_architecture_col,
+                        sampler_col=sampler_col,
+                    )
+                    plot_paired_rank_and_cd(
+                        data=bench_relative_runtime_results,
+                        significance_data=significance_results_for_cd[cd_budget],
+                        x_col=norm_runtime_unit,
+                        entity_col="plotting_identifier",
+                        cache_path=cache_path,
+                        run_start_str=run_start_str,
+                        filename_prefix=f"rank_vs_norm_runtime_with_cd_{cd_significance_method}",
+                        analysis_type=analysis_type,
+                        subfolder="rank_analysis",
+                        row_measure=bench_col,
+                        cd_budget=cd_budget,
+                        alpha=alpha,
+                        x_label="% Budget Used",
+                    )
+                else:
+                    logger.info(
+                        f"Skipping CD plot for budget={cd_budget}: no significance results available"
+                    )
+
+            if cd_budget in global_significance_results_for_cd:
+                global_bench_relative_runtime_results = (
+                    create_default_plotting_identifier(
+                        df=global_bench_relative_runtime_results,
+                        tuner_col=tuner_col,
+                        estimator_architecture_col=estimator_architecture_col,
+                        sampler_col=sampler_col,
+                    )
                 )
                 plot_paired_rank_and_cd(
-                    data=bench_relative_runtime_results,
-                    significance_data=significance_results_for_cd[cd_budget],
+                    data=global_bench_relative_runtime_results,
+                    significance_data=global_significance_results_for_cd[cd_budget],
                     x_col=norm_runtime_unit,
                     entity_col="plotting_identifier",
                     cache_path=cache_path,
                     run_start_str=run_start_str,
-                    filename_prefix=f"rank_vs_norm_runtime_with_cd_{cd_significance_method}",
+                    filename_prefix=f"rank_vs_norm_runtime_with_global_cd_{cd_significance_method}",
                     analysis_type=analysis_type,
                     subfolder="rank_analysis",
                     row_measure=bench_col,
@@ -639,33 +658,6 @@ def analyze_main_benchmark(
                     alpha=alpha,
                     x_label="% Budget Used",
                 )
-            else:
-                logger.info(
-                    f"Skipping CD plot for budget={cd_budget}: no significance results available"
-                )
-
-        if cd_budget in global_significance_results_for_cd:
-            global_bench_relative_runtime_results = create_default_plotting_identifier(
-                df=global_bench_relative_runtime_results,
-                tuner_col=tuner_col,
-                estimator_architecture_col=estimator_architecture_col,
-                sampler_col=sampler_col,
-            )
-            plot_paired_rank_and_cd(
-                data=global_bench_relative_runtime_results,
-                significance_data=global_significance_results_for_cd[cd_budget],
-                x_col=norm_runtime_unit,
-                entity_col="plotting_identifier",
-                cache_path=cache_path,
-                run_start_str=run_start_str,
-                filename_prefix=f"rank_vs_norm_runtime_with_global_cd_{cd_significance_method}",
-                analysis_type=analysis_type,
-                subfolder="rank_analysis",
-                row_measure=bench_col,
-                cd_budget=cd_budget,
-                alpha=alpha,
-                x_label="% Budget Used",
-            )
 
     # NOTE: For next two breakout plots, values are first ranked by benchmark
     # and then split by sampler or architecture on column axis of plots, but
@@ -677,12 +669,7 @@ def analyze_main_benchmark(
             (bench_relative_runtime_results, norm_runtime_unit),
             (bench_relative_iterative_results, norm_iter_unit),
         ]:
-            dataset = create_default_plotting_identifier(
-                df=dataset,
-                tuner_col=tuner_col,
-                estimator_architecture_col=estimator_architecture_col,
-                sampler_col=sampler_col,
-            )
+            dataset["plotting_identifier"] = dataset[estimator_architecture_col]
             plot_and_save(
                 data=dataset,
                 x_col=x_col,
@@ -707,12 +694,7 @@ def analyze_main_benchmark(
             (bench_relative_runtime_results, norm_runtime_unit),
             (bench_relative_iterative_results, norm_iter_unit),
         ]:
-            dataset = create_default_plotting_identifier(
-                df=dataset,
-                tuner_col=tuner_col,
-                estimator_architecture_col=estimator_architecture_col,
-                sampler_col=sampler_col,
-            )
+            dataset["plotting_identifier"] = dataset[sampler_col]
             plot_and_save(
                 data=dataset,
                 x_col=x_col,
@@ -880,17 +862,11 @@ def analyze_searcher_tuning_effect(
     """Analyze the effect of searcher tuning iterations on search estimator performance.
 
     Args:
-        static_raw_benchmark_data: DataFrame containing static benchmark results with columns:
-            - benchmark_identifier: Benchmark suite identifier
-            - dataset: Dataset name within benchmark
-            - data_size: Number of training samples used
-            - repetition: Experimental repetition number
-            - estimator_architecture: ML model architecture (e.g., "RF", "XGBoost")
-            - tuning_iterations: Number of HPO iterations performed
-            - mean_pinball_loss: Average pinball loss across test samples
+        static_raw_benchmark_data: DataFrame containing static benchmark results.
         cache_path: Root directory for saving analysis outputs.
         run_start_str: Timestamp identifier for this experimental run.
         analysis_type: Analysis category label for file organization.
+        schema: Data schema defining column names and structure.
     """
     estimator_architecture_col = schema.estimator_architecture_col
     repetition_column = schema.rep_col
@@ -988,17 +964,11 @@ def analyze_searcher_estimator_comparison(
     4. Visualization of performance patterns across data sizes and benchmarks
 
     Args:
-        static_raw_benchmark_data: DataFrame containing static benchmark results with columns:
-            - benchmark_identifier: Benchmark suite identifier
-            - dataset: Dataset name within benchmark
-            - data_size: Number of training samples used
-            - repetition: Experimental repetition number
-            - estimator_architecture: ML model architecture identifier
-            - tuning_iterations: Number of HPO iterations (filtered to 0)
-            - mean_pinball_loss: Average pinball loss performance metric
+        static_raw_benchmark_data: DataFrame containing static benchmark results
         cache_path: Root directory for saving analysis outputs.
         run_start_str: Timestamp identifier for this experimental run.
         analysis_type: Analysis category label for file organization.
+        schema: Data schema defining column names and structure.
 
     Note:
         Only analyzes configurations with tuning_iterations == 0 to isolate the effect
@@ -1074,4 +1044,5 @@ def analyze_searcher_estimator_comparison(
         col_measure_label="Benchmark",
         row_measure_label="Surrogate Architecture",
         hide_col_and_row_labels=False,
+        x_axis_start=0,
     )

@@ -70,6 +70,19 @@ def generate_configs_per_repetition(
     objective_function,
     seed_offset=0,
 ):
+    """Generate hyperparameter configurations for multiple experimental repetitions.
+
+    Args:
+        search_space: Dictionary defining the hyperparameter search space.
+        n_configs: Number of configurations to generate per repetition.
+        n_repetitions: Number of experimental repetitions.
+        base_seed: Base random seed for reproducible generation.
+        objective_function: Objective function for evaluating configurations.
+        seed_offset: Offset to add to base seed for variation.
+
+    Returns:
+        List of configuration lists, one per repetition.
+    """
     configs_per_repetition = []
     for repetition in range(n_repetitions):
         configs = []
@@ -100,6 +113,21 @@ def run_and_save_friedman(
     analysis_type: str,
     subfolder: str = "statistical_tests",
 ):
+    """Run Friedman statistical test and save results.
+
+    Args:
+        data: DataFrame containing experimental data.
+        breakout_col: List of columns for grouping the analysis.
+        across_col: Column representing blocks/groups for the test.
+        entity_col: Column representing entities/treatments being compared.
+        rank_col: Column containing rank values for comparison.
+        alpha: Significance level for the test.
+        cache_path: Base directory for saving results.
+        run_start_str: Unique identifier for this analysis run.
+        filename: Name of the output file.
+        analysis_type: Type of analysis for path organization.
+        subfolder: Subfolder name for organizing outputs.
+    """
     logging.getLogger(__name__)
     results_df = friedman_test_runner(
         data=data,
@@ -346,11 +374,7 @@ def run_statistical_tests_for_budget(
         f"(budget={budget}): {valid_benchmarks}"
     )
 
-    # Filter data to only include valid benchmarks
     filtered_data = data[data[bench_col].isin(valid_benchmarks)]
-
-    # Friedman (no return expected from helper)
-    # Check if all benchmarks have more than 3 unique tuners for the Friedman test.
     tuner_counts_per_benchmark = filtered_data.groupby(bench_col)[tuner_col].nunique()
 
     if (tuner_counts_per_benchmark > 3).all():

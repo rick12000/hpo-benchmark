@@ -476,6 +476,16 @@ def permutation_pairwise_test(
 
 
 def _log_likelihood(model, X_input, y):
+    """Compute log-likelihood for logistic regression model predictions.
+
+    Args:
+        model: Fitted logistic regression model.
+        X_input: Feature matrix for predictions.
+        y: True binary labels.
+
+    Returns:
+        Log-likelihood value for the model predictions.
+    """
     eps = 1e-15
     probs = model.predict_proba(X_input)
     return np.sum(y * np.log(probs[:, 1] + eps) + (1 - y) * np.log(probs[:, 0] + eps))
@@ -542,17 +552,18 @@ def _compute_likelihood_ratio_statistic(
 def _calculate_chunked_target_coverage_deviation(
     group: pd.DataFrame, breach_column: str
 ) -> pd.Series:
-    """
-    Computes absolute deviation between observed breach rate and target confidence level for each chunk within a group.
+    """Compute absolute deviation between observed breach rate and target confidence level per chunk.
 
-    Splits the group into n_chunks, calculates breach rate and confidence level for each chunk, and stores the deviation at the start index of each chunk. Used for analyzing calibration of constraint coverage over budget progression.
+    Splits the group into fixed-size chunks, calculates breach rate and confidence level
+    for each chunk, and stores the deviation at the start index of each chunk. Used for
+    analyzing calibration of constraint coverage over budget progression.
 
     Args:
         group: DataFrame containing experiment records for a single group.
         breach_column: Column name indicating constraint breaches.
 
     Returns:
-        pd.Series with chunked target coverage deviation values (NaN for non-chunk start indices).
+        Series with chunked target coverage deviation values (NaN for non-chunk start indices).
     """
     n_obs = len(group)
     chunk_size = 10
@@ -598,16 +609,21 @@ def calculate_calibration_statistics_per_repetition(
 ) -> pd.DataFrame:
     """Calculate calibration statistics for conformal prediction methods.
 
+    Computes various calibration metrics including chunked target coverage deviation
+    and likelihood ratio statistics for evaluating conformal prediction performance.
+
     Args:
-        raw_benchmark_data: Raw benchmark results with winkler scores and intervals.
-        aggregators: List of aggregation column names.
-        repetition_column: Name of the repetition column.
-        breach_column: Name of the column containing binary breach indicators.
-        n_bootstraps: Number of bootstrap samples for confidence estimation.
-        random_state: Random seed for reproducible results.
+        raw_benchmark_data: Raw benchmark results with breach indicators and configurations.
+        aggregators: List of aggregation column names for grouping.
+        breach_column: Column name containing binary breach indicators.
+        entity_column: Column name for entities being compared (e.g., tuners).
+        metric_columns: List of metric column names to compute.
+        budget_unit: Column name for budget/iteration unit.
+        random_state: Random seed for reproducible likelihood ratio computations.
+        rank_metrics: Whether to rank metrics within groups.
 
     Returns:
-        DataFrame with averaged scores and confidence intervals per group.
+        DataFrame with averaged calibration statistics per repetition group.
     """
     sorted_experiment_log = raw_benchmark_data.sort_values(
         by=aggregators + [budget_unit],

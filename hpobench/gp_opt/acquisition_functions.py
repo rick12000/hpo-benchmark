@@ -1,11 +1,3 @@
-"""
-Acquisition Functions for Gaussian Process-based Hyperparameter Optimization
-
-This module implements various acquisition functions for GP-based optimization,
-adapted from the optuna_gp_integration.py file. These functions guide the
-selection of the next hyperparameter configuration to evaluate.
-"""
-
 import math
 import logging
 import numpy as np

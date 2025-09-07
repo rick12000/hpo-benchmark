@@ -3,12 +3,31 @@ from typing import List, Optional
 
 
 def _escape_latex_text(text: str) -> str:
+    """Escape underscores in text for LaTeX rendering.
+
+    Args:
+        text: Input text that may contain underscores.
+
+    Returns:
+        Text with underscores escaped for LaTeX.
+    """
     return text.replace("_", "\\_")
 
 
 def _format_score_with_interval(
     mean_val: float, lower_val: float, upper_val: float, is_best: bool
 ) -> str:
+    """Format a score with confidence interval for LaTeX table display.
+
+    Args:
+        mean_val: Mean score value.
+        lower_val: Lower bound of confidence interval.
+        upper_val: Upper bound of confidence interval.
+        is_best: Whether this is the best score (for bold formatting).
+
+    Returns:
+        LaTeX-formatted string with score and interval.
+    """
     mean_str = f"{mean_val:.3f}"
     interval_str = f"\\small{{[{lower_val:.3f}, {upper_val:.3f}]}}"
 
@@ -18,6 +37,11 @@ def _format_score_with_interval(
 
 
 def _get_calibration_metrics_caption() -> str:
+    """Get the standard caption text for calibration metrics tables.
+
+    Returns:
+        LaTeX caption text describing calibration metrics analysis.
+    """
     return (
         "Calibration performance rank by calibration metric. "
         "Metrics are computed for intervals at 25\\%, 50\\% and 75\\% confidence on all LCbench datasets, "
@@ -27,7 +51,14 @@ def _get_calibration_metrics_caption() -> str:
 
 
 def _parse_and_group_entities(df_block: pd.DataFrame) -> dict:
-    """Parse entity names and group by method and adapter."""
+    """Parse entity names and group by method and adapter.
+
+    Args:
+        df_block: DataFrame block containing tuner information.
+
+    Returns:
+        Dictionary grouping entities by method and adapter combinations.
+    """
     grouped = {}
 
     for _, row in df_block.iterrows():
@@ -75,6 +106,15 @@ def _parse_and_group_entities(df_block: pd.DataFrame) -> dict:
 
 
 def _build_calibration_metrics_table_block(df_block: pd.DataFrame, caption: str) -> str:
+    """Build a LaTeX table block for calibration metrics.
+
+    Args:
+        df_block: DataFrame containing calibration metrics data.
+        caption: Caption text for the table.
+
+    Returns:
+        LaTeX table string for the calibration metrics.
+    """
     target_metrics = ["chunked_target_coverage_deviation", "llr_statistic", "width"]
 
     available_metrics = []
@@ -221,6 +261,21 @@ def format_calibration_metrics_to_latex(
     results_df: pd.DataFrame,
     layout_breakout_col: Optional[str] = None,
 ) -> str:
+    """Format calibration metrics results into LaTeX table format.
+
+    Generates LaTeX tables showing calibration performance metrics with confidence
+    intervals, optionally broken out by a specified column. Tables highlight the
+    best performing methods and include proper LaTeX escaping.
+
+    Args:
+        results_df: DataFrame containing calibration metrics with columns for
+            mean values, confidence intervals, and ranking information.
+        layout_breakout_col: Optional column name to break the results into
+            separate tables for each unique value in that column.
+
+    Returns:
+        LaTeX formatted string containing one or more tables with calibration metrics.
+    """
     blocks: List[str] = []
     caption = _get_calibration_metrics_caption()
 
