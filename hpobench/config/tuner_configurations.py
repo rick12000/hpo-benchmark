@@ -25,12 +25,11 @@ from hpobench.config.config_types import (
 
 # 1. Static analysis configurations:
 STATIC_ANALYSIS_ESTIMATOR_ARCHITECTURES = [
-    "qknn",
     "qgp",
     "ql",
     "qrf",
     "qgbm",
-    # "qens5",
+    "qens5",
 ]
 
 # 2. Coverage analysis configurations:
@@ -142,12 +141,11 @@ ARCHITECTURE_VARIATION_ADAPTER = "DtACI"
 ARCHITECTURE_VARIATION_N_QUANTILES = 6
 ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurations(
     architectures=[
-        "qknn",
         "qgp",
         "ql",
         "qrf",
         "qgbm",
-        # "qens5",
+        "qens5",
     ],
     samplers=[
         ExpectedImprovementSampler(
@@ -172,22 +170,24 @@ ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurati
 # 5. Limited architecture configurations:
 LIMITED_ARCHITECTURE_ADAPTER = "DtACI"
 LIMITED_ARCHITECTURE_N_QUANTILES = 6
-LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_configurations(
-    architectures=[
-        "qgp",
-        "qgbm",
-        # "qens5",
-    ],
-    samplers=[
-        ThompsonSampler(
-            n_quantiles=LIMITED_ARCHITECTURE_N_QUANTILES,
-            enable_optimistic_sampling=True,
-            adapter=LIMITED_ARCHITECTURE_ADAPTER,
-        ),
-    ],
-    n_pre_conformal_trials=32,
-    searcher_tuning_framework=None,
-    calibration_split_strategy="train_test_split",
+LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS = (
+    build_architecture_variation_configurations(
+        architectures=[
+            "qgp",
+            "qgbm",
+            "qens5",
+        ],
+        samplers=[
+            ThompsonSampler(
+                n_quantiles=LIMITED_ARCHITECTURE_N_QUANTILES,
+                enable_optimistic_sampling=True,
+                adapter=LIMITED_ARCHITECTURE_ADAPTER,
+            ),
+        ],
+        n_pre_conformal_trials=32,
+        searcher_tuning_framework=None,
+        calibration_split_strategy="train_test_split",
+    )
 )
 
 # 6. Pre-conformal comparison configurations:
@@ -197,7 +197,7 @@ PRECONFORMAL_COMPARISON_CONFIGURATIONS = []
 for architecture in [
     "qgp",
     "qgbm",
-    # "qens5",
+    "qens5",
 ]:
     # Simulate normal pre-conformal cutoff vs. unreachable one:
     for pre_conformal_trials in [32, 10000]:

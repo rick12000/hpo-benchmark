@@ -32,10 +32,10 @@ run_sections = {
     "run_architecture_variation_analysis": False,
     "run_external_tuning_analysis": False,
     "run_heteroscedastic_external_tuning_analysis": False,
-    "run_skew_external_tuning_analysis": False,
+    "run_skew_external_tuning_analysis": True,
     "run_preconformal_comparison_analysis": False,
-    "run_static_analysis": True,
-    "run_quantile_count_comparison": True,
+    "run_static_analysis": False,
+    "run_quantile_count_comparison": False,
     "run_search_tuning_effect_comparison": False,
 }
 
@@ -73,7 +73,7 @@ def main():
                 run_start_str=run_start_str,
                 analysis_type="01_coverage_analysis",
                 max_n_instances_per_benchmark=experiment_params.default_max_n_instances,
-                n_repetitions=experiment_params.small_n_repetitions_per_tuner_config,
+                n_repetitions=experiment_params.large_n_repetitions_per_tuner_config,
                 starting_coverage_trial=32,
                 analysis_components=["coverage"],
             )
@@ -121,7 +121,7 @@ def main():
                 run_start_str=run_start_str,
                 analysis_type="03_architecture_variation",
                 max_n_instances_per_benchmark=experiment_params.default_max_n_instances,
-                n_repetitions=experiment_params.small_n_repetitions_per_tuner_config,
+                n_repetitions=experiment_params.large_n_repetitions_per_tuner_config,
                 analysis_components=[
                     "architecture_comparison",
                     "rank_analysis",
@@ -154,7 +154,7 @@ def main():
                 run_start_str=run_start_str,
                 analysis_type="04_external_tuning",
                 max_n_instances_per_benchmark=experiment_params.default_max_n_instances,
-                n_repetitions=experiment_params.medium_n_repetitions_per_tuner_config,
+                n_repetitions=experiment_params.large_n_repetitions_per_tuner_config,
                 analysis_components=[
                     "permutation_test",
                     "rank_analysis",
@@ -183,7 +183,7 @@ def main():
                 run_start_str=run_start_str,
                 analysis_type="04_heteroskedastic_external_tuning",
                 max_n_instances_per_benchmark=experiment_params.default_max_n_instances,
-                n_repetitions=experiment_params.medium_n_repetitions_per_tuner_config,
+                n_repetitions=experiment_params.large_n_repetitions_per_tuner_config,
                 analysis_components=[
                     "permutation_test",
                     "rank_analysis",
@@ -212,7 +212,7 @@ def main():
                 run_start_str=run_start_str,
                 analysis_type="04_skew_external_tuning",
                 max_n_instances_per_benchmark=experiment_params.default_max_n_instances,
-                n_repetitions=experiment_params.medium_n_repetitions_per_tuner_config,
+                n_repetitions=experiment_params.large_n_repetitions_per_tuner_config,
                 analysis_components=[
                     "permutation_test",
                     "rank_analysis",
@@ -264,7 +264,7 @@ def main():
                 run_start_str=run_start_str,
                 analysis_type="06_quantile_count_comparison",
                 max_n_instances_per_benchmark=experiment_params.default_max_n_instances,
-                n_repetitions=experiment_params.medium_n_repetitions_per_tuner_config,
+                n_repetitions=experiment_params.large_n_repetitions_per_tuner_config,
                 analysis_components=["quantile_count_comparison"],
                 schema=schema,
             )
@@ -288,7 +288,7 @@ def main():
                 run_start_str=run_start_str,
                 analysis_type="07_search_tuning_effect",
                 max_n_instances_per_benchmark=experiment_params.default_max_n_instances,
-                n_repetitions=experiment_params.medium_n_repetitions_per_tuner_config,
+                n_repetitions=experiment_params.large_n_repetitions_per_tuner_config,
                 analysis_components=["search_tuning_effect_comparison"],
                 schema=schema,
             )
@@ -305,7 +305,7 @@ def main():
                 benchmarks=["LCBench-L"],
                 data_size_range=experiment_params.static_data_sizes,
                 estimator_architectures=STATIC_ANALYSIS_ESTIMATOR_ARCHITECTURES,
-                n_repetitions_per_estimator=experiment_params.medium_n_repetitions_per_tuner_config,
+                n_repetitions_per_estimator=experiment_params.large_n_repetitions_per_tuner_config,
                 tuning_iterations_range=experiment_params.static_tuning_iterations,
                 alpha=0.2,
                 n_pre_conformal_trials=min(experiment_params.static_tuning_iterations)

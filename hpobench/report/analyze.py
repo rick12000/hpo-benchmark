@@ -1043,6 +1043,6 @@ def analyze_searcher_estimator_comparison(
         add_markers=True,
         col_measure_label="Benchmark",
         row_measure_label="Surrogate Architecture",
-        hide_col_and_row_labels=False,
+        x_label="Training Data Size",
         x_axis_start=0,
     )

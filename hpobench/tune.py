@@ -111,7 +111,7 @@ def apply_retroactive_timestamps(
         return runtimes
 
     # Get the smallest timestamp from objective function calls
-    min_runtime = min(runtimes)
+    min_runtime = min(runtimes).replace(microsecond=0)
 
     # Assign backwards timestamps to warm-start configs (reverse order)
     warm_start_runtimes = []
