@@ -160,6 +160,7 @@ def add_runtime(
     experiment_log: pd.DataFrame,
     tune_start,
     performance_generator: "ObjectiveMetricGenerator",
+    n_warm_starts: int = 0,
 ):
     """Add runtime predictions to experiment log DataFrame.
 
@@ -167,25 +168,42 @@ def add_runtime(
         experiment_log: DataFrame containing experiment trial data.
         tune_start: Start time of the tuning process.
         performance_generator: Generator for predicting performance and runtime.
+        n_warm_starts: Number of warm start configurations at the beginning.
 
     Returns:
         DataFrame with additional runtime columns.
     """
     experiment_log_copy = experiment_log.copy()
 
+    # Sort observations by end_time from smallest to largest (least to most recent)
+    experiment_log_copy = experiment_log_copy.sort_values("end_time").reset_index(
+        drop=True
+    )
+
     experiment_log_copy["generator_runtime"] = experiment_log_copy[
         "configurations"
     ].apply(lambda x: performance_generator.predict_runtime(x))
-    experiment_log_copy["generator_runtime"] = experiment_log_copy[
-        "generator_runtime"
-    ].cumsum()
 
+    experiment_log_copy["tuner_runtime"] = 0.0
+    # For warm start configurations (first n_warm_starts observations), tuner_runtime = 0
+    # For actual optimization trials, calculate based on timing differences
+    for i in range(n_warm_starts, len(experiment_log_copy)):
+        if i == n_warm_starts:
+            # First non-warm start observation: tune_start to end_time
+            experiment_log_copy.loc[i, "tuner_runtime"] = (
+                experiment_log_copy.loc[i, "end_time"] - tune_start
+            ).total_seconds()
+        else:
+            # Subsequent observations: end_time minus previous row's end_time
+            experiment_log_copy.loc[i, "tuner_runtime"] = (
+                experiment_log_copy.loc[i, "end_time"]
+                - experiment_log_copy.loc[i - 1, "end_time"]
+            ).total_seconds()
+
+    # Calculate runtime as sum of generator_runtime and tuner_runtime, then cumsum
     experiment_log_copy["runtime"] = (
-        experiment_log_copy["end_time"] - tune_start
-    ).dt.total_seconds()
-    experiment_log_copy["runtime"] = (
-        experiment_log_copy["runtime"] + experiment_log_copy["generator_runtime"]
-    )
+        experiment_log_copy["generator_runtime"] + experiment_log_copy["tuner_runtime"]
+    ).cumsum()
 
     return experiment_log_copy
 

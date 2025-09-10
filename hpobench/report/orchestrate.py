@@ -280,6 +280,7 @@ def run_main_benchmark(
                     experiment_log=historical_performance,
                     tune_start=tune_start,
                     performance_generator=experiment_config.objective_function,
+                    n_warm_starts=len(warm_start_configs_per_repetition[repetition]),
                 )
 
                 aliased_benchmark_identifier = (

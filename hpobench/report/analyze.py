@@ -398,6 +398,7 @@ def analyze_main_benchmark(
             analysis_type=analysis_type,
             latex_layout_breakout_col=None,  # Can be modified to include estimator_architecture if needed
             n_bootstraps=n_bootstraps,
+            random_state=1234,
         )
 
     # Dataset level analysis:

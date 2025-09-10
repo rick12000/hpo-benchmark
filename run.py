@@ -20,19 +20,23 @@ from hpobench.report.orchestrate import (
     run_static_benchmark,
 )
 from hpobench.utils import setup_environment
+import numpy as np
+import random
 
 BASE_RANDOM_STATE = 42
+np.random.seed(BASE_RANDOM_STATE)
+random.seed(BASE_RANDOM_STATE)
 
 experiment_params = ExperimentParameters()
 
 # Granular run section control
 run_sections = {
     "run_coverage_analysis": False,
-    "run_sampler_variation_analysis": False,
+    "run_sampler_variation_analysis": True,
     "run_architecture_variation_analysis": False,
     "run_external_tuning_analysis": False,
     "run_heteroscedastic_external_tuning_analysis": False,
-    "run_skew_external_tuning_analysis": True,
+    "run_skew_external_tuning_analysis": False,
     "run_preconformal_comparison_analysis": False,
     "run_static_analysis": False,
     "run_quantile_count_comparison": False,
@@ -90,7 +94,7 @@ def main():
                 benchmarks=["LCBench-L"],
                 tuning_configurations=SAMPLER_VARIATION_CONFIGURATIONS,
                 n_warm_starts=experiment_params.n_warm_starts,
-                n_trials=200,  # experiment_params.n_trials,
+                n_trials=experiment_params.n_trials,
                 timeout=experiment_params.timeout,
                 base_random_state=BASE_RANDOM_STATE,
                 cache_path=CACHE_PATH,
@@ -307,7 +311,7 @@ def main():
                 estimator_architectures=STATIC_ANALYSIS_ESTIMATOR_ARCHITECTURES,
                 n_repetitions_per_estimator=experiment_params.large_n_repetitions_per_tuner_config,
                 tuning_iterations_range=experiment_params.static_tuning_iterations,
-                alpha=0.2,
+                alpha=0.4,
                 n_pre_conformal_trials=min(experiment_params.static_tuning_iterations)
                 - 1,
                 max_n_instances=experiment_params.default_max_n_instances,

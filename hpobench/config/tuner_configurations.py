@@ -234,13 +234,13 @@ for architecture in [
 # 7. Quantile count variation configurations:
 QUANTILE_COUNT_VARIATION_ADAPTER = "DtACI"
 QUANTILE_COUNT_VARIATION_CONFIGURATIONS = []
-QUANTILE_COUNT_VALUES = [4, 6, 8, 10, 20]
+QUANTILE_COUNT_VALUES = [4, 6, 10]
 
 for n_quantiles in QUANTILE_COUNT_VALUES:
     QUANTILE_COUNT_VARIATION_CONFIGURATIONS.extend(
         build_architecture_variation_configurations(
             architectures=[
-                "qrf",  # NOTE: Use single architecture for this configuration, analysis doesn't support multiple
+                "qgbm",  # NOTE: Use single architecture for this configuration, analysis doesn't support multiple
             ],
             samplers=[
                 ExpectedImprovementSampler(

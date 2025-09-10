@@ -458,6 +458,7 @@ class BenchmarkDataProcessor:
                 ],
                 metric_cols=metrics,
                 n_bootstraps=n_bootstraps,
+                random_state=1234,
             )
 
         return final_data
@@ -516,6 +517,7 @@ class BenchmarkDataProcessor:
                 ],
                 metric_cols=["rank", "best_performance"],
                 n_bootstraps=n_bootstraps,
+                random_state=1234,
             )
 
         return final_data
