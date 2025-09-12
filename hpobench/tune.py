@@ -1,6 +1,5 @@
 import pandas as pd
 import optuna
-import logging
 from datetime import datetime, timedelta
 from hpobench.config.config_types import TunerConfig
 from hpobench.config.config_types import IntRange, FloatRange, CategoricalRange
@@ -885,27 +884,6 @@ def smac_tune(
     Returns:
         DataFrame containing the complete tuning history with trial results and metadata.
     """
-    # Disable SMAC logging to reduce noise
-    smac_logger = logging.getLogger("smac")
-    smac_logger.setLevel(logging.ERROR)
-    smac_logger.propagate = False
-
-    smac_facade_logger = logging.getLogger("smac.facade")
-    smac_facade_logger.setLevel(logging.ERROR)
-    smac_facade_logger.propagate = False
-
-    smac_intensifier_logger = logging.getLogger("smac.intensifier")
-    smac_intensifier_logger.setLevel(logging.ERROR)
-    smac_intensifier_logger.propagate = False
-
-    smac_runhistory_logger = logging.getLogger("smac.runhistory")
-    smac_runhistory_logger.setLevel(logging.ERROR)
-    smac_runhistory_logger.propagate = False
-
-    smac_optimizer_logger = logging.getLogger("smac.optimizer")
-    smac_optimizer_logger.setLevel(logging.ERROR)
-    smac_optimizer_logger.propagate = False
-
     # Create configuration space
     configspace = setup_smac_configspace(raw_params, random_state)
 

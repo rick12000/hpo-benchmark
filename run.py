@@ -32,14 +32,14 @@ experiment_params = ExperimentParameters()
 # Granular run section control
 run_sections = {
     "run_coverage_analysis": False,
-    "run_sampler_variation_analysis": True,
+    "run_sampler_variation_analysis": False,
     "run_architecture_variation_analysis": False,
     "run_external_tuning_analysis": False,
     "run_heteroscedastic_external_tuning_analysis": False,
     "run_skew_external_tuning_analysis": False,
     "run_preconformal_comparison_analysis": False,
-    "run_static_analysis": False,
-    "run_quantile_count_comparison": False,
+    "run_static_analysis": True,
+    "run_quantile_count_comparison": True,
     "run_search_tuning_effect_comparison": False,
 }
 
@@ -158,7 +158,7 @@ def main():
                 run_start_str=run_start_str,
                 analysis_type="04_external_tuning",
                 max_n_instances_per_benchmark=experiment_params.default_max_n_instances,
-                n_repetitions=experiment_params.large_n_repetitions_per_tuner_config,
+                n_repetitions=experiment_params.medium_n_repetitions_per_tuner_config,
                 analysis_components=[
                     "permutation_test",
                     "rank_analysis",
@@ -187,7 +187,7 @@ def main():
                 run_start_str=run_start_str,
                 analysis_type="04_heteroskedastic_external_tuning",
                 max_n_instances_per_benchmark=experiment_params.default_max_n_instances,
-                n_repetitions=experiment_params.large_n_repetitions_per_tuner_config,
+                n_repetitions=experiment_params.medium_n_repetitions_per_tuner_config,
                 analysis_components=[
                     "permutation_test",
                     "rank_analysis",
@@ -216,7 +216,7 @@ def main():
                 run_start_str=run_start_str,
                 analysis_type="04_skew_external_tuning",
                 max_n_instances_per_benchmark=experiment_params.default_max_n_instances,
-                n_repetitions=experiment_params.large_n_repetitions_per_tuner_config,
+                n_repetitions=experiment_params.medium_n_repetitions_per_tuner_config,
                 analysis_components=[
                     "permutation_test",
                     "rank_analysis",

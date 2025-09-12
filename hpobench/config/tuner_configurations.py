@@ -196,8 +196,9 @@ PRECONFORMAL_N_QUANTILES = 6
 PRECONFORMAL_COMPARISON_CONFIGURATIONS = []
 for architecture in [
     "qgp",
+    "qrf",
     "qgbm",
-    "qens5",
+    # "qens5",
 ]:
     # Simulate normal pre-conformal cutoff vs. unreachable one:
     for pre_conformal_trials in [32, 10000]:
