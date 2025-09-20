@@ -10,6 +10,8 @@ import numpy as np
 import math
 import re
 from hpobench.utils import AnalysisPathManager
+import seaborn as sns
+from matplotlib.colors import ListedColormap
 
 matplotlib.use("Agg")  # Use non-GUI backend
 logger = logging.getLogger(__name__)
@@ -606,6 +608,115 @@ def _apply_cd_formatting(ax):
     ax.set_yticks([])
 
 
+def _plot_significance_matrix(
+    ax, significance_data: pd.DataFrame, rank_data: pd.DataFrame, entity_col: str
+):
+    entities = sorted(rank_data[entity_col].unique())
+    avg_ranks = dict(zip(rank_data[entity_col], rank_data["rank"]))
+
+    # Create matrices
+    p_matrix = pd.DataFrame(np.nan, index=entities, columns=entities)
+    color_matrix = pd.DataFrame(0, index=entities, columns=entities)
+
+    # Fill diagonal
+    for entity in entities:
+        p_matrix.loc[entity, entity] = 1.0
+        color_matrix.loc[entity, entity] = 0
+
+    # Process significance data
+    for _, row in significance_data.iterrows():
+        entity1, entity2 = row["entity1"], row["entity2"]
+        if entity1 in entities and entity2 in entities:
+            p_val = row.get("p_value_corrected", row.get("p_value", 1.0))
+            better_entity = row.get("better_entity", entity1)
+
+            p_matrix.loc[entity1, entity2] = p_val
+            p_matrix.loc[entity2, entity1] = p_val
+
+            if p_val <= 0.05:
+                if better_entity == entity1:
+                    color_matrix.loc[entity1, entity2] = 2  # Green
+                    color_matrix.loc[entity2, entity1] = 1  # Red
+                else:
+                    color_matrix.loc[entity1, entity2] = 1  # Red
+                    color_matrix.loc[entity2, entity1] = 2  # Green
+
+    # Create annotations
+    annot_matrix = p_matrix.copy()
+    for i in range(len(entities)):
+        for j in range(len(entities)):
+            if i == j:
+                annot_matrix.iloc[i, j] = ""
+            else:
+                p_val = p_matrix.iloc[i, j]
+                if not pd.isna(p_val):
+                    annot_matrix.iloc[i, j] = f"{p_val:.3f}"
+
+    # Plot matrix with thin inner gridlines
+    colors = ["white", "#FF9999", "#99FF99"]
+    cmap = ListedColormap(colors)
+
+    sns.heatmap(
+        color_matrix,
+        annot=annot_matrix,
+        fmt="",
+        cmap=cmap,
+        vmin=0,
+        vmax=2,
+        square=True,
+        cbar=False,
+        annot_kws={"size": 10, "color": "black"},
+        linewidths=0.5,
+        linecolor="black",
+        xticklabels=entities,  # Thin inner gridlines
+        yticklabels=entities,
+        ax=ax,
+    )
+
+    # Add ranks above columns
+    for i, entity in enumerate(entities):
+        rank = avg_ranks.get(entity, 0)
+        ax.text(
+            i + 0.5,
+            -0.15,
+            f"{rank:.2f}",
+            ha="center",
+            va="center",
+            fontsize=10,
+            fontweight="normal",
+            color="black",
+            transform=ax.transData,
+        )
+
+    # Right-align "Ranks:" label closer to matrix
+    ax.text(
+        -0.1,
+        -0.15,
+        "Ranks:",
+        ha="right",
+        va="center",
+        fontsize=10,
+        fontweight="normal",
+        color="black",
+        transform=ax.transData,
+    )
+
+    ax.set_title(
+        "Significance@100% (Benjamini-Hochberg)",
+        fontsize=13,
+        fontweight="normal",
+        pad=20,
+    )
+    ax.set_xlabel("")
+    ax.set_ylabel("")
+    ax.tick_params(axis="both", labelsize=10, colors="black")
+
+    # Thick outer border
+    for spine in ["top", "right", "bottom", "left"]:
+        ax.spines[spine].set_linewidth(2.4)  # Thick outer border
+        ax.spines[spine].set_color("black")
+
+
 def plot_paired_rank_and_cd(
     data: pd.DataFrame,
     significance_data: pd.DataFrame,
@@ -621,14 +732,17 @@ def plot_paired_rank_and_cd(
     alpha: float = 0.05,
     x_label: Optional[str] = None,
     x_axis_start: Optional[float] = None,
+    y_col_lower: Optional[str] = None,
+    y_col_upper: Optional[str] = None,
+    significance_plot_type: str = "cd",
 ) -> None:
-    """Plot paired visualizations: rank evolution and critical difference diagrams.
+    """Plot paired visualizations: rank evolution and significance analysis.
 
     Creates a plot where:
-    - Left column: Rank evolution over budget (existing functionality)
-    - Right column: Two critical difference diagrams stacked vertically
-      - Top: CD diagram with uncorrected p-values
-      - Bottom: CD diagram with corrected p-values
+    - Left column: Rank evolution over budget
+    - Right column: Either CD diagrams ("cd") or significance matrix ("matrix")
+      - "cd": Two CD diagrams stacked vertically (uncorrected/corrected p-values)
+      - "matrix": Single significance matrix with corrected p-values
     - Shared legend at the bottom center
 
     Args:
@@ -642,10 +756,13 @@ def plot_paired_rank_and_cd(
         analysis_type: Analysis type for path organization
         subfolder: Subfolder for saving plots
         row_measure: Column for row grouping (e.g., benchmark)
-        cd_budget: Budget value to use for critical difference diagram
+        cd_budget: Budget value to use for analysis
         alpha: Significance level
         x_label: Custom x-axis label
-        row_measure_label: Custom row measure label
+        x_axis_start: Optional starting value for x-axis
+        y_col_lower: Optional column name for lower confidence bound
+        y_col_upper: Optional column name for upper confidence bound
+        significance_plot_type: Type of significance plot ("cd" or "matrix")
     """
     path_manager = AnalysisPathManager(cache_path, run_start_str)
     output_path = path_manager.get_analysis_path(analysis_type, "plots", subfolder)
@@ -654,35 +771,41 @@ def plot_paired_rank_and_cd(
     # Get unique row values
     row_values = data[row_measure].unique()
 
-    # Create figure with custom gridspec to accommodate rank plots and dual CD diagrams
+    # Create figure with layout based on significance plot type
     base_width = 4.0
     base_height = 4.5
-    fig_width = base_width * 2  # 2 columns
-    # Keep original figure height scaling, but make each row taller
-    fig_height = base_height * len(row_values)
 
-    # Use GridSpec to create custom layout: left column for ranks, right column split for 2 CD diagrams
-    from matplotlib.gridspec import GridSpec
+    if significance_plot_type == "matrix":
+        # Square layout for matrix
+        fig_width = base_width * 2.5  # Wider for matrix
+        fig_height = base_height * len(row_values)
+        from matplotlib.gridspec import GridSpec
 
-    fig = plt.figure(figsize=(fig_width, fig_height), constrained_layout=True)
-    gs = GridSpec(
-        nrows=len(row_values) * 2,  # 2 rows per benchmark (for 2 CD diagrams)
-        ncols=2,
-        figure=fig,
-        # height_ratios=[1.7, 1.7] * len(row_values),  # Taller CD diagrams (1.5x height per row)
-    )
+        fig = plt.figure(figsize=(fig_width, fig_height), constrained_layout=True)
+        gs = GridSpec(nrows=len(row_values), ncols=2, figure=fig, width_ratios=[1, 1])
+    else:
+        # Original CD layout
+        fig_width = base_width * 2
+        fig_height = base_height * len(row_values)
+        from matplotlib.gridspec import GridSpec
 
-    # Create axes manually using gridspec
+        fig = plt.figure(figsize=(fig_width, fig_height), constrained_layout=True)
+        gs = GridSpec(nrows=len(row_values) * 2, ncols=2, figure=fig)
+
+    # Create axes based on significance plot type
     axes = []
     for i in range(len(row_values)):
-        # Left column: rank plot spans both CD diagram rows
-        ax_rank = fig.add_subplot(gs[i * 2 : (i + 1) * 2, 0])
-
-        # Right column: two separate CD diagrams
-        ax_cd_uncorrected = fig.add_subplot(gs[i * 2, 1])
-        ax_cd_corrected = fig.add_subplot(gs[i * 2 + 1, 1])
-
-        axes.append([ax_rank, ax_cd_uncorrected, ax_cd_corrected])
+        if significance_plot_type == "matrix":
+            # Left: rank plot, Right: single matrix
+            ax_rank = fig.add_subplot(gs[i, 0])
+            ax_matrix = fig.add_subplot(gs[i, 1])
+            axes.append([ax_rank, ax_matrix])
+        else:
+            # Original CD layout
+            ax_rank = fig.add_subplot(gs[i * 2 : (i + 1) * 2, 0])
+            ax_cd_uncorrected = fig.add_subplot(gs[i * 2, 1])
+            ax_cd_corrected = fig.add_subplot(gs[i * 2 + 1, 1])
+            axes.append([ax_rank, ax_cd_uncorrected, ax_cd_corrected])
 
     # Collect legend information from first plot
     legend_handles = []
@@ -716,15 +839,17 @@ def plot_paired_rank_and_cd(
                 legend_handles.append(line)
                 legend_labels.append(entity)
 
-            # Add confidence intervals if available
+            # Add confidence intervals if column names are provided and available
             if (
-                "rank_lower" in entity_data.columns
-                and "rank_upper" in entity_data.columns
+                y_col_lower is not None
+                and y_col_upper is not None
+                and y_col_lower in entity_data.columns
+                and y_col_upper in entity_data.columns
             ):
                 ax_rank.fill_between(
                     entity_data[x_col],
-                    entity_data["rank_lower"],
-                    entity_data["rank_upper"],
+                    entity_data[y_col_lower],
+                    entity_data[y_col_upper],
                     alpha=0.2,
                     color=color,
                 )
@@ -738,6 +863,8 @@ def plot_paired_rank_and_cd(
             pad=20,
         )
         ax_rank.grid(True, which="both", linestyle="--", linewidth=0.5, alpha=0.7)
+
+        # Don't force square aspect ratio - let it scale naturally
 
         # Set x-axis start if specified
         if x_axis_start is not None:
@@ -756,75 +883,97 @@ def plot_paired_rank_and_cd(
             axis="both", which="minor", labelsize=9, length=3, width=1.0
         )
 
-        # Right plots: Two Critical difference diagrams
-        ax_cd_uncorrected = axes[i][1]  # Top CD diagram
-        ax_cd_corrected = axes[i][2]  # Bottom CD diagram
+        # Right plot: Either matrix or CD diagrams
+        if significance_plot_type == "matrix":
+            ax_matrix = axes[i][1]
+            cd_data = row_data[row_data[x_col] == cd_budget]
 
-        # Get mean ranks at the specified budget
-        cd_data = row_data[row_data[x_col] == cd_budget]
-
-        # Check if we have both rank data and significance results for this benchmark
-        if not cd_data.empty and not row_sig_data.empty:
-            mean_ranks = dict(zip(cd_data[entity_col], cd_data["rank"]))
-
-            # Top CD diagram: Uncorrected p-values
-            plot_critical_difference_diagram(
-                ax=ax_cd_uncorrected,
-                mean_ranks=mean_ranks,
-                significance_results=row_sig_data,
-                alpha=alpha,
-                title=f"CD@{cd_budget}% (Raw)",
-                p_value_column="p_value",  # Use uncorrected p-values
-            )
-
-            # Bottom CD diagram: Corrected p-values (current behavior)
-            plot_critical_difference_diagram(
-                ax=ax_cd_corrected,
-                mean_ranks=mean_ranks,
-                significance_results=row_sig_data,
-                alpha=alpha,
-                title=f"CD@{cd_budget}% (Benjamini-Hochberg)",
-                p_value_column="p_value_corrected",  # Use corrected p-values
-            )
-        else:
-            # Determine the reason for missing CD diagram
-            if cd_data.empty:
-                reason = f"No data available\nfor budget={cd_budget}"
+            if not cd_data.empty and not row_sig_data.empty:
+                _plot_significance_matrix(
+                    ax=ax_matrix,
+                    significance_data=row_sig_data,
+                    rank_data=cd_data,
+                    entity_col=entity_col,
+                )
             else:
                 reason = (
-                    "Insufficient datasets\nfor significance testing\n(<3 datasets)"
+                    f"No data available\nfor budget={cd_budget}"
+                    if cd_data.empty
+                    else "Insufficient datasets\nfor significance testing"
                 )
-
-            # Apply same message to both CD diagrams
-            for ax_cd, title_suffix in [
-                (ax_cd_uncorrected, "(Uncorrected)"),
-                (ax_cd_corrected, "(Corrected)"),
-            ]:
-                ax_cd.text(
+                ax_matrix.text(
                     0.5,
                     0.5,
                     reason,
                     ha="center",
                     va="center",
-                    transform=ax_cd.transAxes,
-                    fontsize=10,
+                    transform=ax_matrix.transAxes,
+                    fontsize=12,
                 )
-                title = f"CD @{cd_budget}% {title_suffix}"
-                if ax_cd == ax_cd_uncorrected:
-                    title = f"{row_value}\n" + title
-                ax_cd.set_title(title, fontsize=13, pad=20)
+                ax_matrix.set_title(
+                    f"{row_value}", fontsize=13, fontweight="normal", pad=20
+                )
+                ax_matrix.set_xticks([])
+                ax_matrix.set_yticks([])
+        else:
+            # Original CD diagram logic
+            ax_cd_uncorrected = axes[i][1]
+            ax_cd_corrected = axes[i][2]
+            cd_data = row_data[row_data[x_col] == cd_budget]
 
-        # Clean up CD axis appearance to match overall style
-        for ax_cd in [ax_cd_uncorrected, ax_cd_corrected]:
-            for spine in ["top", "right", "bottom", "left"]:
-                if spine in ax_cd.spines:
-                    ax_cd.spines[spine].set_linewidth(1.2)
-            ax_cd.tick_params(
-                axis="both", which="major", labelsize=11, length=6, width=1.2
-            )
-            ax_cd.tick_params(
-                axis="both", which="minor", labelsize=9, length=3, width=1.0
-            )
+            if not cd_data.empty and not row_sig_data.empty:
+                mean_ranks = dict(zip(cd_data[entity_col], cd_data["rank"]))
+                plot_critical_difference_diagram(
+                    ax=ax_cd_uncorrected,
+                    mean_ranks=mean_ranks,
+                    significance_results=row_sig_data,
+                    alpha=alpha,
+                    title=f"CD@{cd_budget}% (Raw)",
+                    p_value_column="p_value",
+                )
+                plot_critical_difference_diagram(
+                    ax=ax_cd_corrected,
+                    mean_ranks=mean_ranks,
+                    significance_results=row_sig_data,
+                    alpha=alpha,
+                    title=f"CD@{cd_budget}% (Benjamini-Hochberg)",
+                    p_value_column="p_value_corrected",
+                )
+            else:
+                reason = (
+                    f"No data available\nfor budget={cd_budget}"
+                    if cd_data.empty
+                    else "Insufficient datasets\nfor significance testing\n(<3 datasets)"
+                )
+                for ax_cd, title_suffix in [
+                    (ax_cd_uncorrected, "(Uncorrected)"),
+                    (ax_cd_corrected, "(Corrected)"),
+                ]:
+                    ax_cd.text(
+                        0.5,
+                        0.5,
+                        reason,
+                        ha="center",
+                        va="center",
+                        transform=ax_cd.transAxes,
+                        fontsize=10,
+                    )
+                    title = f"CD @{cd_budget}% {title_suffix}"
+                    if ax_cd == ax_cd_uncorrected:
+                        title = f"{row_value}\n" + title
+                    ax_cd.set_title(title, fontsize=13, pad=20)
+
+            # Clean up CD axis appearance
+            for ax_cd in [ax_cd_uncorrected, ax_cd_corrected]:
+                for spine in ["top", "right", "bottom", "left"]:
+                    if spine in ax_cd.spines:
+                        ax_cd.spines[spine].set_linewidth(1.2)
+                ax_cd.tick_params(
+                    axis="both", which="major", labelsize=11, length=6, width=1.2
+                )
+                ax_cd.tick_params(
+                    axis="both", which="minor", labelsize=9, length=3, width=1.0
+                )
 
     # Add shared legend at the bottom center (consistent with plot_benchmark_data)
     handles, labels = (legend_handles, legend_labels)
