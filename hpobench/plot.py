@@ -2,7 +2,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 from datetime import datetime
 import pandas as pd
-from typing import Optional, Dict
+from typing import Optional, Dict, Literal
 import time
 import os
 import logging
@@ -84,6 +84,51 @@ def _sort_legend_items(handles, labels):
     combined.sort(key=lambda x: sort_key(x[1]))
     sorted_handles, sorted_labels = zip(*combined)
     return list(sorted_handles), list(sorted_labels)
+
+
+def _calculate_legend_position(
+    num_subplot_rows: int, num_legend_rows: int, plot_type: str = "standard"
+) -> tuple:
+    """Calculate legend position and bottom margin based on subplot and legend configuration.
+
+    Args:
+        num_subplot_rows: Number of subplot rows
+        num_legend_rows: Number of legend rows
+        plot_type: Type of plot ("standard", "matrix", "cd")
+
+    Returns:
+        Tuple of (legend_anchor_y, legend_bottom_margin)
+    """
+    base_legend_anchor_y = -0.16
+    base_bottom_margin = 0.20
+
+    if plot_type == "matrix":
+        # Matrix layout has square subplots that take less vertical space
+        # Use much smaller adjustments and different base positioning
+        base_legend_anchor_y = -0.08  # Start much closer to charts for square layout
+        subplot_row_factor = 0.002  # Minimal adjustment for additional rows
+        legend_row_factor = 0.035  # Smaller adjustment for multi-row legends
+    elif plot_type == "cd":
+        # CD layout has taller subplots, needs more adjustment
+        subplot_row_factor = 0.035
+        legend_row_factor = 0.06
+    else:
+        # Standard layout (plot_benchmark_data)
+        subplot_row_factor = 0.035
+        legend_row_factor = 0.06
+
+    # Adjust for subplot rows: each additional row moves the X label up in figure coordinates
+    subplot_row_adjustment = (num_subplot_rows - 1) * subplot_row_factor
+
+    # Adjust for legend rows: multi-row legends need more space
+    legend_row_adjustment = (num_legend_rows - 1) * legend_row_factor
+
+    legend_anchor_y = (
+        base_legend_anchor_y + subplot_row_adjustment - legend_row_adjustment
+    )
+    legend_bottom_margin = base_bottom_margin + legend_row_adjustment
+
+    return legend_anchor_y, legend_bottom_margin
 
 
 def _get_axis_values(data: pd.DataFrame, measure: Optional[str]) -> list:
@@ -354,25 +399,10 @@ def plot_benchmark_data(
     num_subplot_rows = len(row_values) if row_measure else 1
     num_legend_rows = math.ceil(len(labels) / 4)
 
-    # Adjust legend positioning to maintain consistent distance from bottom X label
-    # More subplot rows = X label is higher in figure coordinates = move legend up
-    base_legend_anchor_y = -0.16
-    base_bottom_margin = 0.20
-
-    # Adjust for subplot rows: each additional row moves the X label up in figure coordinates
-    subplot_row_adjustment = (
-        num_subplot_rows - 1
-    ) * 0.035  # Move legend up for each additional subplot row
-
-    # Adjust for legend rows: multi-row legends need more space
-    legend_row_adjustment = (
-        num_legend_rows - 1
-    ) * 0.06  # Additional space for multi-row legends
-
-    legend_anchor_y = (
-        base_legend_anchor_y + subplot_row_adjustment - legend_row_adjustment
+    # Use unified legend positioning function
+    legend_anchor_y, legend_bottom_margin = _calculate_legend_position(
+        num_subplot_rows, num_legend_rows, "standard"
     )
-    legend_bottom_margin = base_bottom_margin + legend_row_adjustment
 
     # Use fig.legend for a single, consistent legend
     fig.legend(
@@ -628,18 +658,15 @@ def _plot_significance_matrix(
         entity1, entity2 = row["entity1"], row["entity2"]
         if entity1 in entities and entity2 in entities:
             p_val = row.get("p_value_corrected", row.get("p_value", 1.0))
-            better_entity = row.get("better_entity", entity1)
+            row.get("better_entity", entity1)
 
             p_matrix.loc[entity1, entity2] = p_val
             p_matrix.loc[entity2, entity1] = p_val
 
             if p_val <= 0.05:
-                if better_entity == entity1:
-                    color_matrix.loc[entity1, entity2] = 2  # Green
-                    color_matrix.loc[entity2, entity1] = 1  # Red
-                else:
-                    color_matrix.loc[entity1, entity2] = 1  # Red
-                    color_matrix.loc[entity2, entity1] = 2  # Green
+                # Shade all significant cells in light grey, regardless of directionality
+                color_matrix.loc[entity1, entity2] = 1  # Light grey
+                color_matrix.loc[entity2, entity1] = 1  # Light grey
 
     # Create annotations
     annot_matrix = p_matrix.copy()
@@ -653,7 +680,10 @@ def _plot_significance_matrix(
                     annot_matrix.iloc[i, j] = f"{p_val:.3f}"
 
     # Plot matrix with thin inner gridlines
-    colors = ["white", "#FF9999", "#99FF99"]
+    colors = [
+        "white",
+        "#D3D3D3",
+    ]  # White for non-significant, light grey for significant
     cmap = ListedColormap(colors)
 
     sns.heatmap(
@@ -662,7 +692,7 @@ def _plot_significance_matrix(
         fmt="",
         cmap=cmap,
         vmin=0,
-        vmax=2,
+        vmax=1,
         square=True,
         cbar=False,
         annot_kws={"size": 10, "color": "black"},
@@ -673,12 +703,12 @@ def _plot_significance_matrix(
         ax=ax,
     )
 
-    # Add ranks above columns
+    # Add ranks above columns with small vertical space
     for i, entity in enumerate(entities):
         rank = avg_ranks.get(entity, 0)
         ax.text(
             i + 0.5,
-            -0.15,
+            -0.25,  # Increased vertical space
             f"{rank:.2f}",
             ha="center",
             va="center",
@@ -688,10 +718,10 @@ def _plot_significance_matrix(
             transform=ax.transData,
         )
 
-    # Right-align "Ranks:" label closer to matrix
+    # Right-align "Ranks:" label with small vertical space from matrix
     ax.text(
         -0.1,
-        -0.15,
+        -0.25,  # Increased vertical space
         "Ranks:",
         ha="right",
         va="center",
@@ -702,7 +732,7 @@ def _plot_significance_matrix(
     )
 
     ax.set_title(
-        "Significance@100% (Benjamini-Hochberg)",
+        "Wilcoxon@100% (Benjamini-Hochberg)",
         fontsize=13,
         fontweight="normal",
         pad=20,
@@ -734,7 +764,7 @@ def plot_paired_rank_and_cd(
     x_axis_start: Optional[float] = None,
     y_col_lower: Optional[str] = None,
     y_col_upper: Optional[str] = None,
-    significance_plot_type: str = "cd",
+    significance_plot_type: Literal["cd", "matrix"] = "cd",
 ) -> None:
     """Plot paired visualizations: rank evolution and significance analysis.
 
@@ -776,13 +806,22 @@ def plot_paired_rank_and_cd(
     base_height = 4.5
 
     if significance_plot_type == "matrix":
-        # Square layout for matrix
-        fig_width = base_width * 2.5  # Wider for matrix
-        fig_height = base_height * len(row_values)
+        # Square layout for matrix - ensure both charts are square and same size
+        square_size = base_width  # Use base width for square dimensions
+        fig_width = square_size * 2.2  # Two squares plus some spacing
+        fig_height = square_size * len(row_values) + 1.0  # Account for legend space
         from matplotlib.gridspec import GridSpec
 
-        fig = plt.figure(figsize=(fig_width, fig_height), constrained_layout=True)
-        gs = GridSpec(nrows=len(row_values), ncols=2, figure=fig, width_ratios=[1, 1])
+        fig = plt.figure(figsize=(fig_width, fig_height))
+        gs = GridSpec(
+            nrows=len(row_values),
+            ncols=2,
+            figure=fig,
+            width_ratios=[1, 1],
+            height_ratios=[1] * len(row_values),
+            wspace=0.25,
+            hspace=0.25,
+        )  # Increased wspace for buffer between charts
     else:
         # Original CD layout
         fig_width = base_width * 2
@@ -864,7 +903,10 @@ def plot_paired_rank_and_cd(
         )
         ax_rank.grid(True, which="both", linestyle="--", linewidth=0.5, alpha=0.7)
 
-        # Don't force square aspect ratio - let it scale naturally
+        # For matrix layout, ensure rank chart maintains proper aspect ratio
+        if significance_plot_type == "matrix":
+            # Set aspect ratio to maintain square-like proportions without squashing
+            ax_rank.set_aspect("auto")
 
         # Set x-axis start if specified
         if x_axis_start is not None:
@@ -979,31 +1021,16 @@ def plot_paired_rank_and_cd(
     handles, labels = (legend_handles, legend_labels)
     # Sort legend items: numerically if starts with number, otherwise alphabetically
     handles, labels = _sort_legend_items(handles, labels)
+
+    # Calculate positioning adjustments (even if no legend, for consistent margins)
+    num_subplot_rows = len(row_values)
+    num_legend_rows = math.ceil(len(labels) / 4) if labels else 1
+    plot_type = "matrix" if significance_plot_type == "matrix" else "cd"
+    legend_anchor_y, legend_bottom_margin = _calculate_legend_position(
+        num_subplot_rows, num_legend_rows, plot_type
+    )
+
     if handles:
-        # Calculate positioning adjustments
-        num_subplot_rows = len(row_values)
-        num_legend_rows = math.ceil(len(labels) / 4)
-
-        # Adjust legend positioning to maintain consistent distance from bottom X label
-        # More subplot rows = X label is higher in figure coordinates = move legend up
-        base_legend_anchor_y = -0.16
-        base_bottom_margin = 0.20
-
-        # Adjust for subplot rows: each additional row moves the X label up in figure coordinates
-        subplot_row_adjustment = (
-            num_subplot_rows - 1
-        ) * 0.03  # Move legend up for each additional subplot row
-
-        # Adjust for legend rows: multi-row legends need more space
-        legend_row_adjustment = (
-            num_legend_rows - 1
-        ) * 0.06  # Additional space for multi-row legends
-
-        legend_anchor_y = (
-            base_legend_anchor_y + subplot_row_adjustment - legend_row_adjustment
-        )
-        legend_bottom_margin = base_bottom_margin + legend_row_adjustment
-
         fig.legend(
             handles,
             labels,
@@ -1015,18 +1042,27 @@ def plot_paired_rank_and_cd(
         )
 
     # Tight layout for academic papers with extra bottom space for legend
-    # Adjust top spacing to ensure titles are properly aligned
-    legend_bottom_margin = (
-        legend_bottom_margin if "legend_bottom_margin" in locals() else 0.20
-    )
-    fig.subplots_adjust(
-        wspace=0.15,
-        hspace=0.22,
-        bottom=legend_bottom_margin,
-        top=0.90,
-        left=0.09,
-        right=0.98,
-    )
+    # legend_bottom_margin is already calculated above
+
+    if significance_plot_type == "matrix":
+        # For matrix layout, use different spacing to accommodate square subplots
+        fig.subplots_adjust(
+            wspace=0.25,  # Increased spacing between charts
+            hspace=0.25,
+            bottom=legend_bottom_margin,
+            top=0.88,
+            left=0.08,
+            right=0.98,
+        )
+    else:
+        fig.subplots_adjust(
+            wspace=0.15,
+            hspace=0.22,
+            bottom=legend_bottom_margin,
+            top=0.90,
+            left=0.09,
+            right=0.98,
+        )
 
     # Save the plot using same format handling
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
