@@ -27,7 +27,7 @@ For source code pertaining to conformalized hyperparameter optimization, refer t
 To resolve this, you can clone the below fork with minor edits to SMAC's `ConfigSpace` dependancy:
    ```bash
    git clone https://github.com/rick12000/SMAC3-ConfigSpace-Amend
-   cd hpo-benchmark
+   cd SMAC3-ConfigSpace-Amend
    ```
 
 And install it in your environment directly by navigating to it while your python environment is active and running:
