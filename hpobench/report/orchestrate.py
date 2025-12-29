@@ -19,7 +19,7 @@ from hpobench.config.config_types import (
     TunerConfig,
 )
 from hpobench.tune import setup_confopt_params
-from hpobench.report.utils import generate_configs_per_repetition
+from hpobench.report.utils import generate_configs_per_repetition, extract_search_space_metafeatures
 from hpobench.utils import (
     generate_hyperparameter_combinations,
     add_runtime,
@@ -28,9 +28,11 @@ from hpobench.prepare import (
     setup_yahpo_instance_configs,
     setup_jahs201_configs,
     setup_nas301_configs,
+    setup_synthetic_tabular_configs,
 )
 from hpobench.config.schema import BenchmarkDataSchema
-from hpobench.config.constants import Aliases
+from hpobench.config.constants import Aliases, SYNTHETIC_TABULAR_STORAGE_DIR
+from hpobench.config.benchmark_data import SYNTHETIC_TABULAR_IDS
 
 from hpobench.tune import tune
 from hpobench.report.analyze import analyze_main_benchmark
@@ -54,6 +56,7 @@ def load_experiment_configs(
             "rbv2_aknn-H",
             "rbv2_aknn-A",
             "nas301",
+            "synthetic_tabular",
         ]
     ],
     tuning_configurations: list[TunerConfig],
@@ -168,6 +171,29 @@ def load_experiment_configs(
         )
         experiment_configs.extend(configs)
 
+    if "synthetic_tabular" in benchmarks:
+        idx = benchmarks.index("synthetic_tabular")
+        all_datasets = SYNTHETIC_TABULAR_IDS
+        if (
+            datasets_per_benchmark is not None
+            and datasets_per_benchmark[idx] is not None
+        ):
+            selected_datasets = datasets_per_benchmark[idx]
+        elif max_n_instances_per_benchmark < len(all_datasets):
+            selected_datasets = all_datasets[:max_n_instances_per_benchmark]
+        else:
+            selected_datasets = all_datasets
+
+        configs = setup_synthetic_tabular_configs(
+            datasets=selected_datasets,
+            tuning_configurations=tuning_configurations,
+            n_warm_starts=n_warm_starts,
+            n_trials=n_trials,
+            timeout=timeout,
+            model_type="random_forest",
+        )
+        experiment_configs.extend(configs)
+
     return experiment_configs
 
 
@@ -235,6 +261,19 @@ def run_main_benchmark(
 
         logger.info(f"Initializing generator for dataset: {dataset_name}...")
         experiment_config.objective_function.initialize()
+        
+        search_space_metafeatures = extract_search_space_metafeatures(
+            experiment_config.search_space
+        )
+        logger.info(f"Extracted search space metafeatures: {search_space_metafeatures}")
+        
+        dataset_metafeatures = {}
+        if hasattr(experiment_config.objective_function, "get_metafeatures"):
+            try:
+                dataset_metafeatures = experiment_config.objective_function.get_metafeatures()
+                logger.info(f"Extracted dataset metafeatures: {dataset_metafeatures}")
+            except Exception as e:
+                logger.warning(f"Failed to extract dataset metafeatures: {e}")
 
         logger.info(
             f"Generating {experiment_config.n_warm_starts} warm start configurations for dataset: {dataset_name}"
@@ -297,6 +336,12 @@ def run_main_benchmark(
                 historical_performance[
                     "searcher_tuning_framework"
                 ] = tuner.searcher_tuning_framework
+                
+                for key, value in search_space_metafeatures.items():
+                    historical_performance[key] = value
+                
+                for key, value in dataset_metafeatures.items():
+                    historical_performance[key] = value
 
                 if tuner.tuner.backend == "confopt":
                     sampler_name = tuner.tuner.searcher.sampler.__class__.__name__
@@ -552,6 +597,7 @@ def run_static_benchmark(
             "rbv2_aknn-L",
             "rbv2_aknn-H",
             "rbv2_aknn-A",
+            "synthetic_tabular",
         ]
     ],
     data_size_range: list[int],
@@ -719,6 +765,23 @@ def run_static_benchmark(
                 timeout=100000,  # placeholder
             )
             experiment_configs.extend(jahs201_configs)
+
+        elif benchmark == "synthetic_tabular":
+            all_datasets = SYNTHETIC_TABULAR_IDS
+            selected_datasets = (
+                all_datasets[:max_n_instances]
+                if max_n_instances < len(all_datasets)
+                else all_datasets
+            )
+            synthetic_tabular_configs = setup_synthetic_tabular_configs(
+                datasets=selected_datasets,
+                tuning_configurations=[],  # placeholder
+                n_warm_starts=1,  # placeholder
+                n_trials=0,  # placeholder
+                timeout=100000,  # placeholder
+                model_type="random_forest",
+            )
+            experiment_configs.extend(synthetic_tabular_configs)
 
         else:
             raise ValueError(f"Unsupported benchmark: {benchmark}")

@@ -7,6 +7,7 @@ from hpobench.generation.generate import (
     BlackBoxGenerator,
     YahpoGenerator,
     NAS301Generator,
+    SyntheticTabularGenerator,
 )
 from hpobench.config.config_types import (
     ExperimentConfig,
@@ -19,10 +20,13 @@ from hpobench.config.benchmark_data import (
     BLACK_BOX_SEARCH_SPACE,
     YAHPO_SUBSETS,
     NAS301_SEARCH_SPACE,
+    SYNTHETIC_TABULAR_SEARCH_SPACE_RF,
+    SYNTHETIC_TABULAR_SEARCH_SPACE_GBT,
 )
+from hpobench.config.constants import SYNTHETIC_TABULAR_STORAGE_DIR
 from yahpo_gym import BenchmarkSet
 import ConfigSpace as CS
-from typing import Optional
+from typing import Optional, Literal
 
 logger = logging.getLogger(__name__)
 
@@ -278,6 +282,46 @@ def setup_blackbox_configs(
             )
         )
 
+    return experiment_configs
+
+
+def setup_synthetic_tabular_configs(
+    datasets: list[str],
+    tuning_configurations: list[TunerConfig],
+    n_warm_starts: int,
+    n_trials: int,
+    timeout: int,
+    model_type: Literal["random_forest", "gradient_boosted_trees"] = "random_forest",
+) -> list[ExperimentConfig]:
+    experiment_configs = []
+    
+    if model_type == "random_forest":
+        search_space = SYNTHETIC_TABULAR_SEARCH_SPACE_RF
+    elif model_type == "gradient_boosted_trees":
+        search_space = SYNTHETIC_TABULAR_SEARCH_SPACE_GBT
+    else:
+        raise ValueError(f"Unknown model type: {model_type}")
+    
+    for dataset in datasets:
+        experiment_configs.append(
+            ExperimentConfig(
+                search_space=search_space,
+                objective_function=SyntheticTabularGenerator(
+                    generator="synthetic_tabular",
+                    dataset=dataset,
+                    model_type=model_type,
+                    train_size=0.8,
+                    random_state=42,
+                ),
+                tuner_configurations=tuning_configurations,
+                n_warm_starts=n_warm_starts,
+                n_trials=n_trials,
+                timeout=timeout,
+                benchmark_identifier="synthetic_tabular",
+                dataset_identifier=dataset,
+            )
+        )
+    
     return experiment_configs
 
 

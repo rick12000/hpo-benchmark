@@ -1,5 +1,6 @@
 import numpy as np
-from typing import Union, Dict, Any
+from typing import Union, Dict, Any, Literal
+from pathlib import Path
 
 from ConfigSpace import Configuration
 
@@ -7,6 +8,9 @@ from jahs_bench import Benchmark
 from abc import ABC, abstractmethod
 
 from yahpo_gym import BenchmarkSet
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
 
 from hpobench.generation.black_box_functions import (
     rastrigin,
@@ -16,6 +20,16 @@ from hpobench.generation.black_box_functions import (
     shekel,
     hartmann6,
 )
+from hpobench.config.constants import SYNTHETIC_TABULAR_STORAGE_DIR
+from hpobench.generation.tabular.orchestrator import generate_tabular_datasets
+from hpobench.generation.tabular.config import (
+    GenerationConfig,
+    DatasetMetaConfig,
+)
+from hpobench.generation.tabular.storage import DatasetStorage
+from hpobench.generation.tabular.metafeatures import calculate_metafeatures
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.metrics import accuracy_score
 
 
 def _ensure_yahpo_initialized():
@@ -567,3 +581,174 @@ class NAS301Generator(YahpoGenerator):
             raise ValueError(f"ConfigSpace evaluation failed for NAS-301: {e}")
 
         return filtered_configuration
+
+
+class SyntheticTabularGenerator(ObjectiveMetricGenerator):
+    def __init__(
+        self,
+        generator: str,
+        dataset: str,
+        model_type: Literal["random_forest", "gradient_boosted_trees"],
+        train_size: float = 0.8,
+        random_state: int = 42,
+    ):
+        self.generator = generator
+        self.dataset = dataset
+        self.storage_dir = Path(SYNTHETIC_TABULAR_STORAGE_DIR)
+        self.model_type = model_type
+        self.train_size = train_size
+        self.random_state = random_state
+        
+        self.dataset_features = None
+        self.dataset_targets = None
+        self.dataset_metadata = None
+        self.task_type = None
+        self._initialized = False
+        self._metafeatures = None
+    
+    def initialize(self) -> None:
+        if self._initialized:
+            return
+        
+        datasets_exist = False
+        if self.storage_dir.exists():
+            dataset_dirs = [d for d in self.storage_dir.iterdir() if d.is_dir() and d.name.startswith("dataset_")]
+            if len(dataset_dirs) > 0:
+                datasets_exist = True
+        
+        if not datasets_exist:
+            custom_config = GenerationConfig(
+                meta_config=DatasetMetaConfig(
+                    num_samples_min=500,
+                    num_samples_max=5000,
+                    num_features_min=10,
+                    num_features_max=50,
+                    num_latent_nodes_min=20,
+                    num_latent_nodes_max=80,
+                    graph_depth_min=3,
+                    graph_depth_max=7,
+                    graph_connectivity_min=0.15,
+                    graph_connectivity_max=0.5,
+                    difficulty_min=0.2,
+                    difficulty_max=0.8,
+                )
+            )
+            
+            generate_tabular_datasets(
+                num_datasets=50,
+                storage_dir=str(self.storage_dir),
+                config=custom_config,
+                base_seed=42,
+                start_id=1,
+            )
+        
+        storage = DatasetStorage(str(self.storage_dir))
+        dataset_id = int(self.dataset)
+        self.dataset_features, self.dataset_targets, self.dataset_metadata = storage.load_dataset(dataset_id)
+        
+        self.task_type = self.dataset_metadata.get("task_type", "regression")
+        
+        self._initialized = True
+    
+    def predict(self, configuration: dict[str, Union[str, int, float, bool]]) -> float:
+        self.initialize()
+        
+        X = self.dataset_features.values
+        y = self.dataset_targets.values.ravel()
+        
+        X_train, X_val, y_train, y_val = train_test_split(
+            X, y, train_size=self.train_size, random_state=self.random_state
+        )
+        
+        if self.model_type in ["random_forest", "gradient_boosted_trees"]:
+            apply_normalization = False
+        else:
+            apply_normalization = True
+        
+        if apply_normalization:
+            scaler = StandardScaler()
+            X_train = scaler.fit_transform(X_train)
+            X_val = scaler.transform(X_val)
+        
+        if self.task_type == "classification":
+            y_train = y_train.astype(int)
+            y_val = y_val.astype(int)
+            
+            if self.model_type == "random_forest":
+                model = RandomForestClassifier(
+                    n_estimators=configuration.get("n_estimators", 100),
+                    max_depth=configuration.get("max_depth", None),
+                    min_samples_split=configuration.get("min_samples_split", 2),
+                    min_samples_leaf=configuration.get("min_samples_leaf", 1),
+                    random_state=self.random_state,
+                )
+            elif self.model_type == "gradient_boosted_trees":
+                model = GradientBoostingClassifier(
+                    n_estimators=configuration.get("n_estimators", 100),
+                    learning_rate=configuration.get("learning_rate", 0.1),
+                    max_depth=configuration.get("max_depth", 3),
+                    min_samples_split=configuration.get("min_samples_split", 2),
+                    min_samples_leaf=configuration.get("min_samples_leaf", 1),
+                    random_state=self.random_state,
+                )
+            else:
+                raise ValueError(f"Unknown model type: {self.model_type}")
+            
+            model.fit(X_train, y_train)
+            val_predictions = model.predict(X_val)
+            val_accuracy = accuracy_score(y_val, val_predictions)
+            return -val_accuracy
+        else:
+            if self.model_type == "random_forest":
+                model = RandomForestRegressor(
+                    n_estimators=configuration.get("n_estimators", 100),
+                    max_depth=configuration.get("max_depth", None),
+                    min_samples_split=configuration.get("min_samples_split", 2),
+                    min_samples_leaf=configuration.get("min_samples_leaf", 1),
+                    random_state=self.random_state,
+                )
+            elif self.model_type == "gradient_boosted_trees":
+                model = GradientBoostingRegressor(
+                    n_estimators=configuration.get("n_estimators", 100),
+                    learning_rate=configuration.get("learning_rate", 0.1),
+                    max_depth=configuration.get("max_depth", 3),
+                    min_samples_split=configuration.get("min_samples_split", 2),
+                    min_samples_leaf=configuration.get("min_samples_leaf", 1),
+                    random_state=self.random_state,
+                )
+            else:
+                raise ValueError(f"Unknown model type: {self.model_type}")
+            
+            model.fit(X_train, y_train)
+            val_predictions = model.predict(X_val)
+            val_mse = np.mean((val_predictions - y_val) ** 2)
+            return val_mse
+    
+    def predict_batch(self, configurations: list[dict]) -> list[float]:
+        # TODO: Implement proper batch logic to avoid re-training model for each configuration
+        results = []
+        for config in configurations:
+            results.append(self.predict(config))
+        return results
+    
+    def predict_runtime(
+        self, configuration: dict[str, Union[str, int, float, bool]]
+    ) -> float:
+        return 0.0
+    
+    def predict_runtime_batch(self, configurations: list[dict]) -> list[float]:
+        return [0.0] * len(configurations)
+    
+    def get_metafeatures(self) -> dict[str, Union[int, float, str]]:
+        self.initialize()
+        
+        if self._metafeatures is not None:
+            return self._metafeatures
+        
+        self._metafeatures = calculate_metafeatures(
+            features=self.dataset_features,
+            targets=self.dataset_targets,
+            task_type=self.task_type
+        )
+        
+        return self._metafeatures

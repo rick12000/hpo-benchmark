@@ -5,10 +5,12 @@ from hpobench.report.metrics import (
     permutation_pairwise_test,
 )
 from hpobench.utils import generate_hyperparameter_combinations
+from hpobench.config.config_types import IntRange, FloatRange, CategoricalRange
 import pandas as pd
 import logging
 import os
-from typing import List, Optional, Literal
+import numpy as np
+from typing import List, Optional, Literal, Dict
 
 from hpobench.utils import save_analysis_results, AnalysisPathManager
 from hpobench.process import block_bootstrap
@@ -16,6 +18,74 @@ from hpobench.report.latex import (
     format_calibration_metrics_to_latex,
 )
 from hpobench.report.metrics import calculate_calibration_statistics_per_repetition
+
+logger = logging.getLogger(__name__)
+
+
+def extract_search_space_metafeatures(search_space: Dict) -> Dict[str, float]:
+    n_int = 0
+    n_float = 0
+    n_categorical = 0
+    categorical_cardinalities = []
+    total_combinations = 1
+    max_combinations = 10**15
+
+    for param_name, param_range in search_space.items():
+        if isinstance(param_range, IntRange):
+            n_int += 1
+            combinations = param_range.upper - param_range.lower + 1
+            if total_combinations <= max_combinations:
+                total_combinations *= combinations
+            else:
+                total_combinations = max_combinations
+
+        elif isinstance(param_range, FloatRange):
+            n_float += 1
+            combinations = 1000
+            if total_combinations <= max_combinations:
+                total_combinations *= combinations
+            else:
+                total_combinations = max_combinations
+
+        elif isinstance(param_range, CategoricalRange):
+            n_categorical += 1
+            cardinality = len(param_range.choices)
+            categorical_cardinalities.append(cardinality)
+            if total_combinations <= max_combinations:
+                total_combinations *= cardinality
+            else:
+                total_combinations = max_combinations
+
+    n_hyperparameters = n_int + n_float + n_categorical
+    categorical_ratio = (
+        n_categorical / n_hyperparameters if n_hyperparameters > 0 else 0.0
+    )
+    continuous_ratio = (
+        (n_int + n_float) / n_hyperparameters if n_hyperparameters > 0 else 0.0
+    )
+
+    if categorical_cardinalities:
+        avg_categorical_cardinality = float(np.mean(categorical_cardinalities))
+        min_categorical_cardinality = float(np.min(categorical_cardinalities))
+        max_categorical_cardinality = float(np.max(categorical_cardinalities))
+    else:
+        avg_categorical_cardinality = 0.0
+        min_categorical_cardinality = 0.0
+        max_categorical_cardinality = 0.0
+
+    total_combinations = min(total_combinations, max_combinations)
+
+    return {
+        "n_integer_hyperparameters": n_int,
+        "n_float_hyperparameters": n_float,
+        "n_categorical_hyperparameters": n_categorical,
+        "ratio_continuous_hyperparameters": continuous_ratio,
+        "ratio_categorical_hyperparameters": categorical_ratio,
+        "avg_categorical_cardinality": avg_categorical_cardinality,
+        "min_categorical_cardinality": min_categorical_cardinality,
+        "max_categorical_cardinality": max_categorical_cardinality,
+        "total_search_space_combinations": total_combinations,
+    }
 
 
 def _save_text_content(

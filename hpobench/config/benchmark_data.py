@@ -1,3 +1,4 @@
+from pathlib import Path
 from hpobench.config.config_types import (
     FloatRange,
     CategoricalRange,
@@ -373,3 +374,40 @@ BLACK_BOX_SEARCH_SPACE = {}
 for n in range(n_synthetic_params):
     BLACK_BOX_SEARCH_SPACE[f"param{n}"] = FloatRange(lower=0, upper=100)
 BLACK_BOX_IDS: list[str] = ["rastrigin", "shekel", "weierstrass", "griewank", "ackley"]
+
+SYNTHETIC_TABULAR_SEARCH_SPACE_RF = {
+    "n_estimators": CategoricalRange(choices=[50, 100, 200, 300]),
+    "max_depth": CategoricalRange(choices=[None, 5, 10, 20, 30]),
+    "min_samples_split": CategoricalRange(choices=[2, 5, 10]),
+    "min_samples_leaf": CategoricalRange(choices=[1, 2, 4]),
+}
+
+SYNTHETIC_TABULAR_SEARCH_SPACE_GBT = {
+    "n_estimators": CategoricalRange(choices=[50, 100, 200, 300]),
+    "learning_rate": FloatRange(lower=0.01, upper=0.3, log=True),
+    "max_depth": CategoricalRange(choices=[3, 5, 7, 10]),
+    "min_samples_split": CategoricalRange(choices=[2, 5, 10]),
+    "min_samples_leaf": CategoricalRange(choices=[1, 2, 4]),
+}
+
+
+def _get_synthetic_tabular_ids() -> list[str]:
+    from hpobench.config.constants import SYNTHETIC_TABULAR_STORAGE_DIR
+    
+    storage_dir = Path(SYNTHETIC_TABULAR_STORAGE_DIR)
+    if not storage_dir.exists():
+        return []
+    
+    dataset_ids = []
+    for item in storage_dir.iterdir():
+        if item.is_dir() and item.name.startswith("dataset_"):
+            try:
+                dataset_id = item.name.replace("dataset_", "")
+                dataset_ids.append(dataset_id)
+            except (ValueError, IndexError):
+                continue
+    
+    return sorted(dataset_ids, key=lambda x: int(x) if x.isdigit() else 0)
+
+
+SYNTHETIC_TABULAR_IDS: list[str] = _get_synthetic_tabular_ids()

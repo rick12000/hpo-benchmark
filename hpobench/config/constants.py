@@ -1,6 +1,8 @@
 from pydantic import BaseModel
 from typing import Optional, List, Dict
 
+SYNTHETIC_TABULAR_STORAGE_DIR = "cache/tabular_datasets"
+
 
 class ExperimentParameters(BaseModel):
     """Default parameters for hyperparameter optimization experiments.
@@ -58,4 +60,8 @@ class Aliases(BaseModel):
         "qgbm": "QGBM",
         "qens5": "QE",
     }
-    benchmark_aliases: Dict[str, str] = {"jahs201": "JAHS-201", "nas301": "NAS-301"}
+    benchmark_aliases: Dict[str, str] = {
+        "jahs201": "JAHS-201",
+        "nas301": "NAS-301",
+        "synthetic_tabular": "Synthetic-Tabular",
+    }
