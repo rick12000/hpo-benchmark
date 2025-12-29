@@ -23,17 +23,7 @@ from hpobench.config.config_types import (
     ConfOptModel,
 )
 
-# 1. Static analysis configurations:
-STATIC_ANALYSIS_ESTIMATOR_ARCHITECTURES = [
-    "qknn",
-    "qgp",
-    "ql",
-    "qrf",
-    "qgbm",
-    # "qens5",
-]
-
-# 2. Coverage analysis configurations:
+# Coverage analysis configurations:
 COVERAGE_ANALYSIS_CONFIGURATIONS = []
 COVERAGE_PLOT_CONFIGURATIONS = []
 COVERAGE_INTERVAL_WIDTHS = [0.25, 0.5, 0.75]

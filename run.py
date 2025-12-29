@@ -5,19 +5,13 @@ from hpobench.config.tuner_configurations import (
     ARCHITECTURE_VARIATION_CONFIGURATIONS,
     SAMPLER_VARIATION_CONFIGURATIONS,
     COVERAGE_ANALYSIS_CONFIGURATIONS,
-    STATIC_ANALYSIS_ESTIMATOR_ARCHITECTURES,
     QUANTILE_COUNT_VARIATION_CONFIGURATIONS,
     SEARCH_TUNING_EFFECT_CONFIGURATIONS,
 )
 from hpobench.config.constants import ExperimentParameters
-from hpobench.report.analyze import (
-    analyze_searcher_tuning_effect,
-    analyze_searcher_estimator_comparison,
-)
 from hpobench.config.schema import BenchmarkDataSchema
 from hpobench.report.orchestrate import (
     run_and_analyze_main_benchmark,
-    run_static_benchmark,
 )
 from hpobench.utils import setup_environment
 
@@ -34,7 +28,6 @@ run_sections = {
     "run_heteroscedastic_external_tuning_analysis": False,
     "run_skew_external_tuning_analysis": False,
     "run_preconformal_comparison_analysis": False,
-    "run_static_analysis": True,
     "run_quantile_count_comparison": True,
     "run_search_tuning_effect_comparison": False,
 }
@@ -296,45 +289,6 @@ def main():
         except Exception as e:
             logger.error(f"Error in task {name}: {e}", exc_info=True)
 
-    # Static analysis (estimator error analysis)
-    if run_sections.get("run_static_analysis", False):
-        name = "static_analysis"
-        logger.info("Starting Estimator Error Analysis (STATIC configs)...")
-        try:
-            static_results = run_static_benchmark(
-                benchmarks=["LCBench-L"],
-                data_size_range=experiment_params.static_data_sizes,
-                estimator_architectures=STATIC_ANALYSIS_ESTIMATOR_ARCHITECTURES,
-                n_repetitions_per_estimator=experiment_params.medium_n_repetitions_per_tuner_config,
-                tuning_iterations_range=experiment_params.static_tuning_iterations,
-                alpha=0.2,
-                n_pre_conformal_trials=min(experiment_params.static_tuning_iterations)
-                - 1,
-                max_n_instances=experiment_params.default_max_n_instances,
-                base_random_state=BASE_RANDOM_STATE,
-            )
-
-            logger.info("Starting Tuning Effect Analysis...")
-            analyze_searcher_tuning_effect(
-                static_raw_benchmark_data=static_results,
-                cache_path=CACHE_PATH,
-                run_start_str=run_start_str,
-                analysis_type="05_static_analysis",
-                schema=schema,
-            )
-            logger.info("Tuning Effect Analysis finished.")
-
-            logger.info("Starting Estimator Comparison Analysis...")
-            analyze_searcher_estimator_comparison(
-                static_raw_benchmark_data=static_results,
-                cache_path=CACHE_PATH,
-                run_start_str=run_start_str,
-                analysis_type="05_static_analysis",
-                schema=schema,
-            )
-            logger.info("Estimator Comparison Analysis finished.")
-        except Exception as e:
-            logger.error(f"Error in task {name}: {e}", exc_info=True)
 
 
 if __name__ == "__main__":
