@@ -546,7 +546,7 @@ def confopt_tune(
         max_runtime=int(timeout) if timeout is not None else None,
         max_searches=adj_n_trials,
         n_random_searches=0,
-        conformal_retraining_frequency=1,
+        # conformal_retraining_frequency=1,
         verbose=False,
         random_state=random_state,
         optimizer_framework=searcher_tuning_framework

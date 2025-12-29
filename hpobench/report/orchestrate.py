@@ -32,7 +32,6 @@ from hpobench.prepare import (
 )
 from hpobench.config.schema import BenchmarkDataSchema
 from hpobench.config.constants import Aliases, SYNTHETIC_TABULAR_STORAGE_DIR
-from hpobench.config.benchmark_data import SYNTHETIC_TABULAR_IDS
 
 from hpobench.tune import tune
 from hpobench.report.analyze import analyze_main_benchmark
@@ -65,6 +64,7 @@ def load_experiment_configs(
     timeout: Optional[float],
     max_n_instances_per_benchmark: int = 10,
     datasets_per_benchmark: Optional[list[list[str]]] = None,
+    synthetic_tabular_ids: Optional[list[str]] = None,
 ) -> list[ExperimentConfig]:
     """Load and configure benchmark instances for hyperparameter optimization experiments.
 
@@ -173,7 +173,7 @@ def load_experiment_configs(
 
     if "synthetic_tabular" in benchmarks:
         idx = benchmarks.index("synthetic_tabular")
-        all_datasets = SYNTHETIC_TABULAR_IDS
+        all_datasets = synthetic_tabular_ids if synthetic_tabular_ids is not None else []
         if (
             datasets_per_benchmark is not None
             and datasets_per_benchmark[idx] is not None
@@ -192,6 +192,8 @@ def load_experiment_configs(
             timeout=timeout,
             model_type="random_forest",
         )
+        logger.info(f"Created {len(configs)} synthetic tabular experiment configurations")
+        
         experiment_configs.extend(configs)
 
     return experiment_configs

@@ -21,16 +21,13 @@ from hpobench.generation.black_box_functions import (
     hartmann6,
 )
 from hpobench.config.constants import SYNTHETIC_TABULAR_STORAGE_DIR
-from hpobench.generation.tabular.orchestrator import generate_tabular_datasets
-from hpobench.generation.tabular.config import (
-    GenerationConfig,
-    DatasetMetaConfig,
-)
 from hpobench.generation.tabular.storage import DatasetStorage
 from hpobench.generation.tabular.metafeatures import calculate_metafeatures
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.metrics import accuracy_score
 
+import logging
+logger = logging.getLogger(__name__)
 
 def _ensure_yahpo_initialized():
     """Wrapper to avoid circular imports."""
@@ -609,45 +606,17 @@ class SyntheticTabularGenerator(ObjectiveMetricGenerator):
     def initialize(self) -> None:
         if self._initialized:
             return
-        
-        datasets_exist = False
-        if self.storage_dir.exists():
-            dataset_dirs = [d for d in self.storage_dir.iterdir() if d.is_dir() and d.name.startswith("dataset_")]
-            if len(dataset_dirs) > 0:
-                datasets_exist = True
-        
-        if not datasets_exist:
-            custom_config = GenerationConfig(
-                meta_config=DatasetMetaConfig(
-                    num_samples_min=500,
-                    num_samples_max=5000,
-                    num_features_min=10,
-                    num_features_max=50,
-                    num_latent_nodes_min=20,
-                    num_latent_nodes_max=80,
-                    graph_depth_min=3,
-                    graph_depth_max=7,
-                    graph_connectivity_min=0.15,
-                    graph_connectivity_max=0.5,
-                    difficulty_min=0.2,
-                    difficulty_max=0.8,
-                )
-            )
-            
-            generate_tabular_datasets(
-                num_datasets=50,
-                storage_dir=str(self.storage_dir),
-                config=custom_config,
-                base_seed=42,
-                start_id=1,
-            )
-        
-        storage = DatasetStorage(str(self.storage_dir))
-        dataset_id = int(self.dataset)
-        self.dataset_features, self.dataset_targets, self.dataset_metadata = storage.load_dataset(dataset_id)
-        
+
+        try:
+            storage = DatasetStorage(str(self.storage_dir))
+            dataset_id = int(self.dataset)
+            self.dataset_features, self.dataset_targets, self.dataset_metadata = storage.load_dataset(dataset_id)
+        except Exception as e:
+            logger.error(f"Failed to load dataset {self.dataset}: {e}", exc_info=True)
+            raise
+
         self.task_type = self.dataset_metadata.get("task_type", "regression")
-        
+
         self._initialized = True
     
     def predict(self, configuration: dict[str, Union[str, int, float, bool]]) -> float:
