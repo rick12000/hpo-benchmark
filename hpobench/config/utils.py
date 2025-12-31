@@ -112,53 +112,6 @@ def create_searcher_config_id(
     return config_id
 
 
-def build_sampler_variation_configurations(
-    samplers: List[
-        Union[
-            ThompsonSampler,
-            LowerBoundSampler,
-            ExpectedImprovementSampler,
-        ]
-    ],
-    quantile_arch: Any,
-    n_pre_conformal_trials: int = 20,
-    searcher_tuning_framework: Optional[str] = None,
-    calibration_split_strategy: str = "train_test_split",
-) -> List[TunerConfig]:
-    """Build tuning configurations for different samplers with a fixed quantile architecture.
-
-    Args:
-        samplers: List of sampler instances.
-        quantile_arch: Quantile estimator architecture.
-        n_pre_conformal_trials: Number of pre-conformal trials.
-        searcher_tuning_framework: Value to set in TunerConfig for searcher_tuning_framework.
-        calibration_split_strategy: Value to set in QuantileConformalSearcher for calibration_split_strategy.
-    Returns:
-        List of tuning configuration objects for each sampler.
-    """
-    configs = []
-    for sampler in samplers:
-        sampler_copy = deepcopy(sampler)
-        searcher = QuantileConformalSearcher(
-            quantile_estimator_architecture=quantile_arch,
-            sampler=sampler_copy,
-            n_pre_conformal_trials=n_pre_conformal_trials,
-            n_calibration_folds=5,
-            calibration_split_strategy=calibration_split_strategy,
-        )
-        config_id = create_searcher_config_id(searcher) + (
-            f" stf={searcher_tuning_framework}" if searcher_tuning_framework else ""
-        )
-        configs.append(
-            TunerConfig(
-                tuner=ConfOptModel(backend="confopt", searcher=searcher),
-                tuner_identifier=config_id,
-                searcher_tuning_framework=searcher_tuning_framework,
-            )
-        )
-    return configs
-
-
 def build_architecture_variation_configurations(
     architectures: List[Any],
     samplers: List[
@@ -215,14 +168,14 @@ def get_external_tuning_configurations() -> List[TunerConfig]:
         List of external tuning configuration objects (e.g., for skopt, optuna).
     """
     return [
-        TunerConfig(
-            tuner=CustomGPModel(backend="gp_opt", searcher="EI"),
-            tuner_identifier="GP-EI",
-        ),
-        TunerConfig(
-            tuner=CustomGPModel(backend="gp_opt", searcher="OBS"),
-            tuner_identifier="GP-OBS",
-        ),
+        # TunerConfig(
+        #     tuner=CustomGPModel(backend="gp_opt", searcher="EI"),
+        #     tuner_identifier="GP-EI",
+        # ),
+        # TunerConfig(
+        #     tuner=CustomGPModel(backend="gp_opt", searcher="OBS"),
+        #     tuner_identifier="GP-OBS",
+        # ),
         TunerConfig(
             tuner=OptunaModel(backend="optuna", searcher="TPE"),
             tuner_identifier="TPE",
@@ -231,8 +184,8 @@ def get_external_tuning_configurations() -> List[TunerConfig]:
             tuner=OptunaModel(backend="optuna", searcher="random"),
             tuner_identifier="RS",
         ),
-        TunerConfig(
-            tuner=SMACModel(backend="smac", searcher="SMAC-EI"),
-            tuner_identifier="SMAC",
-        ),
+        # TunerConfig(
+        #     tuner=SMACModel(backend="smac", searcher="SMAC-EI"),
+        #     tuner_identifier="SMAC",
+        # ),
     ]

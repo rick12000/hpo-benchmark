@@ -645,19 +645,19 @@ class SyntheticTabularGenerator(ObjectiveMetricGenerator):
             
             if self.model_type == "random_forest":
                 model = RandomForestClassifier(
-                    n_estimators=configuration.get("n_estimators", 100),
-                    max_depth=configuration.get("max_depth", None),
-                    min_samples_split=configuration.get("min_samples_split", 2),
-                    min_samples_leaf=configuration.get("min_samples_leaf", 1),
+                    n_estimators=configuration["n_estimators"],
+                    max_depth=configuration["max_depth"],
+                    min_samples_split=configuration["min_samples_split"],
+                    min_samples_leaf=configuration["min_samples_leaf"],
                     random_state=self.random_state,
                 )
             elif self.model_type == "gradient_boosted_trees":
                 model = GradientBoostingClassifier(
-                    n_estimators=configuration.get("n_estimators", 100),
-                    learning_rate=configuration.get("learning_rate", 0.1),
-                    max_depth=configuration.get("max_depth", 3),
-                    min_samples_split=configuration.get("min_samples_split", 2),
-                    min_samples_leaf=configuration.get("min_samples_leaf", 1),
+                    n_estimators=configuration["n_estimators"],
+                    learning_rate=configuration["learning_rate"],
+                    max_depth=configuration["max_depth"],
+                    min_samples_split=configuration["min_samples_split"],
+                    min_samples_leaf=configuration["min_samples_leaf"],
                     random_state=self.random_state,
                 )
             else:
@@ -670,19 +670,19 @@ class SyntheticTabularGenerator(ObjectiveMetricGenerator):
         else:
             if self.model_type == "random_forest":
                 model = RandomForestRegressor(
-                    n_estimators=configuration.get("n_estimators", 100),
-                    max_depth=configuration.get("max_depth", None),
-                    min_samples_split=configuration.get("min_samples_split", 2),
-                    min_samples_leaf=configuration.get("min_samples_leaf", 1),
+                    n_estimators=configuration["n_estimators"],
+                    max_depth=configuration["max_depth"],
+                    min_samples_split=configuration["min_samples_split"],
+                    min_samples_leaf=configuration["min_samples_leaf"],
                     random_state=self.random_state,
                 )
             elif self.model_type == "gradient_boosted_trees":
                 model = GradientBoostingRegressor(
-                    n_estimators=configuration.get("n_estimators", 100),
-                    learning_rate=configuration.get("learning_rate", 0.1),
-                    max_depth=configuration.get("max_depth", 3),
-                    min_samples_split=configuration.get("min_samples_split", 2),
-                    min_samples_leaf=configuration.get("min_samples_leaf", 1),
+                    n_estimators=configuration["n_estimators"],
+                    learning_rate=configuration["learning_rate"],
+                    max_depth=configuration["max_depth"],
+                    min_samples_split=configuration["min_samples_split"],
+                    min_samples_leaf=configuration["min_samples_leaf"],
                     random_state=self.random_state,
                 )
             else:

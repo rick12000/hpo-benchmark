@@ -15,7 +15,6 @@ except ImportError:
     )
 from hpobench.config.utils import (
     get_external_tuning_configurations,
-    build_sampler_variation_configurations,
     build_architecture_variation_configurations,
 )
 from hpobench.config.config_types import (
@@ -31,7 +30,6 @@ LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS = build_architecture_variation_con
     architectures=[
         "qrf",
         "qgbm",
-        # "qens5",
     ],
     samplers=[
         ThompsonSampler(

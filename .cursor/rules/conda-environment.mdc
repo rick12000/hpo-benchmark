@@ -4,7 +4,7 @@ globs:
 alwaysApply: true
 ---
 
-To run anything in the terminal or console, ALWAYS:
-1. Run: conda activate hpo_final_runs_env
-2. Run: pip install .
+To run anything in the terminal or console:
+1. Run: conda activate confopt_bench
+2. Run: pip install -e .
 3. Run your command

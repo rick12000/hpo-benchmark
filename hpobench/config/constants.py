@@ -24,7 +24,7 @@ class ExperimentParameters(BaseModel):
     n_warm_starts: int = 15
     default_max_n_instances: int = 3
 
-    medium_n_repetitions_per_tuner_config: int = 5
+    medium_n_repetitions_per_tuner_config: int = 3
 
 
 class Aliases(BaseModel):

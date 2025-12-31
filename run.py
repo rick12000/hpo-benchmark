@@ -41,6 +41,13 @@ def _generate_synthetic_tabular_datasets() -> None:
     
     if not datasets_exist:
         logger.info("No datasets found, generating synthetic tabular datasets...")
+        from hpobench.generation.tabular.config import (
+            FeatureSelectionConfig,
+            TaskConfig,
+            TargetSelectionConfig,
+            SignalNoiseConfig,
+        )
+        
         custom_config = GenerationConfig(
             meta_config=DatasetMetaConfig(
                 num_samples_min=500,
@@ -64,7 +71,32 @@ def _generate_synthetic_tabular_datasets() -> None:
                 apply_missingness=False,
                 missingness_probability=0.0,
                 apply_scaling=True,
-            )
+            ),
+            feature_selection_config=FeatureSelectionConfig(
+                strategy="causal",  # Use causal-aware feature selection
+                causal_only_probability=0.8,  # 80% causal features
+                include_confounders=True,
+                confounder_count_min=0,
+                confounder_count_max=2,
+            ),
+            task_config=TaskConfig(
+                task_strategy="random",  # Balanced mix of regression and classification
+                regression_probability=0.5,
+                classification_cardinality_min=2,
+                classification_cardinality_max=10,
+            ),
+            target_selection_config=TargetSelectionConfig(
+                select_from_leaf_nodes=True,  # Targets are leaf/near-leaf nodes
+                min_ancestors=2,  # Ensure target has causal parents
+                max_ancestors_ratio=0.5,
+            ),
+            signal_noise_config=SignalNoiseConfig(
+                target_snr_easy=5.0,
+                target_snr_medium=2.0,
+                target_snr_hard=0.5,
+                calibrate_per_path=True,  # Calibrate noise based on causal depth
+                min_mutual_information=0.01,  # Validation threshold - relaxed slightly to account for classification task variance
+            ),
         )
         
         generate_tabular_datasets(
