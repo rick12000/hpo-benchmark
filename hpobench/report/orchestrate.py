@@ -5,7 +5,7 @@ import logging
 from typing import Literal, Optional
 import gc
 import numpy as np
-from sklearn.metrics import mean_pinball_loss
+
 
 try:
     from confopt.selection.conformalization import QuantileConformalEstimator
@@ -18,8 +18,7 @@ from hpobench.config.config_types import (
     ExperimentConfig,
     TunerConfig,
 )
-from hpobench.tune import setup_confopt_params
-from hpobench.report.utils import generate_configs_per_repetition, extract_search_space_metafeatures
+from hpobench.config.config_types import IntRange, FloatRange, CategoricalRange
 from hpobench.utils import (
     generate_hyperparameter_combinations,
     add_runtime,
@@ -29,12 +28,16 @@ from hpobench.prepare import (
     setup_jahs201_configs,
     setup_nas301_configs,
     setup_synthetic_tabular_configs,
+    _generate_randomized_search_spaces,
 )
-from hpobench.config.schema import BenchmarkDataSchema
+from hpobench.config.schema import BenchmarkDataSchema, SearchSpaceMetafeaturesSchema
 from hpobench.config.constants import Aliases, SYNTHETIC_TABULAR_STORAGE_DIR
+from hpobench.config.benchmark_data import (
+    SYNTHETIC_TABULAR_SEARCH_SPACE_RF,
+    SYNTHETIC_TABULAR_SEARCH_SPACE_GBT,
+)
 
 from hpobench.tune import tune
-from hpobench.report.analyze import analyze_main_benchmark
 
 logger = logging.getLogger(__name__)
 os.environ["SYNETUNE_FOLDER"] = "cache/syne-tune"
@@ -59,7 +62,7 @@ def load_experiment_configs(
         ]
     ],
     tuning_configurations: list[TunerConfig],
-    n_warm_starts: int,
+    n_warm_starts: list[int],
     n_trials: int,
     timeout: Optional[float],
     max_n_instances_per_benchmark: int = 10,
@@ -86,7 +89,7 @@ def load_experiment_configs(
             - "rbv2_aknn-A": RBV2 XGBoost subset with most skewed datasets
         tuning_configurations: List of tuner configurations defining the HPO algorithms
             and their parameters to be evaluated on each benchmark instance.
-        n_warm_starts: Number of initial random hyperparameter configurations to generate
+        n_warm_starts: List of numbers of initial random hyperparameter configurations to generate
             for each tuner to ensure fair comparison across different optimization methods.
         n_trials: Total number of hyperparameter evaluation trials per tuner configuration,
             including warm start trials.
@@ -184,19 +187,203 @@ def load_experiment_configs(
         else:
             selected_datasets = all_datasets
 
-        configs = setup_synthetic_tabular_configs(
-            datasets=selected_datasets,
-            tuning_configurations=tuning_configurations,
-            n_warm_starts=n_warm_starts,
-            n_trials=n_trials,
-            timeout=timeout,
-            model_type="random_forest",
+        logger.info(
+            f"Setting up synthetic tabular benchmark with {len(selected_datasets)} datasets"
         )
-        logger.info(f"Created {len(configs)} synthetic tabular experiment configurations")
         
-        experiment_configs.extend(configs)
+        has_confopt_tuners = any(
+            hasattr(t.tuner, "backend") and t.tuner.backend == "confopt"
+            for t in tuning_configurations
+        )
+        
+        if has_confopt_tuners:
+            logger.info(
+                "Confopt tuners detected: using base search spaces only "
+                "(conformal estimators require fixed encoding)"
+            )
+            n_search_space_variations = 1
+        else:
+            n_search_space_variations = 5
+            logger.info(
+                f"Using {n_search_space_variations} randomized search space variations "
+                "(no confopt tuners detected)"
+            )
+        
+        model_types = ["random_forest", "gradient_boosted_trees"]
+        logger.info(
+            f"Will generate {len(model_types)} models × {n_search_space_variations} search space variation(s)"
+        )
+        
+        total_configs_before = len(experiment_configs)
+        
+        for model_idx, model_type in enumerate(model_types, 1):
+            if model_type == "random_forest":
+                base_search_space = SYNTHETIC_TABULAR_SEARCH_SPACE_RF
+            else:
+                base_search_space = SYNTHETIC_TABULAR_SEARCH_SPACE_GBT
+            
+            logger.info(
+                f"[Model {model_idx}/{len(model_types)}] Processing {model_type} with {len(base_search_space)} base hyperparameters"
+            )
+            
+            search_space_variations = _generate_randomized_search_spaces(
+                base_search_space=base_search_space,
+                n_variations=n_search_space_variations,
+                random_state=42,
+            )
+            logger.info(
+                f"[Model {model_idx}/{len(model_types)}] Generated {len(search_space_variations)} search space variation(s) for {model_type}"
+            )
+            
+            for var_idx, search_space in enumerate(search_space_variations, 1):
+                from hpobench.prepare import _calculate_search_space_size
+                space_size = _calculate_search_space_size(search_space)
+                logger.info(
+                    f"[Model {model_idx}, Variation {var_idx}] Search space: {len(search_space)} params, ~{space_size} combinations"
+                )
+                
+                configs = setup_synthetic_tabular_configs(
+                    datasets=selected_datasets,
+                    tuning_configurations=tuning_configurations,
+                    n_warm_starts=n_warm_starts,
+                    n_trials=n_trials,
+                    timeout=timeout,
+                    model_type=model_type,
+                    search_space=search_space,
+                )
+                experiment_configs.extend(configs)
+                logger.info(
+                    f"[Model {model_idx}, Variation {var_idx}] Created {len(configs)} configs for {len(selected_datasets)} datasets"
+                )
+        
+        total_configs_added = len(experiment_configs) - total_configs_before
+        logger.info(
+            f"Synthetic tabular benchmark setup complete: added {total_configs_added} configurations "
+            f"({len(model_types)} models × {n_search_space_variations} variation(s) × {len(selected_datasets)} datasets)"
+        )
 
     return experiment_configs
+
+
+def generate_configs_per_repetition(
+    search_space,
+    n_configs,
+    n_repetitions,
+    base_seed,
+    objective_function,
+    seed_offset=0,
+):
+    """Generate hyperparameter configurations for multiple experimental repetitions.
+
+    Args:
+        search_space: Dictionary defining the hyperparameter search space.
+        n_configs: Number of configurations to generate per repetition.
+        n_repetitions: Number of experimental repetitions.
+        base_seed: Base random seed for reproducible generation.
+        objective_function: Objective function for evaluating configurations.
+        seed_offset: Offset to add to base seed for variation.
+
+    Returns:
+        List of configuration lists, one per repetition.
+    """
+    configs_per_repetition = []
+    for repetition in range(n_repetitions):
+        configs = []
+        consistent_configs = generate_hyperparameter_combinations(
+            params=search_space,
+            n_combinations=n_configs,
+            random_state=base_seed + seed_offset + repetition,
+        )
+
+        performances = objective_function.predict_batch(consistent_configs)
+        for combination, performance in zip(consistent_configs, performances):
+            configs.append((combination, performance))
+
+        configs_per_repetition.append(configs)
+    return configs_per_repetition
+
+
+
+def extract_search_space_metafeatures(
+    search_space: dict,
+    schema: Optional[SearchSpaceMetafeaturesSchema] = None,
+) -> dict[str, float]:
+    """Extract metafeatures from search space configuration.
+    
+    Args:
+        search_space: Dictionary defining the hyperparameter search space
+        schema: Optional SearchSpaceMetafeaturesSchema for column naming
+        
+    Returns:
+        Dictionary with search space metafeatures using schema column names
+    """
+    if schema is None:
+        from hpobench.config.schema import SearchSpaceMetafeaturesSchema
+        schema = SearchSpaceMetafeaturesSchema()
+    
+    n_int = 0
+    n_float = 0
+    n_categorical = 0
+    categorical_cardinalities = []
+    total_combinations = 1
+    max_combinations = 10**15
+
+    for param_name, param_range in search_space.items():
+        if isinstance(param_range, IntRange):
+            n_int += 1
+            combinations = param_range.upper - param_range.lower + 1
+            if total_combinations <= max_combinations:
+                total_combinations *= combinations
+            else:
+                total_combinations = max_combinations
+
+        elif isinstance(param_range, FloatRange):
+            n_float += 1
+            combinations = 1000
+            if total_combinations <= max_combinations:
+                total_combinations *= combinations
+            else:
+                total_combinations = max_combinations
+
+        elif isinstance(param_range, CategoricalRange):
+            n_categorical += 1
+            cardinality = len(param_range.choices)
+            categorical_cardinalities.append(cardinality)
+            if total_combinations <= max_combinations:
+                total_combinations *= cardinality
+            else:
+                total_combinations = max_combinations
+
+    n_hyperparameters = n_int + n_float + n_categorical
+    categorical_ratio = (
+        n_categorical / n_hyperparameters if n_hyperparameters > 0 else 0.0
+    )
+    continuous_ratio = (
+        (n_int + n_float) / n_hyperparameters if n_hyperparameters > 0 else 0.0
+    )
+
+    if categorical_cardinalities:
+        avg_categorical_cardinality = float(np.mean(categorical_cardinalities))
+        min_categorical_cardinality = float(np.min(categorical_cardinalities))
+        max_categorical_cardinality = float(np.max(categorical_cardinalities))
+    else:
+        avg_categorical_cardinality = 0.0
+        min_categorical_cardinality = 0.0
+        max_categorical_cardinality = 0.0
+
+    total_combinations = min(total_combinations, max_combinations)
+
+    return {
+        schema.n_integer_hyperparameters: n_int,
+        schema.n_float_hyperparameters: n_float,
+        schema.n_categorical_hyperparameters: n_categorical,
+        schema.ratio_continuous_hyperparameters: continuous_ratio,
+        schema.ratio_categorical_hyperparameters: categorical_ratio,
+        schema.avg_categorical_cardinality: avg_categorical_cardinality,
+        schema.min_categorical_cardinality: min_categorical_cardinality,
+        schema.max_categorical_cardinality: max_categorical_cardinality,
+        schema.total_search_space_combinations: total_combinations,
+    }
 
 
 def run_main_benchmark(
@@ -209,13 +396,16 @@ def run_main_benchmark(
     """Execute the core hyperparameter optimization benchmark experiments.
 
     This function runs the main experimental loop that evaluates multiple HPO algorithms
-    across different datasets and repetitions. For each experiment configuration (which
-    contains a single dataset), it:
+    across different datasets, warm start counts, and repetitions. For each experiment 
+    configuration (which contains a single dataset), it:
     1. Initializes the objective function (surrogate model that returns performance of
         dataset at passed hyperparameters)
-    2. Generates consistent warm start configurations (one set of configurations per repetition)
-    3. Runs each tuner configuration for the specified number of trials
-    4. Collects performance metrics, runtime data, and tuner-specific metadata
+    2. For each warm start count in the configuration's list:
+        a. Generates consistent warm start configurations (one set per repetition)
+        b. Runs each tuner configuration for the specified number of trials
+        c. Collects performance metrics, runtime data, tuner-specific metadata, and
+           the number of warm starts used
+    3. Collects performance metrics, runtime data, and tuner-specific metadata
 
     The function handles both confopt-based tuners (with detailed conformal prediction
     metadata) and external tuning frameworks (Optuna, Sk Opt, etc.) with appropriate
@@ -250,6 +440,7 @@ def run_main_benchmark(
         - 'sampler_n_quantiles': Number of quantiles used by sampler for confopt (empty for others)
         - 'sampler_adapter': Adapter used by sampler for confopt ("None" if None, empty for others)
         - 'tuner_searcher_tuning_framework': Searcher tuning framework from tuner config ("None" if None, empty for others)
+        - 'n_random_warm_starts': Number of random warm starts used for this trial
     """
     logger.info("Running HPO benchmark...")
 
@@ -257,11 +448,22 @@ def run_main_benchmark(
     os.makedirs(incremental_data_path, exist_ok=True)
 
     raw_benchmark_data = pd.DataFrame()
-    for experiment_config in experiment_configs:
+    logger.info(f"Starting benchmark run with {len(experiment_configs)} experiment configurations")
+    
+    for config_idx, experiment_config in enumerate(experiment_configs, 1):
         dataset_name = experiment_config.dataset_identifier
-        logger.info(f"Loop Level | Dataset: {dataset_name}")
+        benchmark_name = experiment_config.benchmark_identifier
+        search_space_size = len(experiment_config.search_space)
+        n_tuners = len(experiment_config.tuner_configurations)
+        n_warm_start_counts = len(experiment_config.n_warm_starts)
+        
+        logger.info(
+            f"[Config {config_idx}/{len(experiment_configs)}] Dataset: {dataset_name} | "
+            f"Benchmark: {benchmark_name} | Search space: {search_space_size} params | "
+            f"Tuners: {n_tuners} | Warm start configurations: {n_warm_start_counts}"
+        )
 
-        logger.info(f"Initializing generator for dataset: {dataset_name}...")
+        logger.info(f"Initializing objective function for: {dataset_name}...")
         experiment_config.objective_function.initialize()
         
         search_space_metafeatures = extract_search_space_metafeatures(
@@ -277,163 +479,169 @@ def run_main_benchmark(
             except Exception as e:
                 logger.warning(f"Failed to extract dataset metafeatures: {e}")
 
-        logger.info(
-            f"Generating {experiment_config.n_warm_starts} warm start configurations for dataset: {dataset_name}"
-        )
-        # NOTE: Warm starts are identical per repetition, so all models
-        # will have the same starting hyperparameter configurations, but
-        # a new set of warm starts needs to be generated per dataset and
-        # per repetition.
-        warm_start_configs_per_repetition = []
-        for repetition in range(n_repetitions):
-            consistent_warm_starts = generate_hyperparameter_combinations(
-                params=experiment_config.search_space,
-                n_combinations=experiment_config.n_warm_starts,
-                random_state=base_random_state + repetition,
+        # Loop over each warm start count
+        for ws_idx, n_ws in enumerate(experiment_config.n_warm_starts, 1):
+            logger.info(
+                f"Warm start loop [{ws_idx}/{len(experiment_config.n_warm_starts)}] - "
+                f"Generating {n_ws} warm start configurations for dataset: {dataset_name}"
             )
-            warm_start_configs = []
-            for combination in consistent_warm_starts:
-                performance = experiment_config.objective_function.predict(combination)
-                warm_start_configs.append((combination, performance))
-            warm_start_configs_per_repetition.append(warm_start_configs)
-        logger.info(
-            f"Generated {len(warm_start_configs_per_repetition[0])} warm start configurations."
-        )
-
-        for tuner in experiment_config.tuner_configurations:
-            logger.info(f"Loop Level | Tuner: {tuner}")
+            # NOTE: Warm starts are identical per repetition, so all models
+            # will have the same starting hyperparameter configurations, but
+            # a new set of warm starts needs to be generated per dataset and
+            # per repetition.
+            warm_start_configs_per_repetition = []
             for repetition in range(n_repetitions):
-                logger.info(f"Loop Level | Repetition: {repetition}")
-                tune_start = datetime.now()
-
-                historical_performance = tune(
-                    performance_generator=experiment_config.objective_function,
-                    tuner_config=tuner,
-                    n_trials=experiment_config.n_trials,
-                    timeout=experiment_config.timeout,
+                consistent_warm_starts = generate_hyperparameter_combinations(
                     params=experiment_config.search_space,
-                    # Grab the warm start configurations for this repetition (shared by all tuners):
-                    warm_start_configs=warm_start_configs_per_repetition[repetition],
+                    n_combinations=n_ws,
                     random_state=base_random_state + repetition,
                 )
+                warm_start_configs = []
+                for combination in consistent_warm_starts:
+                    performance = experiment_config.objective_function.predict(combination)
+                    warm_start_configs.append((combination, performance))
+                warm_start_configs_per_repetition.append(warm_start_configs)
+            logger.info(
+                f"Generated {len(warm_start_configs_per_repetition[0])} warm start configurations."
+            )
 
-                historical_performance = add_runtime(
-                    experiment_log=historical_performance,
-                    tune_start=tune_start,
-                    performance_generator=experiment_config.objective_function,
-                )
+            for tuner in experiment_config.tuner_configurations:
+                logger.info(f"Loop Level | Tuner: {tuner}")
+                for repetition in range(n_repetitions):
+                    logger.info(f"Loop Level | Repetition: {repetition}")
+                    tune_start = datetime.now()
 
-                aliased_benchmark_identifier = (
-                    aliases.benchmark_aliases[experiment_config.benchmark_identifier]
-                    if experiment_config.benchmark_identifier
-                    in aliases.benchmark_aliases
-                    else experiment_config.benchmark_identifier
-                )
-                historical_performance[
-                    "benchmark_identifier"
-                ] = aliased_benchmark_identifier
-                historical_performance["dataset"] = dataset_name
-                historical_performance["tuner"] = tuner.tuner_identifier
-                historical_performance["repetition"] = repetition + 1
-                historical_performance[
-                    "searcher_tuning_framework"
-                ] = tuner.searcher_tuning_framework
-                
-                for key, value in search_space_metafeatures.items():
-                    historical_performance[key] = value
-                
-                for key, value in dataset_metafeatures.items():
-                    historical_performance[key] = value
-
-                if tuner.tuner.backend == "confopt":
-                    sampler_name = tuner.tuner.searcher.sampler.__class__.__name__
-
-                    if hasattr(tuner.tuner.searcher.sampler, "interval_width"):
-                        confidence_level = str(
-                            tuner.tuner.searcher.sampler.interval_width
-                        )
-                    else:
-                        confidence_level = ""
-
-                    estimator_architecture = (
-                        tuner.tuner.searcher.quantile_estimator_architecture
+                    historical_performance = tune(
+                        performance_generator=experiment_config.objective_function,
+                        tuner_config=tuner,
+                        n_trials=experiment_config.n_trials,
+                        timeout=experiment_config.timeout,
+                        params=experiment_config.search_space,
+                        # Grab the warm start configurations for this repetition (shared by all tuners):
+                        warm_start_configs=warm_start_configs_per_repetition[repetition],
+                        random_state=base_random_state + repetition,
                     )
 
-                    if hasattr(tuner.tuner.searcher, "n_pre_conformal_trials"):
-                        n_pre_conformal_trials = (
-                            tuner.tuner.searcher.n_pre_conformal_trials
-                        )
-                    else:
-                        n_pre_conformal_trials = ""
+                    historical_performance = add_runtime(
+                        experiment_log=historical_performance,
+                        tune_start=tune_start,
+                        performance_generator=experiment_config.objective_function,
+                    )
 
-                    if hasattr(tuner.tuner.searcher.sampler, "n_quantiles"):
-                        sampler_n_quantiles = tuner.tuner.searcher.sampler.n_quantiles
-                    else:
-                        sampler_n_quantiles = ""
+                    aliased_benchmark_identifier = (
+                        aliases.benchmark_aliases[experiment_config.benchmark_identifier]
+                        if experiment_config.benchmark_identifier
+                        in aliases.benchmark_aliases
+                        else experiment_config.benchmark_identifier
+                    )
+                    historical_performance[
+                        "benchmark_identifier"
+                    ] = aliased_benchmark_identifier
+                    historical_performance["dataset"] = dataset_name
+                    historical_performance["tuner"] = tuner.tuner_identifier
+                    historical_performance["repetition"] = repetition + 1
+                    historical_performance[
+                        "searcher_tuning_framework"
+                    ] = tuner.searcher_tuning_framework
+                    
+                    # Add the number of random warm starts used
+                    historical_performance["n_random_warm_starts"] = n_ws
+                    
+                    for key, value in search_space_metafeatures.items():
+                        historical_performance[key] = value
+                    
+                    for key, value in dataset_metafeatures.items():
+                        historical_performance[key] = value
 
-                    if hasattr(tuner.tuner.searcher.sampler, "adapter"):
-                        if tuner.tuner.searcher.sampler.adapter is None:
-                            sampler_adapter = "None"
+                    if tuner.tuner.backend == "confopt":
+                        sampler_name = tuner.tuner.searcher.sampler.__class__.__name__
+
+                        if hasattr(tuner.tuner.searcher.sampler, "interval_width"):
+                            confidence_level = str(
+                                tuner.tuner.searcher.sampler.interval_width
+                            )
                         else:
-                            sampler_adapter = str(tuner.tuner.searcher.sampler.adapter)
-                    else:
-                        sampler_adapter = ""
+                            confidence_level = ""
 
-                    if tuner.searcher_tuning_framework is None:
-                        tuner_searcher_tuning_framework = "None"
-                    else:
-                        tuner_searcher_tuning_framework = str(
-                            tuner.searcher_tuning_framework
+                        estimator_architecture = (
+                            tuner.tuner.searcher.quantile_estimator_architecture
                         )
-                else:
-                    # NOTE: Use "" instead of None or NaN to avoid bad groupby behavior
-                    sampler_name = ""
-                    confidence_level = ""
-                    estimator_architecture = ""
-                    n_pre_conformal_trials = ""
-                    sampler_n_quantiles = ""
-                    sampler_adapter = ""
-                    tuner_searcher_tuning_framework = ""
 
-                aliased_estimator_architecture = (
-                    aliases.architecture_aliases[estimator_architecture]
-                    if estimator_architecture in aliases.architecture_aliases
-                    else estimator_architecture
-                )
-                aliased_sampler_name = (
-                    aliases.sampler_aliases[sampler_name]
-                    if sampler_name in aliases.sampler_aliases
-                    else sampler_name
-                )
-                if tuner.tuner.backend == "confopt":
-                    if sampler_name == "ThompsonSampler":
-                        if tuner.tuner.searcher.sampler.enable_optimistic_sampling:
-                            aliased_sampler_name = "OBS"
-                historical_performance[
-                    "estimator_architecture"
-                ] = aliased_estimator_architecture
-                historical_performance["confidence_level"] = confidence_level
-                historical_performance["sampler"] = aliased_sampler_name
-                historical_performance[
-                    "n_pre_conformal_trials"
-                ] = n_pre_conformal_trials
-                historical_performance["sampler_n_quantiles"] = sampler_n_quantiles
-                historical_performance["sampler_adapter"] = sampler_adapter
-                historical_performance[
-                    "tuner_searcher_tuning_framework"
-                ] = tuner_searcher_tuning_framework
+                        if hasattr(tuner.tuner.searcher, "n_pre_conformal_trials"):
+                            n_pre_conformal_trials = (
+                                tuner.tuner.searcher.n_pre_conformal_trials
+                            )
+                        else:
+                            n_pre_conformal_trials = ""
 
-                raw_benchmark_data = pd.concat(
-                    [raw_benchmark_data, historical_performance], axis=0
-                )
+                        if hasattr(tuner.tuner.searcher.sampler, "n_quantiles"):
+                            sampler_n_quantiles = tuner.tuner.searcher.sampler.n_quantiles
+                        else:
+                            sampler_n_quantiles = ""
 
-                data_path = os.path.join(cache_path, f"data/{run_start_str}")
-                if not os.path.exists(data_path):
-                    os.makedirs(data_path)
-                raw_benchmark_data.to_csv(
-                    os.path.join(data_path, "incremental_raw_benchmark_data.csv"),
-                    index=False,
-                )
+                        if hasattr(tuner.tuner.searcher.sampler, "adapter"):
+                            if tuner.tuner.searcher.sampler.adapter is None:
+                                sampler_adapter = "None"
+                            else:
+                                sampler_adapter = str(tuner.tuner.searcher.sampler.adapter)
+                        else:
+                            sampler_adapter = ""
+
+                        if tuner.searcher_tuning_framework is None:
+                            tuner_searcher_tuning_framework = "None"
+                        else:
+                            tuner_searcher_tuning_framework = str(
+                                tuner.searcher_tuning_framework
+                            )
+                    else:
+                        # NOTE: Use "" instead of None or NaN to avoid bad groupby behavior
+                        sampler_name = ""
+                        confidence_level = ""
+                        estimator_architecture = ""
+                        n_pre_conformal_trials = ""
+                        sampler_n_quantiles = ""
+                        sampler_adapter = ""
+                        tuner_searcher_tuning_framework = ""
+
+                    aliased_estimator_architecture = (
+                        aliases.architecture_aliases[estimator_architecture]
+                        if estimator_architecture in aliases.architecture_aliases
+                        else estimator_architecture
+                    )
+                    aliased_sampler_name = (
+                        aliases.sampler_aliases[sampler_name]
+                        if sampler_name in aliases.sampler_aliases
+                        else sampler_name
+                    )
+                    if tuner.tuner.backend == "confopt":
+                        if sampler_name == "ThompsonSampler":
+                            if tuner.tuner.searcher.sampler.enable_optimistic_sampling:
+                                aliased_sampler_name = "OBS"
+                    historical_performance[
+                        "estimator_architecture"
+                    ] = aliased_estimator_architecture
+                    historical_performance["confidence_level"] = confidence_level
+                    historical_performance["sampler"] = aliased_sampler_name
+                    historical_performance[
+                        "n_pre_conformal_trials"
+                    ] = n_pre_conformal_trials
+                    historical_performance["sampler_n_quantiles"] = sampler_n_quantiles
+                    historical_performance["sampler_adapter"] = sampler_adapter
+                    historical_performance[
+                        "tuner_searcher_tuning_framework"
+                    ] = tuner_searcher_tuning_framework
+
+                    raw_benchmark_data = pd.concat(
+                        [raw_benchmark_data, historical_performance], axis=0
+                    )
+
+                    data_path = os.path.join(cache_path, f"data/{run_start_str}")
+                    if not os.path.exists(data_path):
+                        os.makedirs(data_path)
+                    raw_benchmark_data.to_csv(
+                        os.path.join(data_path, "incremental_raw_benchmark_data.csv"),
+                        index=False,
+                    )
 
         # Free up memory after processing each experiment config:
         experiment_config.objective_function = None
@@ -464,7 +672,7 @@ def run_and_analyze_main_benchmark(
         ]
     ],
     tuning_configurations: list[TunerConfig],
-    n_warm_starts: int,
+    n_warm_starts: list[int],
     n_trials: int,
     timeout: Optional[float],
     base_random_state: int,
@@ -519,8 +727,8 @@ def run_and_analyze_main_benchmark(
         tuning_configurations: HPO algorithms and their parameter settings to compare.
             Should include both confopt-based methods and baseline algorithms for
             comprehensive evaluation.
-        n_warm_starts: Number of random initial configurations per tuner to ensure
-            fair comparison. Typically 10-20 for small search spaces, more for complex ones.
+        n_warm_starts: List of numbers of random initial configurations per tuner to ensure
+            fair comparison. Typically [10, 15, 20] to compare multiple warm start counts.
         n_trials: Total hyperparameter evaluations per tuner run. Should be sufficient
             to reach convergence - typically 100-500 depending on search space complexity.
         timeout: Per-evaluation time limit in seconds. Critical for expensive benchmarks
@@ -574,15 +782,5 @@ def run_and_analyze_main_benchmark(
         base_random_state=base_random_state,
         cache_path=cache_path,
         run_start_str=run_start_str,
-    )
-
-    analyze_main_benchmark(
-        raw_benchmark_data=raw_benchmark_data,
-        cache_path=cache_path,
-        run_start_str=run_start_str,
-        analysis_type=analysis_type,
-        analysis_components=analysis_components,
-        schema=schema,
-        starting_coverage_trial=starting_coverage_trial,
     )
 

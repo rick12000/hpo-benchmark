@@ -2,6 +2,44 @@ from pydantic import BaseModel
 from typing import Any, Dict, List
 
 
+class SearchSpaceMetafeaturesSchema(BaseModel):
+    """Schema for search space metafeature column names.
+    
+    These features describe the hyperparameter search space structure and dimensionality.
+    """
+    
+    n_integer_hyperparameters: str = "n_integer_hyperparameters"
+    n_float_hyperparameters: str = "n_float_hyperparameters"
+    n_categorical_hyperparameters: str = "n_categorical_hyperparameters"
+    ratio_continuous_hyperparameters: str = "ratio_continuous_hyperparameters"
+    ratio_categorical_hyperparameters: str = "ratio_categorical_hyperparameters"
+    avg_categorical_cardinality: str = "avg_categorical_cardinality"
+    min_categorical_cardinality: str = "min_categorical_cardinality"
+    max_categorical_cardinality: str = "max_categorical_cardinality"
+    total_search_space_combinations: str = "total_search_space_combinations"
+    
+    def to_list(self) -> List[str]:
+        """Get all search space metafeature column names as a list."""
+        return list(self.model_dump().values())
+
+
+class DatasetMetafeaturesSchema(BaseModel):
+    """Schema for dataset metafeature column names.
+    
+    These features describe the dataset characteristics (samples, features, classes, etc.).
+    By default, this is a placeholder - actual dataset metafeatures are extracted
+    from the objective function's get_metafeatures() method.
+    """
+    
+    n_samples: str = "n_samples"
+    n_features: str = "n_features"
+    n_classes: str = "n_classes"
+    
+    def to_list(self) -> List[str]:
+        """Get all dataset metafeature column names as a list."""
+        return list(self.model_dump().values())
+
+
 class BenchmarkDataSchema(BaseModel):
     """Schema defining column names for benchmark experiment data.
 
@@ -49,11 +87,21 @@ class BenchmarkDataSchema(BaseModel):
     tuning_iterations_col: str = "tuning_iterations"
     estimator_error_col: str = "mean_pinball_loss"
     breach_col: str = "breach_status"
+    n_random_warm_starts_col: str = "n_random_warm_starts"
 
     runtime_unit: str = "runtime"
     iter_unit: str = "iteration"
     norm_runtime_unit: str = f"normalized_{runtime_unit}"
     norm_iter_unit: str = f"normalized_{iter_unit}"
+    trial_col: str = "trial"
+    performance_col: str = "performance"
+    ranking_group_col: str = "ranking_group"
+    label_col: str = "label"
+    predicted_score_col: str = "predicted_score"
+    
+    # Nested schemas for specific use cases
+    search_space_metafeatures: SearchSpaceMetafeaturesSchema = SearchSpaceMetafeaturesSchema()
+    dataset_metafeatures: DatasetMetafeaturesSchema = DatasetMetafeaturesSchema()
 
     def to_list(self) -> List[str]:
         """Convert all schema field values to a list.

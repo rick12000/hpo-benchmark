@@ -23,6 +23,7 @@ from hpobench.generation.black_box_functions import (
 from hpobench.config.constants import SYNTHETIC_TABULAR_STORAGE_DIR
 from hpobench.generation.tabular.storage import DatasetStorage
 from hpobench.generation.tabular.metafeatures import calculate_metafeatures
+from hpobench.config.schema import DatasetMetafeaturesSchema
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.metrics import accuracy_score
 
@@ -625,6 +626,16 @@ class SyntheticTabularGenerator(ObjectiveMetricGenerator):
         X = self.dataset_features.values
         y = self.dataset_targets.values.ravel()
         
+        # Filter out rows with NaN or Inf values
+        valid_mask = ~(np.isnan(X).any(axis=1) | np.isinf(X).any(axis=1) | np.isnan(y) | np.isinf(y))
+        X = X[valid_mask]
+        y = y[valid_mask]
+        
+        # Ensure we have enough samples for train/test split
+        if len(X) < 4:
+            # Not enough valid samples - return worst case
+            return 0.0 if self.task_type == "classification" else float('inf')
+        
         X_train, X_val, y_train, y_val = train_test_split(
             X, y, train_size=self.train_size, random_state=self.random_state
         )
@@ -714,10 +725,12 @@ class SyntheticTabularGenerator(ObjectiveMetricGenerator):
         if self._metafeatures is not None:
             return self._metafeatures
         
+        schema = DatasetMetafeaturesSchema()
         self._metafeatures = calculate_metafeatures(
             features=self.dataset_features,
             targets=self.dataset_targets,
-            task_type=self.task_type
+            task_type=self.task_type,
+            schema=schema
         )
         
         return self._metafeatures

@@ -195,7 +195,7 @@ class ExperimentConfig(BaseModel):
         search_space: Dictionary mapping parameter names to their ranges.
         objective_function: Generator for objective function values.
         tuner_configurations: List of tuner configurations to compare.
-        n_warm_starts: Number of random trials before optimization begins.
+        n_warm_starts: List of random trial counts before optimization begins to evaluate.
         benchmark_identifier: Name of the benchmark suite.
         dataset_identifier: Specific dataset within the benchmark.
         metric: Optimization metric name (if applicable).
@@ -206,7 +206,7 @@ class ExperimentConfig(BaseModel):
     search_space: dict[str, Union[IntRange, FloatRange, CategoricalRange]]
     objective_function: ObjectiveMetricGenerator
     tuner_configurations: list[TunerConfig]
-    n_warm_starts: int
+    n_warm_starts: list[int]
     benchmark_identifier: str
     dataset_identifier: str
     metric: Optional[str] = None

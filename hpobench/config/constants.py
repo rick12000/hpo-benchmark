@@ -11,7 +11,7 @@ class ExperimentParameters(BaseModel):
         n_trials: Default number of optimization trials per experiment.
         n_coverage_trials: Number of trials for coverage analysis experiments.
         timeout: Maximum experiment duration in seconds.
-        n_warm_starts: Default number of random initialization trials.
+        n_warm_starts: List of random initialization trial counts to evaluate.
         default_max_n_instances: Maximum parallel instances for experiments.
         small_n_repetitions_per_tuner_config: Repetitions for small experiments.
         medium_n_repetitions_per_tuner_config: Repetitions for medium experiments.
@@ -21,8 +21,8 @@ class ExperimentParameters(BaseModel):
     n_trials: Optional[int] = 50
 
     timeout: Optional[int] = None
-    n_warm_starts: int = 15
-    default_max_n_instances: int = 3
+    n_warm_starts: List[int] = [15]
+    default_max_n_instances: int = 5
 
     medium_n_repetitions_per_tuner_config: int = 3
 

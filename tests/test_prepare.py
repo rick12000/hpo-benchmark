@@ -32,7 +32,7 @@ def test_setup_yahpo_instance_configs():
     configs = setup_yahpo_instance_configs(
         benchmark="lcbench",
         tuning_configurations=DEV_TUNING_CONFIGURATIONS,
-        n_warm_starts=5,
+        n_warm_starts=[5],
         n_trials=10,
         timeout=3600,
         max_n_instances=n_instances,
@@ -49,7 +49,7 @@ def test_setup_jahs201_configs():
     configs = setup_jahs201_configs(
         datasets=datasets,
         tuning_configurations=DEV_TUNING_CONFIGURATIONS,
-        n_warm_starts=5,
+        n_warm_starts=[5],
         n_trials=10,
         timeout=3600,
     )
@@ -67,7 +67,7 @@ def test_setup_blackbox_configs():
     configs = setup_blackbox_configs(
         functions=functions,
         tuning_configurations=DEV_TUNING_CONFIGURATIONS,
-        n_warm_starts=5,
+        n_warm_starts=[5],
         n_trials=10,
         timeout=3600,
     )
@@ -86,7 +86,7 @@ def test_setup_nas301_configs():
     configs = setup_nas301_configs(
         datasets=datasets,
         tuning_configurations=DEV_TUNING_CONFIGURATIONS,
-        n_warm_starts=5,
+        n_warm_starts=[5],
         n_trials=10,
         timeout=3600,
     )
@@ -115,7 +115,7 @@ def test_yahpo_instance_configs_use_maximum_fidelity():
         configs = setup_yahpo_instance_configs(
             benchmark=benchmark,
             tuning_configurations=DEV_TUNING_CONFIGURATIONS,
-            n_warm_starts=5,
+            n_warm_starts=[5],
             n_trials=10,
             timeout=3600,
             max_n_instances=1,  # Just test one instance

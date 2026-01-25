@@ -1,0 +1,7 @@
+---
+description:
+globs:
+alwaysApply: true
+---
+
+Do not return any summaries, instructions or meta commentary markdown files after you have completed your changes. Only make the requested changes.

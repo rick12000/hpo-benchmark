@@ -5,16 +5,12 @@ from hpobench.config.tuner_configurations import (
 )
 from hpobench.config.constants import ExperimentParameters, SYNTHETIC_TABULAR_STORAGE_DIR
 from hpobench.config.schema import BenchmarkDataSchema
-from hpobench.generation.tabular.orchestrator import generate_tabular_datasets
-from hpobench.generation.tabular.config import (
-    GenerationConfig,
-    DatasetMetaConfig,
-    PostProcessingConfig,
-)
+from hpobench.generation.tabular.generation_utils import generate_and_save_batch
 from hpobench.report.orchestrate import (
     load_experiment_configs,
     run_main_benchmark,
 )
+from hpobench.report.learning_to_rank import run_learning_to_rank_analysis
 from hpobench.utils import setup_environment
 
 BASE_RANDOM_STATE = 42
@@ -28,7 +24,7 @@ schema = BenchmarkDataSchema()
 
 
 def _generate_synthetic_tabular_datasets() -> None:
-    """Generate synthetic tabular datasets if they don't already exist."""
+    """Generate synthetic tabular datasets using OpenTab's SCM approach if they don't already exist."""
     storage_dir = Path(SYNTHETIC_TABULAR_STORAGE_DIR)
     
     datasets_exist = False
@@ -40,72 +36,20 @@ def _generate_synthetic_tabular_datasets() -> None:
         logger.warning(f"Storage directory {storage_dir} does not exist, will create it")
     
     if not datasets_exist:
-        logger.info("No datasets found, generating synthetic tabular datasets...")
-        from hpobench.generation.tabular.config import (
-            FeatureSelectionConfig,
-            TaskConfig,
-            TargetSelectionConfig,
-            SignalNoiseConfig,
-        )
+        logger.info("No datasets found, generating synthetic tabular datasets using SCM approach...")
         
-        custom_config = GenerationConfig(
-            meta_config=DatasetMetaConfig(
-                num_samples_min=500,
-                num_samples_max=5000,
-                num_features_min=10,
-                num_features_max=50,
-                num_latent_nodes_min=60,
-                num_latent_nodes_max=120,
-                graph_depth_min=3,
-                graph_depth_max=7,
-                graph_connectivity_min=0.15,
-                graph_connectivity_max=0.5,
-                difficulty_min=0.2,
-                difficulty_max=0.8,
-            ),
-            postprocessing_config=PostProcessingConfig(
-                apply_quantization=True,
-                quantization_probability=0.3,
-                apply_warping=True,
-                warping_probability=0.5,
-                apply_missingness=False,
-                missingness_probability=0.0,
-                apply_scaling=True,
-            ),
-            feature_selection_config=FeatureSelectionConfig(
-                strategy="causal",  # Use causal-aware feature selection
-                causal_only_probability=0.8,  # 80% causal features
-                include_confounders=True,
-                confounder_count_min=0,
-                confounder_count_max=2,
-            ),
-            task_config=TaskConfig(
-                task_strategy="random",  # Balanced mix of regression and classification
-                regression_probability=0.5,
-                classification_cardinality_min=2,
-                classification_cardinality_max=10,
-            ),
-            target_selection_config=TargetSelectionConfig(
-                select_from_leaf_nodes=True,  # Targets are leaf/near-leaf nodes
-                min_ancestors=2,  # Ensure target has causal parents
-                max_ancestors_ratio=0.5,
-            ),
-            signal_noise_config=SignalNoiseConfig(
-                target_snr_easy=5.0,
-                target_snr_medium=2.0,
-                target_snr_hard=0.5,
-                calibrate_per_path=True,  # Calibrate noise based on causal depth
-                min_mutual_information=0.01,  # Validation threshold - relaxed slightly to account for classification task variance
-            ),
-        )
-        
-        generate_tabular_datasets(
-            num_datasets=50,
+        # Generate both classification and regression datasets using OpenTab's SCM approach
+        generate_and_save_batch(
+            num_classification=25,
+            num_regression=25,
             storage_dir=str(storage_dir),
-            config=custom_config,
+            n_samples_range=(10, 512),
+            n_features_range=(1, 160),
+            n_classes_range=(2, 10),
             base_seed=42,
             start_id=1,
         )
+        logger.info("Successfully generated 50 synthetic datasets (25 classification, 25 regression)")
     else:
         logger.info("Datasets already exist, skipping generation")
 
@@ -156,6 +100,18 @@ def main():
         cache_path=CACHE_PATH,
         run_start_str=run_start_str,
     )
+    
+    logger.info("Running learning-to-rank analysis on benchmark results")
+    ltr_results = run_learning_to_rank_analysis(
+        raw_benchmark_data=raw_benchmark_data,
+        train_size=0.7,
+        val_size=0.15,
+        random_state=BASE_RANDOM_STATE,
+        k_values=[1, 3],
+    )
+    
+    logger.info("Learning-to-rank analysis completed successfully")
+    logger.info(f"Analysis results: {ltr_results}")
 
 
 if __name__ == "__main__":

@@ -1,7 +1,8 @@
 import numpy as np
 import pandas as pd
-from typing import Dict
+from typing import Dict, Optional
 import logging
+from hpobench.config.schema import DatasetMetafeaturesSchema
 
 logger = logging.getLogger(__name__)
 
@@ -9,7 +10,8 @@ logger = logging.getLogger(__name__)
 def calculate_metafeatures(
     features: pd.DataFrame,
     targets: pd.DataFrame,
-    task_type: str
+    task_type: str,
+    schema: Optional[DatasetMetafeaturesSchema] = None,
 ) -> Dict:
     """
     Calculate basic metafeatures for a dataset.
@@ -22,26 +24,30 @@ def calculate_metafeatures(
         features: Feature DataFrame
         targets: Target DataFrame
         task_type: "regression" or "classification"
+        schema: Optional DatasetMetafeaturesSchema for column naming
         
     Returns:
         Dictionary of basic metafeatures
     """
+    if schema is None:
+        schema = DatasetMetafeaturesSchema()
+    
     X = features.values
     y = targets.values.ravel()
     
-    n_observations = len(X)
+    n_samples = len(X)
     n_features = X.shape[1]
     
     metafeatures = {
-        "n_observations": n_observations,
-        "n_features": n_features,
+        schema.n_samples: n_samples,
+        schema.n_features: n_features,
         "task_type": task_type,
     }
     
     if task_type == "classification":
         unique_classes = np.unique(y)
         n_classes = len(unique_classes)
-        metafeatures["n_classes"] = n_classes
+        metafeatures[schema.n_classes] = n_classes
         
         if n_classes > 1:
             class_counts = np.bincount(y.astype(int))
@@ -50,7 +56,7 @@ def calculate_metafeatures(
         else:
             metafeatures["class_imbalance"] = 0.0
     else:
-        metafeatures["n_classes"] = 0
+        metafeatures[schema.n_classes] = 0
         metafeatures["class_imbalance"] = 0.0
         
         y_std = np.std(y)
