@@ -4,7 +4,6 @@ from pathlib import Path
 
 from ConfigSpace import Configuration
 
-from jahs_bench import Benchmark
 from abc import ABC, abstractmethod
 
 from yahpo_gym import BenchmarkSet
@@ -26,6 +25,10 @@ from hpobench.generation.tabular.metafeatures import calculate_metafeatures
 from hpobench.config.schema import DatasetMetafeaturesSchema
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.metrics import accuracy_score
+
+import threading
+import openml
+import pandas as pd
 
 import logging
 logger = logging.getLogger(__name__)
@@ -181,87 +184,6 @@ class BlackBoxGenerator(ObjectiveMetricGenerator):
             List of runtime values (all 0 for black-box functions).
         """
         return [0.0] * len(configurations)
-
-
-class Jahs201Generator(ObjectiveMetricGenerator):
-    """Objective metric generator for the JAHS-201 surrogate benchmark.
-
-    Args:
-        dataset: Name of the JAHS-201 dataset.
-        metrics: List of metric names to use.
-        lazy: If True, defer initialization of the generator until first use.
-    """
-
-    def __init__(
-        self,
-        dataset: str,
-        metrics: list[str] = ["valid-acc", "runtime"],
-        lazy: bool = True,
-    ):
-        self._dataset = dataset
-        self._metrics = metrics
-        self._lazy = lazy
-        self._initialized = False
-
-        self.default_fidelities = {
-            "epoch": 200,
-            "W": 16,
-            "N": 5,
-            "Resolution": 1,
-        }
-
-        if not self._lazy:
-            self._initialize_generator()
-        else:
-            self.generator = None
-
-    def _initialize_generator(self) -> None:
-        """Initialize the JAHS-201 generator if not already initialized."""
-        if not self._initialized:
-            self.generator = Benchmark(
-                task=self._dataset, lazy=False, metrics=self._metrics
-            )
-            self._initialized = True
-
-    def initialize(self) -> None:
-        """Initialize the generator if needed."""
-        self._initialize_generator()
-
-    def _merge_with_fidelities(
-        self, configuration: dict[str, Union[str, int, float, bool]]
-    ) -> dict[str, Union[str, int, float, bool]]:
-        """Merge configuration with default maximum fidelities."""
-        merged = configuration.copy()
-        merged.update(self.default_fidelities)
-        return merged
-
-    def _evaluate_jahs(
-        self, configuration: dict[str, Union[str, int, float, bool]]
-    ) -> dict:
-        """Helper method to evaluate configuration with JAHS-201 benchmark."""
-        self._initialize_generator()
-        merged_config = self._merge_with_fidelities(configuration)
-        return self.generator(merged_config)[self.default_fidelities["epoch"]]
-
-    def predict(self, configuration: dict[str, Union[str, int, float, bool]]) -> float:
-        """Return negative validation accuracy for the given configuration."""
-        result = self._evaluate_jahs(configuration)
-        return -result["valid-acc"]
-
-    def predict_batch(self, configurations: list[dict]) -> list[float]:
-        """Evaluate multiple configurations in batch."""
-        return [self.predict(config) for config in configurations]
-
-    def predict_runtime(
-        self, configuration: dict[str, Union[str, int, float, bool]]
-    ) -> float:
-        """Return runtime for the given configuration."""
-        result = self._evaluate_jahs(configuration)
-        return result["runtime"]
-
-    def predict_runtime_batch(self, configurations: list[dict]) -> list[float]:
-        """Evaluate runtime for multiple configurations in batch."""
-        return [self.predict_runtime(config) for config in configurations]
 
 
 class YahpoGenerator(ObjectiveMetricGenerator):
@@ -445,140 +367,67 @@ class YahpoGenerator(ObjectiveMetricGenerator):
         batch_results = self._batch_evaluate_configurations(configurations)
         return [self._extract_runtime_metric(result) for result in batch_results]
 
+    def get_metafeatures(self) -> dict[str, Union[int, float, str]] | None:
+        """Fetch and calculate metafeatures for the OpenML dataset.
 
-class NAS301Generator(YahpoGenerator):
-    """Specialized objective metric generator for NAS-301 benchmark.
-
-    Extends YahpoGenerator to handle NAS-301 specific parameter name mapping.
-
-    Args:
-        instance_value: Value of the instance for this experiment.
-        instance_name: Name of the instance parameter in the configuration space.
-        fidelity_space: Dictionary of fidelity parameter names and their values.
-        config_space: Configuration space object.
-    """
-
-    NB301_ATTRIBUTE_NAME_PREFIX = "NetworkSelectorDatasetInfo_COLON_darts_COLON_"
-
-    def __init__(
-        self,
-        instance_value: Any,
-        instance_name: str,
-        fidelity_space: Dict,
-        config_space,
-    ):
-        # Initialize with nb301 dataset
-        super().__init__(
-            dataset="nb301",
-            instance_value=instance_value,
-            instance_name=instance_name,
-            fidelity_space=fidelity_space,
-            config_space=config_space,
-        )
-
-        # Set default maximum fidelity for NAS-301 (like JAHS-201 generator)
-        # NAS-301 uses epoch as fidelity parameter with maximum value of 98
-        self.default_fidelities = {
-            "epoch": 97,  # Maximum fidelity for NAS-301
-        }
-
-        # Initialize parameter name mapping for NAS-301
-        self._shortened_keys = set()
-        self._initialize_nas301_specifics()
-
-    def _initialize_nas301_specifics(self):
-        """Initialize NAS-301 specific parameter name handling."""
-        # Create mapping from shortened keys to full YAHPO parameter names
-        len_prefix = len(self.NB301_ATTRIBUTE_NAME_PREFIX)
-
-        # Get all parameter names from the YAHPO config space
-        yahpo_config_space = self.generator.get_opt_space(drop_fidelity_params=True)
-
-        for param_name in yahpo_config_space.get_hyperparameter_names():
-            if param_name.startswith(self.NB301_ATTRIBUTE_NAME_PREFIX):
-                shortened_key = param_name[len_prefix:]
-                self._shortened_keys.add(shortened_key)
-
-    def _map_configuration_to_yahpo(self, configuration: dict) -> dict:
-        """Map shortened parameter names back to full YAHPO parameter names.
-
-        Args:
-            configuration: Dictionary with shortened parameter names.
+        Fetches the original dataset from OpenML using the instance value (task ID),
+        calculates metafeatures in the same format as SyntheticTabularGenerator,
+        and returns them as a dictionary.
 
         Returns:
-            Dictionary with full YAHPO parameter names.
+            Dictionary of metafeatures in the same format as calculate_metafeatures(),
+            or None if fetching or calculation fails/times out.
         """
-        mapped_config = {}
+        def _fetch_openml_dataset_internal():
+            """Internal function to fetch OpenML dataset and calculate metafeatures."""
+            openml.config.server = "https://www.openml.org/api/v1/xml"
 
-        for key, value in configuration.items():
-            if key in self._shortened_keys:
-                # Map shortened key back to full YAHPO parameter name
-                full_key = self.NB301_ATTRIBUTE_NAME_PREFIX + key
-                mapped_config[full_key] = value
-            else:
-                # Keep non-NAS parameters as-is
-                mapped_config[key] = value
+            task_id = int(self.generator.instance)
+            task = openml.tasks.get_task(task_id)
+            dataset_id = task.dataset_id
 
-        return mapped_config
+            dataset = openml.datasets.get_dataset(dataset_id)
+            X, y, _, _ = dataset.get_data(target=dataset.default_target_attribute)
 
-    def _merge_with_fidelities(
-        self, configuration: dict[str, Union[str, int, float, bool]]
-    ) -> dict[str, Union[str, int, float, bool]]:
-        """Merge configuration with default maximum fidelities.
+            task_type = "classification" if dataset.data_type == "supervised classification" else "regression"
 
-        Args:
-            configuration: Dictionary mapping parameter names to their values.
-
-        Returns:
-            Configuration merged with default maximum fidelity values.
-        """
-        merged = configuration.copy()
-        merged.update(self.default_fidelities)
-        return merged
-
-    def _get_filtered_configuration(self, configuration: dict) -> dict:
-        """Override to handle NAS-301 parameter name mapping.
-
-        Args:
-            configuration: Dictionary mapping parameter names to their values.
-
-        Returns:
-            Filtered configuration dictionary with full YAHPO parameter names.
-        """
-        # First merge with default maximum fidelities
-        merged_config = self._merge_with_fidelities(configuration)
-
-        # Then map the shortened parameter names to full YAHPO names
-        mapped_config = self._map_configuration_to_yahpo(merged_config)
-
-        # NOTE: NAS-301 doesn't use an instance parameter in the configuration space
-        # The instance is handled at the BenchmarkSet level, not as a hyperparameter
-
-        # Use ConfigSpace's built-in method to get active hyperparameters
-        try:
-            # Create a temporary config space with the full parameter names for validation
-            yahpo_config_space = self.generator.get_opt_space(
-                drop_fidelity_params=False
+            schema = DatasetMetafeaturesSchema()
+            metafeatures = calculate_metafeatures(
+                features=X,
+                targets=pd.DataFrame(y),
+                task_type=task_type,
+                schema=schema,
             )
 
-            cs_config = Configuration(
-                yahpo_config_space,
-                values=mapped_config,
-                allow_inactive_with_values=True,
+            return metafeatures
+
+        result = [None]
+        exception = [None]
+
+        def target():
+            try:
+                result[0] = _fetch_openml_dataset_internal()
+            except Exception as e:
+                exception[0] = e
+                logger.warning(
+                    f"Failed to fetch metafeatures for instance {self.generator.instance}: {str(e)}"
+                )
+
+        thread = threading.Thread(target=target)
+        thread.daemon = True
+        thread.start()
+        thread.join(timeout=120)
+
+        if thread.is_alive():
+            logger.warning(
+                f"Metafeature fetching timed out after 120 seconds for instance {self.generator.instance}"
             )
-            active_hyperparameters = yahpo_config_space.get_active_hyperparameters(
-                cs_config
-            )
+            return None
 
-            # Filter configuration to only include active parameters
-            filtered_configuration = {
-                k: v for k, v in mapped_config.items() if k in active_hyperparameters
-            }
+        if exception[0]:
+            return None
 
-        except Exception as e:
-            raise ValueError(f"ConfigSpace evaluation failed for NAS-301: {e}")
-
-        return filtered_configuration
+        return result[0]
 
 
 class SyntheticTabularGenerator(ObjectiveMetricGenerator):

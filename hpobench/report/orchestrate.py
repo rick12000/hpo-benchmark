@@ -25,8 +25,6 @@ from hpobench.utils import (
 )
 from hpobench.prepare import (
     setup_yahpo_instance_configs,
-    setup_jahs201_configs,
-    setup_nas301_configs,
     setup_synthetic_tabular_configs,
     _generate_randomized_search_spaces,
 )
@@ -45,10 +43,25 @@ os.environ["SYNETUNE_FOLDER"] = "cache/syne-tune"
 aliases = Aliases()
 
 
+def _get_nan_metafeatures() -> dict:
+    """Return a dictionary of dataset metafeatures filled with NaN values.
+    
+    Returns:
+        Dictionary with standard metafeature keys set to NaN.
+    """
+    return {
+        "n_samples": np.nan,
+        "n_features": np.nan,
+        "n_classes": np.nan,
+        "class_imbalance": np.nan,
+        "target_normalized_std": np.nan,
+        "task_type": np.nan,
+    }
+
+
 def load_experiment_configs(
     benchmarks: list[
         Literal[
-            "jahs201",
             "lcbench",
             "rbv2_aknn",
             "LCBench-L",
@@ -57,7 +70,6 @@ def load_experiment_configs(
             "rbv2_aknn-L",
             "rbv2_aknn-H",
             "rbv2_aknn-A",
-            "nas301",
             "synthetic_tabular",
         ]
     ],
@@ -72,13 +84,10 @@ def load_experiment_configs(
     """Load and configure benchmark instances for hyperparameter optimization experiments.
 
     This function sets up experiment configurations for different HPO benchmarks, handling
-    the specific initialization requirements for YAHPO (RBVS2 XGBoost, LCBench) and JAHS-Bench-201
-    datasets. For JAHS-Bench-201, it automatically selects datasets up to the specified limit,
-    prioritizing CIFAR-10, Fashion-MNIST, and colorectal histology datasets.
+    the specific initialization requirements for YAHPO (RBVS2 XGBoost, LCBench) benchmarks.
 
     Args:
-        benchmarks: List of benchmark names to initialize.         Supported benchmarks are:
-            - "jahs201": JAHS-Bench-201 neural architecture search benchmark
+        benchmarks: List of benchmark names to initialize. Supported benchmarks are:
             - "lcbench": Learning Curves Benchmark for machine learning algorithms
             - "rbv2_aknn": RBVS2 XGBoost benchmark from YAHPO suite
             - "LCBench-L": LCBench subset with largest datasets
@@ -87,6 +96,7 @@ def load_experiment_configs(
             - "rbv2_aknn-L": RBV2 XGBoost subset with largest datasets
             - "rbv2_aknn-H": RBV2 XGBoost subset with most heteroscedastic datasets
             - "rbv2_aknn-A": RBV2 XGBoost subset with most skewed datasets
+            - "synthetic_tabular": Synthetic tabular benchmark
         tuning_configurations: List of tuner configurations defining the HPO algorithms
             and their parameters to be evaluated on each benchmark instance.
         n_warm_starts: List of numbers of initial random hyperparameter configurations to generate
@@ -129,50 +139,6 @@ def load_experiment_configs(
                 max_n_instances=max_n_instances_per_benchmark,
             )
             experiment_configs.extend(configs)
-
-    if "jahs201" in benchmarks:
-        idx = benchmarks.index("jahs201")
-        all_datasets = ["cifar10", "fashion_mnist", "colorectal_histology"]
-        if (
-            datasets_per_benchmark is not None
-            and datasets_per_benchmark[idx] is not None
-        ):
-            selected_datasets = datasets_per_benchmark[idx]
-        elif max_n_instances_per_benchmark < len(all_datasets):
-            selected_datasets = all_datasets[:max_n_instances_per_benchmark]
-        else:
-            selected_datasets = all_datasets
-
-        configs = setup_jahs201_configs(
-            datasets=selected_datasets,
-            tuning_configurations=tuning_configurations,
-            n_warm_starts=n_warm_starts,
-            n_trials=n_trials,
-            timeout=timeout,
-        )
-        experiment_configs.extend(configs)
-
-    if "nas301" in benchmarks:
-        idx = benchmarks.index("nas301")
-        all_datasets = ["CIFAR10"]  # NAS-301 only has CIFAR10 dataset
-        if (
-            datasets_per_benchmark is not None
-            and datasets_per_benchmark[idx] is not None
-        ):
-            selected_datasets = datasets_per_benchmark[idx]
-        elif max_n_instances_per_benchmark < len(all_datasets):
-            selected_datasets = all_datasets[:max_n_instances_per_benchmark]
-        else:
-            selected_datasets = all_datasets
-
-        configs = setup_nas301_configs(
-            datasets=selected_datasets,
-            tuning_configurations=tuning_configurations,
-            n_warm_starts=n_warm_starts,
-            n_trials=n_trials,
-            timeout=timeout,
-        )
-        experiment_configs.extend(configs)
 
     if "synthetic_tabular" in benchmarks:
         idx = benchmarks.index("synthetic_tabular")
@@ -475,9 +441,14 @@ def run_main_benchmark(
         if hasattr(experiment_config.objective_function, "get_metafeatures"):
             try:
                 dataset_metafeatures = experiment_config.objective_function.get_metafeatures()
-                logger.info(f"Extracted dataset metafeatures: {dataset_metafeatures}")
+                if dataset_metafeatures is None:
+                    dataset_metafeatures = _get_nan_metafeatures()
+                    logger.warning("Dataset metafeatures returned None; filling with NaN values")
+                else:
+                    logger.info(f"Extracted dataset metafeatures: {dataset_metafeatures}")
             except Exception as e:
-                logger.warning(f"Failed to extract dataset metafeatures: {e}")
+                dataset_metafeatures = _get_nan_metafeatures()
+                logger.warning(f"Failed to extract dataset metafeatures: {e}; filling with NaN values")
 
         # Loop over each warm start count
         for ws_idx, n_ws in enumerate(experiment_config.n_warm_starts, 1):
@@ -660,7 +631,6 @@ def run_main_benchmark(
 def run_and_analyze_main_benchmark(
     benchmarks: list[
         Literal[
-            "jahs201",
             "lcbench",
             "rbv2_aknn",
             "LCBench-L",
@@ -715,7 +685,6 @@ def run_and_analyze_main_benchmark(
     Args:
         benchmarks: List of benchmark datasets to evaluate. Each benchmark provides
             different characteristics (search space dimensionality, evaluation cost, etc.):
-            - "jahs201": Neural architecture search with expensive evaluations
             - "lcbench": Classical ML algorithms with learning curve data
             - "rbv2_aknn": Gradient boosting hyperparameter optimization
             - "LCBench-L": LCBench subset with largest datasets
@@ -731,8 +700,8 @@ def run_and_analyze_main_benchmark(
             fair comparison. Typically [10, 15, 20] to compare multiple warm start counts.
         n_trials: Total hyperparameter evaluations per tuner run. Should be sufficient
             to reach convergence - typically 100-500 depending on search space complexity.
-        timeout: Per-evaluation time limit in seconds. Critical for expensive benchmarks
-            like JAHS-Bench-201 where individual evaluations can take minutes.
+        timeout: Per-evaluation time limit in seconds. Needed to prevent long-running evaluations
+            from blocking the pipeline.
         base_random_state: Seed for reproducible experiments. All randomness in the
             experimental pipeline derives from this seed to ensure exact reproducibility.
         cache_path: Directory for storing experimental data, plots, and analysis results.

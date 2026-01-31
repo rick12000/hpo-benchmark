@@ -73,9 +73,6 @@ def _get_synthetic_tabular_ids() -> list[str]:
 
 
 def main():
-    name = "synthetic_tabular"
-    logger.info(f"Starting {name} analysis")
-    
     logger.info("Generating synthetic tabular datasets...")
     _generate_synthetic_tabular_datasets()
     
@@ -83,7 +80,7 @@ def main():
     logger.info(f"Available synthetic tabular dataset IDs: {synthetic_tabular_ids}")
     
     experiment_configs = load_experiment_configs(
-        benchmarks=["synthetic_tabular"],
+        benchmarks=["lcbench", "synthetic_tabular"],
         tuning_configurations=LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS
         + EXTERNAL_TUNING_CONFIGURATIONS,
         n_warm_starts=experiment_params.n_warm_starts,

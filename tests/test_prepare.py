@@ -1,16 +1,12 @@
 from hpobench.prepare import (
     setup_yahpo_instance_configs,
-    setup_jahs201_configs,
     setup_blackbox_configs,
-    setup_nas301_configs,
 )
 from hpobench.config.config_types import (
     ExperimentConfig,
 )
 from hpobench.config.benchmark_data import (
-    JAHS201_SEARCH_SPACE,
     BLACK_BOX_SEARCH_SPACE,
-    NAS301_SEARCH_SPACE,
 )
 from hpobench.config.config_types import ConfOptModel
 from hpobench.config.tuner_configurations import cv_conformal_searcher, TunerConfig
@@ -43,24 +39,6 @@ def test_setup_yahpo_instance_configs():
     assert all(c.benchmark_identifier == "lcbench" for c in configs)
 
 
-def test_setup_jahs201_configs():
-    datasets = ["cifar10"]
-
-    configs = setup_jahs201_configs(
-        datasets=datasets,
-        tuning_configurations=DEV_TUNING_CONFIGURATIONS,
-        n_warm_starts=[5],
-        n_trials=10,
-        timeout=3600,
-    )
-
-    assert len(configs) == len(datasets)
-    assert all(isinstance(c, ExperimentConfig) for c in configs)
-    assert all(c.search_space == JAHS201_SEARCH_SPACE for c in configs)
-    assert all(c.benchmark_identifier == "JAHS-201" for c in configs)
-    assert [c.dataset_identifier for c in configs] == datasets
-
-
 def test_setup_blackbox_configs():
     functions = ["hartmann"]
 
@@ -77,31 +55,6 @@ def test_setup_blackbox_configs():
     assert all(c.search_space == BLACK_BOX_SEARCH_SPACE for c in configs)
     assert all(c.benchmark_identifier == "blackbox" for c in configs)
     assert [c.dataset_identifier for c in configs] == functions
-
-
-def test_setup_nas301_configs():
-    """Test NAS-301 configuration setup."""
-    datasets = ["CIFAR10"]
-
-    configs = setup_nas301_configs(
-        datasets=datasets,
-        tuning_configurations=DEV_TUNING_CONFIGURATIONS,
-        n_warm_starts=[5],
-        n_trials=10,
-        timeout=3600,
-    )
-
-    assert len(configs) == len(datasets)
-    assert all(isinstance(c, ExperimentConfig) for c in configs)
-    assert all(c.search_space == NAS301_SEARCH_SPACE for c in configs)
-    assert all(c.benchmark_identifier == "nas301" for c in configs)
-    assert [c.dataset_identifier for c in configs] == datasets
-
-    # Test that the generator is properly configured with maximum fidelity
-    generator = configs[0].objective_function
-    assert generator.dataset == "nb301"
-    assert hasattr(generator, "default_fidelities")
-    assert generator.default_fidelities["epoch"] == 97  # Maximum fidelity for NAS-301
 
 
 def test_yahpo_instance_configs_use_maximum_fidelity():

@@ -22,7 +22,7 @@ class ExperimentParameters(BaseModel):
 
     timeout: Optional[int] = None
     n_warm_starts: List[int] = [15]
-    default_max_n_instances: int = 5
+    default_max_n_instances: int = 10
 
     medium_n_repetitions_per_tuner_config: int = 3
 
@@ -51,7 +51,5 @@ class Aliases(BaseModel):
         "qens5": "QE",
     }
     benchmark_aliases: Dict[str, str] = {
-        "jahs201": "JAHS-201",
-        "nas301": "NAS-301",
         "synthetic_tabular": "Synthetic-Tabular",
     }

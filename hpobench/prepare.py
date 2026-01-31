@@ -5,10 +5,8 @@ import random
 import copy
 from hpobench.config.config_types import TunerConfig
 from hpobench.generation.generate import (
-    Jahs201Generator,
     BlackBoxGenerator,
     YahpoGenerator,
-    NAS301Generator,
     SyntheticTabularGenerator,
 )
 from hpobench.config.config_types import (
@@ -18,10 +16,8 @@ from hpobench.config.config_types import (
     CategoricalRange,
 )
 from hpobench.config.benchmark_data import (
-    JAHS201_SEARCH_SPACE,
     BLACK_BOX_SEARCH_SPACE,
     YAHPO_SUBSETS,
-    NAS301_SEARCH_SPACE,
     SYNTHETIC_TABULAR_SEARCH_SPACE_RF,
     SYNTHETIC_TABULAR_SEARCH_SPACE_GBT,
 )
@@ -206,44 +202,6 @@ def setup_yahpo_instance_configs(
                 benchmark_identifier=benchmark,
                 dataset_identifier=instance_value,
                 metric=primary_metric,
-            )
-        )
-
-    return experiment_configs
-
-
-def setup_jahs201_configs(
-    datasets: list[str],
-    tuning_configurations: list,
-    n_warm_starts: list[int],
-    n_trials: int,
-    timeout: int,
-) -> list[ExperimentConfig]:
-    """Create experiment configurations for the JAHS-201 benchmark datasets.
-
-    Args:
-        datasets: List of dataset names for JAHS-201.
-        tuning_configurations: List of tuner configurations to use for each dataset.
-        n_warm_starts: List of warm-start configuration counts for each experiment.
-        n_trials: Number of trials to run for each experiment.
-        timeout: Maximum runtime for each experiment.
-
-    Returns:
-        List of ExperimentConfig objects, one per dataset in JAHS-201.
-    """
-    experiment_configs = []
-    for dataset in datasets:
-        # NOTE: Use lazy=True to defer memory hungry generator initialization:
-        experiment_configs.append(
-            ExperimentConfig(
-                search_space=JAHS201_SEARCH_SPACE,
-                objective_function=Jahs201Generator(dataset=dataset, lazy=True),
-                tuner_configurations=tuning_configurations,
-                n_warm_starts=n_warm_starts,
-                n_trials=n_trials,
-                timeout=timeout,
-                benchmark_identifier="JAHS-201",
-                dataset_identifier=dataset,
             )
         )
 
@@ -492,61 +450,3 @@ def setup_synthetic_tabular_configs(
     return experiment_configs
 
 
-def setup_nas301_configs(
-    datasets: list[str],
-    tuning_configurations: list[TunerConfig],
-    n_warm_starts: list[int],
-    n_trials: int,
-    timeout: int,
-) -> list[ExperimentConfig]:
-    """Create experiment configurations for NAS-301 benchmark.
-
-    Args:
-        datasets: List of dataset names (typically ["CIFAR10"] for NAS-301).
-        tuning_configurations: List of tuner configurations to use for each dataset.
-        n_warm_starts: List of warm-start configuration counts for each experiment.
-        n_trials: Number of trials to run for each experiment.
-        timeout: Maximum runtime for each experiment.
-
-    Returns:
-        List of ExperimentConfig objects, one per dataset.
-    """
-    experiment_configs = []
-
-    # Ensure YAHPO is initialized before creating BenchmarkSet
-    _ensure_yahpo_initialized()
-
-    # Create ConfigSpace for NAS-301 with full parameter names
-    # This will be used for parameter validation and active hyperparameter detection
-    benchmark_set = BenchmarkSet("nb301", active_session=False, check=False)
-    full_config_space = benchmark_set.get_opt_space(drop_fidelity_params=True)
-    benchmark_set.get_fidelity_space()
-
-    # For NAS-301, we don't pass fidelity values since the generator
-    # automatically uses maximum fidelity (like JAHS-201 generator)
-    fidelity_dict = {}
-
-    # NAS-301 doesn't use instance parameters in the configuration space
-    # The instance is set at the BenchmarkSet level
-    instance_name = None  # Not used for NAS-301
-
-    for dataset in datasets:
-        experiment_configs.append(
-            ExperimentConfig(
-                search_space=NAS301_SEARCH_SPACE,
-                objective_function=NAS301Generator(
-                    instance_value=dataset,
-                    instance_name=instance_name,
-                    fidelity_space=fidelity_dict,
-                    config_space=full_config_space,
-                ),
-                tuner_configurations=tuning_configurations,
-                n_warm_starts=n_warm_starts,
-                n_trials=n_trials,
-                timeout=timeout,
-                benchmark_identifier="nas301",
-                dataset_identifier=dataset,
-            )
-        )
-
-    return experiment_configs
