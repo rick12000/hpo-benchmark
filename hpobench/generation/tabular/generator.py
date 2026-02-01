@@ -76,7 +76,6 @@ def sample_hyperparameters(
     n_classes_range: Tuple[int, int] = (2, 10),
     node_dim_range: Tuple[int, int] = (4, 16),
     is_regression: bool = False,
-    max_cells: int = 75000,
 ) -> SCMHyperparameters:
     """Sample high-level hyperparameters for dataset generation."""
     # Graph size: log-uniform distribution
@@ -101,10 +100,6 @@ def sample_hyperparameters(
     n_features_min, n_features_max = n_features_range
     n_features = int(beta_sample * (n_features_max - n_features_min) + n_features_min)
     n_features = max(n_features_min, min(n_features_max, n_features))
-    
-    # Cap table size at max_cells
-    if n_samples * n_features > max_cells:
-        n_samples = max(1, max_cells // n_features)
     
     n_classes = 0 if is_regression else random.randint(*n_classes_range)
     

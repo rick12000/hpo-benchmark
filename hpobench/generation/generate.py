@@ -1,5 +1,5 @@
 import numpy as np
-from typing import Union, Dict, Any, Literal
+from typing import Union, Dict, Any
 from pathlib import Path
 
 from ConfigSpace import Configuration
@@ -366,24 +366,21 @@ class YahpoGenerator(ObjectiveMetricGenerator):
 class SyntheticTabularGenerator(ObjectiveMetricGenerator):
     """Generator for synthetic surrogate data.
     
-    The SCM-generated synthetic data represents surrogate performance landscapes
-    (hyperparameter configurations and their performances). The features (X) represent
-    hyperparameter configurations, and the targets (y) represent performance values.
+    The SCM-generated synthetic data represents precomputed surrogate performance landscapes
+    (hyperparameter configurations and their performances), similar to YAHPO/lcbench.
+    The features (X) represent hyperparameter configurations, and the targets (y) represent 
+    performance values. No model type is needed since the data is already precomputed.
     """
     
     def __init__(
         self,
         generator: str,
         dataset: str,
-        model_type: Literal["random_forest", "gradient_boosted_trees"],
-        train_size: float = 0.8,
         random_state: int = 42,
     ):
         self.generator = generator
         self.dataset = dataset
         self.storage_dir = Path(SYNTHETIC_TABULAR_STORAGE_DIR)
-        self.model_type = model_type  # Kept for compatibility but not used
-        self.train_size = train_size  # Kept for compatibility but not used
         self.random_state = random_state
         
         # Surrogate data (X = configs, y = performances)

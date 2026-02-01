@@ -24,7 +24,7 @@ from hpobench.config.benchmark_data import (
 from hpobench.config.constants import SYNTHETIC_TABULAR_STORAGE_DIR
 from yahpo_gym import BenchmarkSet
 import ConfigSpace as CS
-from typing import Optional, Literal, Union
+from typing import Optional, Union
 
 logger = logging.getLogger(__name__)
 
@@ -400,10 +400,12 @@ def setup_synthetic_tabular_configs(
     n_warm_starts: list[int],
     n_trials: int,
     timeout: int,
-    model_type: Literal["random_forest", "gradient_boosted_trees"] = "random_forest",
     search_space: Optional[dict[str, Union[IntRange, FloatRange, CategoricalRange]]] = None,
 ) -> list[ExperimentConfig]:
     """Create experiment configurations for synthetic tabular benchmark.
+    
+    Synthetic data represents precomputed surrogate performance landscapes (like YAHPO/lcbench).
+    No model type is needed since the data is already computed.
     
     Args:
         datasets: List of dataset identifiers
@@ -411,8 +413,7 @@ def setup_synthetic_tabular_configs(
         n_warm_starts: List of warm start configuration counts
         n_trials: Number of optimization trials
         timeout: Timeout per evaluation
-        model_type: Type of model (random_forest or gradient_boosted_trees)
-        search_space: Hyperparameter search space. If None, uses default for model_type
+        search_space: Hyperparameter search space. If None, uses default.
         
     Returns:
         List of experiment configurations
@@ -420,12 +421,7 @@ def setup_synthetic_tabular_configs(
     experiment_configs = []
     
     if search_space is None:
-        if model_type == "random_forest":
-            search_space = SYNTHETIC_TABULAR_SEARCH_SPACE_RF
-        elif model_type == "gradient_boosted_trees":
-            search_space = SYNTHETIC_TABULAR_SEARCH_SPACE_GBT
-        else:
-            raise ValueError(f"Unknown model type: {model_type}")
+        search_space = SYNTHETIC_TABULAR_SEARCH_SPACE_RF
     
     for dataset in datasets:
         experiment_configs.append(
@@ -434,8 +430,6 @@ def setup_synthetic_tabular_configs(
                 objective_function=SyntheticTabularGenerator(
                     generator="synthetic_tabular",
                     dataset=dataset,
-                    model_type=model_type,
-                    train_size=0.8,
                     random_state=42,
                 ),
                 tuner_configurations=tuning_configurations,

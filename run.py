@@ -27,20 +27,22 @@ def _generate_synthetic_tabular_datasets() -> None:
     """Generate synthetic tabular datasets using OpenTab's SCM approach if they don't already exist."""
     storage_dir = Path(SYNTHETIC_TABULAR_STORAGE_DIR)
     
+    # Check if datasets exist
     datasets_exist = False
     if storage_dir.exists():
         dataset_dirs = [d for d in storage_dir.iterdir() if d.is_dir() and d.name.startswith("dataset_")]
         if len(dataset_dirs) > 0:
             datasets_exist = True
+            logger.info(f"Found {len(dataset_dirs)} existing synthetic datasets")
     else:
         logger.warning(f"Storage directory {storage_dir} does not exist, will create it")
     
     if not datasets_exist:
-        logger.info("No datasets found, generating synthetic tabular datasets using SCM approach...")
+        logger.info("No valid datasets found, generating synthetic tabular datasets using SCM approach...")
         
         # Generate regression datasets using OpenTab's SCM approach
         # Surrogate data represents continuous performance landscapes, so always regression
-        # Now using larger sample sizes (50,000 rows) to provide better coverage of the causal surface
+        # Using 50,000 rows per dataset to provide good coverage of the causal surface
         # Random warm starts will sample smaller subsets from this larger surrogate data
         generate_and_save_batch(
             num_classification=0,  # Never classification for surrogate data
@@ -52,7 +54,7 @@ def _generate_synthetic_tabular_datasets() -> None:
             base_seed=42,
             start_id=1,
         )
-        logger.info("Successfully generated 50 regression synthetic datasets (50,000 rows each)")
+        logger.info("Successfully generated 50 regression synthetic datasets")
     else:
         logger.info("Datasets already exist, skipping generation")
 

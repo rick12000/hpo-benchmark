@@ -35,6 +35,7 @@ from hpobench.config.benchmark_data import (
     SYNTHETIC_TABULAR_SEARCH_SPACE_RF,
     SYNTHETIC_TABULAR_SEARCH_SPACE_GBT,
 )
+from hpobench.generation.tabular.storage import DatasetStorage
 
 from hpobench.tune import tune
 
@@ -42,6 +43,77 @@ logger = logging.getLogger(__name__)
 os.environ["SYNETUNE_FOLDER"] = "cache/syne-tune"
 
 aliases = Aliases()
+
+
+def _infer_search_space_from_dataset(dataset_id: str) -> dict[str, IntRange | FloatRange | CategoricalRange]:
+    """Infer search space from a synthetic dataset by analyzing column types and ranges.
+    
+    For each feature column in the dataset:
+    - Integer columns: create IntRange(min, max)
+    - Float columns: create FloatRange(min, max)
+    - Categorical columns (binary or multi-category): create CategoricalRange(unique_values)
+    
+    Args:
+        dataset_id: The dataset ID (e.g., "1", "2", etc.)
+        
+    Returns:
+        Dictionary mapping column names to appropriate Range objects
+    """
+    try:
+        storage_dir = Path(SYNTHETIC_TABULAR_STORAGE_DIR)
+        storage = DatasetStorage(str(storage_dir))
+        dataset_id_int = int(dataset_id)
+        
+        features, _, _ = storage.load_dataset(dataset_id_int)
+        
+        search_space = {}
+        
+        for col in features.columns:
+            col_data = features[col]
+            
+            # Try to classify the column type
+            # First check if it looks like integer (all values are whole numbers or close to it)
+            is_integer = False
+            try:
+                # Check if all non-null values are integers or very close to integers
+                non_null = col_data.dropna()
+                if len(non_null) > 0:
+                    int_check = np.allclose(non_null, non_null.astype(int), rtol=1e-9)
+                    if int_check:
+                        is_integer = True
+            except:
+                pass
+            
+            # Check if it's categorical (limited unique values)
+            unique_count = col_data.nunique()
+            is_categorical = unique_count <= 20  # Heuristic: if <= 20 unique values, treat as categorical
+            
+            if is_categorical and not is_integer:
+                # Categorical column
+                unique_values = sorted(col_data.dropna().unique().tolist())
+                search_space[col] = CategoricalRange(choices=unique_values)
+                logger.debug(f"  {col}: CategoricalRange with {len(unique_values)} choices")
+            
+            elif is_integer:
+                # Integer column
+                min_val = int(col_data.min())
+                max_val = int(col_data.max())
+                search_space[col] = IntRange(min=min_val, max=max_val)
+                logger.debug(f"  {col}: IntRange({min_val}, {max_val})")
+            
+            else:
+                # Float column
+                min_val = float(col_data.min())
+                max_val = float(col_data.max())
+                search_space[col] = FloatRange(min=min_val, max=max_val)
+                logger.debug(f"  {col}: FloatRange({min_val}, {max_val})")
+        
+        logger.info(f"Inferred search space for dataset {dataset_id}: {len(search_space)} parameters")
+        return search_space
+    
+    except Exception as e:
+        logger.error(f"Failed to infer search space for dataset {dataset_id}: {e}", exc_info=True)
+        raise
 
 
 def _get_nan_surrogate_metafeatures() -> dict:
@@ -184,57 +256,57 @@ def load_experiment_configs(
                 "(no confopt tuners detected)"
             )
         
-        model_types = ["random_forest", "gradient_boosted_trees"]
-        logger.info(
-            f"Will generate {len(model_types)} models × {n_search_space_variations} search space variation(s)"
-        )
-        
         total_configs_before = len(experiment_configs)
         
-        for model_idx, model_type in enumerate(model_types, 1):
-            if model_type == "random_forest":
-                base_search_space = SYNTHETIC_TABULAR_SEARCH_SPACE_RF
+        # For each dataset, infer its search space from the data and create configs
+        for dataset_idx, dataset_id in enumerate(selected_datasets, 1):
+            logger.info(f"[Dataset {dataset_idx}/{len(selected_datasets)}] Processing dataset {dataset_id}")
+            
+            # Infer search space from the dataset itself
+            base_search_space = _infer_search_space_from_dataset(dataset_id)
+            logger.info(
+                f"[Dataset {dataset_idx}] Inferred search space with {len(base_search_space)} parameters"
+            )
+            
+            # Generate search space variations if needed
+            if n_search_space_variations > 1:
+                search_space_variations = _generate_randomized_search_spaces(
+                    base_search_space=base_search_space,
+                    n_variations=n_search_space_variations,
+                    random_state=42 + int(dataset_id),  # Different seed per dataset
+                )
+                logger.info(
+                    f"[Dataset {dataset_idx}] Generated {len(search_space_variations)} search space variation(s)"
+                )
             else:
-                base_search_space = SYNTHETIC_TABULAR_SEARCH_SPACE_GBT
+                search_space_variations = [base_search_space]
             
-            logger.info(
-                f"[Model {model_idx}/{len(model_types)}] Processing {model_type} with {len(base_search_space)} base hyperparameters"
-            )
-            
-            search_space_variations = _generate_randomized_search_spaces(
-                base_search_space=base_search_space,
-                n_variations=n_search_space_variations,
-                random_state=42,
-            )
-            logger.info(
-                f"[Model {model_idx}/{len(model_types)}] Generated {len(search_space_variations)} search space variation(s) for {model_type}"
-            )
-            
+            # Create configs for all variations of this dataset
             for var_idx, search_space in enumerate(search_space_variations, 1):
                 from hpobench.prepare import _calculate_search_space_size
                 space_size = _calculate_search_space_size(search_space)
-                logger.info(
-                    f"[Model {model_idx}, Variation {var_idx}] Search space: {len(search_space)} params, ~{space_size} combinations"
+                logger.debug(
+                    f"[Dataset {dataset_idx}, Variation {var_idx}] Search space: {len(search_space)} params, ~{space_size} combinations"
                 )
                 
                 configs = setup_synthetic_tabular_configs(
-                    datasets=selected_datasets,
+                    datasets=[dataset_id],
                     tuning_configurations=tuning_configurations,
                     n_warm_starts=n_warm_starts,
                     n_trials=n_trials,
                     timeout=timeout,
-                    model_type=model_type,
                     search_space=search_space,
                 )
                 experiment_configs.extend(configs)
-                logger.info(
-                    f"[Model {model_idx}, Variation {var_idx}] Created {len(configs)} configs for {len(selected_datasets)} datasets"
-                )
+            
+            logger.info(
+                f"[Dataset {dataset_idx}] Created {len(search_space_variations)} config(s) for dataset {dataset_id}"
+            )
         
         total_configs_added = len(experiment_configs) - total_configs_before
         logger.info(
             f"Synthetic tabular benchmark setup complete: added {total_configs_added} configurations "
-            f"({len(model_types)} models × {n_search_space_variations} variation(s) × {len(selected_datasets)} datasets)"
+            f"({n_search_space_variations} variation(s) × {len(selected_datasets)} datasets)"
         )
 
     return experiment_configs
