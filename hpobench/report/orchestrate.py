@@ -44,19 +44,27 @@ os.environ["SYNETUNE_FOLDER"] = "cache/syne-tune"
 aliases = Aliases()
 
 
-def _get_nan_metafeatures() -> dict:
-    """Return a dictionary of dataset metafeatures filled with NaN values.
+def _get_nan_surrogate_metafeatures() -> dict:
+    """Return a dictionary of surrogate metafeatures filled with NaN values.
     
     Returns:
-        Dictionary with standard metafeature keys set to NaN.
+        Dictionary with surrogate metafeature keys set to NaN.
     """
+    from hpobench.config.schema import SurrogateMetafeaturesSchema
+    schema = SurrogateMetafeaturesSchema()
     return {
-        "n_samples": np.nan,
-        "n_features": np.nan,
-        "n_classes": np.nan,
-        "class_imbalance": np.nan,
-        "target_normalized_std": np.nan,
-        "task_type": np.nan,
+        schema.n_surrogate_samples: np.nan,
+        schema.n_hyperparameters: np.nan,
+        schema.performance_mean: np.nan,
+        schema.performance_std: np.nan,
+        schema.performance_min: np.nan,
+        schema.performance_max: np.nan,
+        schema.performance_range: np.nan,
+        schema.performance_skewness: np.nan,
+        schema.performance_kurtosis: np.nan,
+        schema.best_performance: np.nan,
+        schema.avg_config_performance_correlation: np.nan,
+        schema.max_config_performance_correlation: np.nan,
     }
 
 
@@ -437,19 +445,6 @@ def run_main_benchmark(
             experiment_config.search_space
         )
         logger.info(f"Extracted search space metafeatures: {search_space_metafeatures}")
-        
-        dataset_metafeatures = {}
-        if hasattr(experiment_config.objective_function, "get_metafeatures"):
-            try:
-                dataset_metafeatures = experiment_config.objective_function.get_metafeatures()
-                if dataset_metafeatures is None:
-                    dataset_metafeatures = _get_nan_metafeatures()
-                    logger.warning("Dataset metafeatures returned None; filling with NaN values")
-                else:
-                    logger.info(f"Extracted dataset metafeatures: {dataset_metafeatures}")
-            except Exception as e:
-                dataset_metafeatures = _get_nan_metafeatures()
-                logger.warning(f"Failed to extract dataset metafeatures: {e}; filling with NaN values")
 
         # Loop over each warm start count
         for ws_idx, n_ws in enumerate(experiment_config.n_warm_starts, 1):
@@ -476,6 +471,22 @@ def run_main_benchmark(
             logger.info(
                 f"Generated {len(warm_start_configs_per_repetition[0])} warm start configurations."
             )
+            
+            # Calculate surrogate metafeatures from warm-start configs (first repetition)
+            # These metafeatures are the same for all tuners and repetitions with this n_ws
+            from hpobench.generation.tabular.metafeatures import calculate_surrogate_metafeatures
+            from hpobench.config.schema import SurrogateMetafeaturesSchema
+            
+            configs = [config for config, _ in warm_start_configs_per_repetition[0]]
+            performances = [perf for _, perf in warm_start_configs_per_repetition[0]]
+            
+            schema = SurrogateMetafeaturesSchema()
+            surrogate_metafeatures = calculate_surrogate_metafeatures(
+                configs=configs,
+                performances=performances,
+                schema=schema
+            )
+            logger.info(f"Calculated surrogate metafeatures from {len(configs)} warm-start configs: {surrogate_metafeatures}")
 
             for tuner in experiment_config.tuner_configurations:
                 logger.info(f"Loop Level | Tuner: {tuner}")
@@ -483,10 +494,13 @@ def run_main_benchmark(
                     logger.info(f"Loop Level | Repetition: {repetition}")
                     tune_start = datetime.now()
 
+                    # Run for exactly 1 trial after warm-start (n_trials = n_ws + 1)
+                    n_trials_for_tuner = n_ws + 1
+                    
                     historical_performance = tune(
                         performance_generator=experiment_config.objective_function,
                         tuner_config=tuner,
-                        n_trials=experiment_config.n_trials,
+                        n_trials=n_trials_for_tuner,
                         timeout=experiment_config.timeout,
                         params=experiment_config.search_space,
                         # Grab the warm start configurations for this repetition (shared by all tuners):
@@ -522,7 +536,7 @@ def run_main_benchmark(
                     for key, value in search_space_metafeatures.items():
                         historical_performance[key] = value
                     
-                    for key, value in dataset_metafeatures.items():
+                    for key, value in surrogate_metafeatures.items():
                         historical_performance[key] = value
 
                     if tuner.tuner.backend == "confopt":
@@ -819,17 +833,21 @@ def run_learning_to_rank_analysis(
     
     naive_ranker = train_naive_ranker(train_data, schema)
     
+    # Include n_random_warm_starts and surrogate metafeatures instead of iteration and dataset metafeatures
     cols_to_include = (
-        [schema.data_col, schema.iter_unit, schema.tuner_col, 
+        [schema.data_col, schema.n_random_warm_starts_col, schema.tuner_col, 
          schema.performance_col, schema.ranking_group_col, schema.label_col] +
         schema.search_space_metafeatures.to_list() +
-        schema.dataset_metafeatures.to_list() +
-        [schema.iter_unit]
+        schema.surrogate_metafeatures.to_list() +
+        [schema.n_random_warm_starts_col]
     )
     
+    # Filter to only include columns that exist in the data
     feature_cols = [
         col for col in ranking_data.columns 
-        if col in cols_to_include
+        if col in cols_to_include and col not in [schema.data_col, schema.tuner_col, 
+                                                    schema.performance_col, schema.ranking_group_col, 
+                                                    schema.label_col]
     ]
     
     logger.info(f"Using {len(feature_cols)} features for LTR model")

@@ -4,6 +4,9 @@ OpenTab-based SCM synthetic data generator for tabular benchmarking.
 This module implements the Structural Causal Model (SCM) based synthetic data generation
 approach from the TabPFN paper, adapted from OpenTab's implementation.
 
+The generated synthetic data represents surrogate performance landscapes (hyperparameter
+configurations and their associated performances) for HPO benchmarking.
+
 Key Features:
 - Graph structure sampling via preferential attachment
 - Computational edge mappings (neural networks, decision trees, categorical discretization)

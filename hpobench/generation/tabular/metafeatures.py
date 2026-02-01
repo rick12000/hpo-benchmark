@@ -1,70 +1,148 @@
 import numpy as np
 import pandas as pd
-from typing import Dict, Optional
+from typing import Dict, Optional, List, Union
 import logging
-from hpobench.config.schema import DatasetMetafeaturesSchema
+from scipy import stats
+from hpobench.config.schema import SurrogateMetafeaturesSchema
 
 logger = logging.getLogger(__name__)
 
 
-def calculate_metafeatures(
-    features: pd.DataFrame,
-    targets: pd.DataFrame,
-    task_type: str,
-    schema: Optional[DatasetMetafeaturesSchema] = None,
+def calculate_surrogate_metafeatures(
+    configs: List[Dict[str, Union[int, float, str]]],
+    performances: List[float],
+    schema: Optional[SurrogateMetafeaturesSchema] = None,
 ) -> Dict:
     """
-    Calculate basic metafeatures for a dataset.
+    Calculate metafeatures for surrogate data (hyperparameter configs + performances).
     
-    This is a minimal implementation for analysis purposes only.
-    Complex metafeatures (heteroscedasticity, GP-based, etc.) have been removed
-    as they are not needed for dataset generation.
+    Treats the surrogate data as a tabular dataset where:
+    - Rows = hyperparameter configurations
+    - Columns = hyperparameter values + performance
     
     Args:
-        features: Feature DataFrame
-        targets: Target DataFrame
-        task_type: "regression" or "classification"
-        schema: Optional DatasetMetafeaturesSchema for column naming
+        configs: List of hyperparameter configuration dictionaries
+        performances: List of performance values corresponding to each config
+        schema: Optional SurrogateMetafeaturesSchema for column naming
         
     Returns:
-        Dictionary of basic metafeatures
+        Dictionary of surrogate metafeatures
     """
     if schema is None:
-        schema = DatasetMetafeaturesSchema()
+        schema = SurrogateMetafeaturesSchema()
     
-    X = features.values
-    y = targets.values.ravel()
+    if len(configs) == 0 or len(performances) == 0:
+        logger.warning("Empty surrogate data provided, returning NaN metafeatures")
+        return _get_nan_surrogate_metafeatures(schema)
     
-    n_samples = len(X)
-    n_features = X.shape[1]
+    if len(configs) != len(performances):
+        raise ValueError(
+            f"Mismatch between configs ({len(configs)}) and performances ({len(performances)})"
+        )
+    
+    # Convert to numpy arrays for easier computation
+    performances_arr = np.array(performances)
+    
+    # Size metafeatures
+    n_surrogate_samples = len(configs)
+    n_hyperparameters = len(configs[0]) if configs else 0
+    
+    # Performance statistics
+    performance_mean = float(np.mean(performances_arr))
+    performance_std = float(np.std(performances_arr))
+    performance_min = float(np.min(performances_arr))
+    performance_max = float(np.max(performances_arr))
+    performance_range = performance_max - performance_min
+    
+    # Distribution shape
+    try:
+        performance_skewness = float(stats.skew(performances_arr))
+        performance_kurtosis = float(stats.kurtosis(performances_arr))
+    except Exception as e:
+        logger.warning(f"Failed to calculate skewness/kurtosis: {e}")
+        performance_skewness = 0.0
+        performance_kurtosis = 0.0
+    
+    # Best performance (minimum for minimization problems)
+    best_performance = performance_min
+    
+    # Calculate correlation between hyperparameters and performance
+    correlations = []
+    
+    # Convert configs to DataFrame for easier correlation calculation
+    try:
+        config_df = pd.DataFrame(configs)
+        
+        # Only calculate correlations for numeric columns
+        for col in config_df.columns:
+            try:
+                # Try to convert to numeric
+                numeric_col = pd.to_numeric(config_df[col], errors='coerce')
+                
+                # Skip if all NaN after conversion
+                if numeric_col.notna().sum() > 1:
+                    # Calculate correlation with performance
+                    corr = numeric_col.corr(pd.Series(performances_arr))
+                    if not np.isnan(corr):
+                        correlations.append(abs(corr))
+            except Exception:
+                # Skip non-numeric or problematic columns
+                continue
+        
+        if len(correlations) > 0:
+            avg_config_performance_correlation = float(np.mean(correlations))
+            max_config_performance_correlation = float(np.max(correlations))
+        else:
+            avg_config_performance_correlation = 0.0
+            max_config_performance_correlation = 0.0
+    except Exception as e:
+        logger.warning(f"Failed to calculate config-performance correlations: {e}")
+        avg_config_performance_correlation = 0.0
+        max_config_performance_correlation = 0.0
     
     metafeatures = {
-        schema.n_samples: n_samples,
-        schema.n_features: n_features,
-        "task_type": task_type,
+        schema.n_surrogate_samples: n_surrogate_samples,
+        schema.n_hyperparameters: n_hyperparameters,
+        schema.performance_mean: performance_mean,
+        schema.performance_std: performance_std,
+        schema.performance_min: performance_min,
+        schema.performance_max: performance_max,
+        schema.performance_range: performance_range,
+        schema.performance_skewness: performance_skewness,
+        schema.performance_kurtosis: performance_kurtosis,
+        schema.best_performance: best_performance,
+        schema.avg_config_performance_correlation: avg_config_performance_correlation,
+        schema.max_config_performance_correlation: max_config_performance_correlation,
     }
-    
-    if task_type == "classification":
-        unique_classes = np.unique(y)
-        n_classes = len(unique_classes)
-        metafeatures[schema.n_classes] = n_classes
-        
-        if n_classes > 1:
-            class_counts = np.bincount(y.astype(int))
-            class_imbalance = np.std(class_counts) / (np.mean(class_counts) + 1e-10)
-            metafeatures["class_imbalance"] = float(class_imbalance)
-        else:
-            metafeatures["class_imbalance"] = 0.0
-    else:
-        metafeatures[schema.n_classes] = 0
-        metafeatures["class_imbalance"] = 0.0
-        
-        y_std = np.std(y)
-        y_mean = np.mean(y)
-        metafeatures["target_normalized_std"] = float(y_std / (abs(y_mean) + 1e-10))
     
     return metafeatures
 
 
-# Backward compatibility alias
-calculate_basic_metafeatures = calculate_metafeatures
+def _get_nan_surrogate_metafeatures(
+    schema: Optional[SurrogateMetafeaturesSchema] = None,
+) -> Dict:
+    """Return a dictionary of surrogate metafeatures filled with NaN values.
+    
+    Args:
+        schema: Optional SurrogateMetafeaturesSchema for column naming
+        
+    Returns:
+        Dictionary with surrogate metafeature keys set to NaN.
+    """
+    if schema is None:
+        schema = SurrogateMetafeaturesSchema()
+    
+    return {
+        schema.n_surrogate_samples: np.nan,
+        schema.n_hyperparameters: np.nan,
+        schema.performance_mean: np.nan,
+        schema.performance_std: np.nan,
+        schema.performance_min: np.nan,
+        schema.performance_max: np.nan,
+        schema.performance_range: np.nan,
+        schema.performance_skewness: np.nan,
+        schema.performance_kurtosis: np.nan,
+        schema.best_performance: np.nan,
+        schema.avg_config_performance_correlation: np.nan,
+        schema.max_config_performance_correlation: np.nan,
+    }

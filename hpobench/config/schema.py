@@ -23,20 +23,41 @@ class SearchSpaceMetafeaturesSchema(BaseModel):
         return list(self.model_dump().values())
 
 
-class DatasetMetafeaturesSchema(BaseModel):
-    """Schema for dataset metafeature column names.
+class SurrogateMetafeaturesSchema(BaseModel):
+    """Schema for surrogate data metafeature column names.
     
-    These features describe the dataset characteristics (samples, features, classes, etc.).
-    By default, this is a placeholder - actual dataset metafeatures are extracted
-    from the objective function's get_metafeatures() method.
+    These features describe the characteristics of the surrogate data (hyperparameter
+    configurations and their associated performances), which directly represent the
+    optimization landscape that tuners operate on.
+    
+    Surrogate metafeatures capture:
+    - Size of the surrogate dataset (number of config-performance pairs)
+    - Performance landscape statistics (mean, std, range, distribution shape)
+    - Relationships between hyperparameters and performance
     """
     
-    n_samples: str = "n_samples"
-    n_features: str = "n_features"
-    n_classes: str = "n_classes"
+    # Size metafeatures
+    n_surrogate_samples: str = "n_surrogate_samples"
+    n_hyperparameters: str = "n_hyperparameters"
+    
+    # Performance statistics
+    performance_mean: str = "performance_mean"
+    performance_std: str = "performance_std"
+    performance_min: str = "performance_min"
+    performance_max: str = "performance_max"
+    performance_range: str = "performance_range"
+    performance_skewness: str = "performance_skewness"
+    performance_kurtosis: str = "performance_kurtosis"
+    
+    # Best performance (for reference)
+    best_performance: str = "best_performance"
+    
+    # Correlation between hyperparameters and performance
+    avg_config_performance_correlation: str = "avg_config_performance_correlation"
+    max_config_performance_correlation: str = "max_config_performance_correlation"
     
     def to_list(self) -> List[str]:
-        """Get all dataset metafeature column names as a list."""
+        """Get all surrogate metafeature column names as a list."""
         return list(self.model_dump().values())
 
 
@@ -100,7 +121,7 @@ class BenchmarkDataSchema(BaseModel):
     
     # Nested schemas for specific use cases
     search_space_metafeatures: SearchSpaceMetafeaturesSchema = SearchSpaceMetafeaturesSchema()
-    dataset_metafeatures: DatasetMetafeaturesSchema = DatasetMetafeaturesSchema()
+    surrogate_metafeatures: SurrogateMetafeaturesSchema = SurrogateMetafeaturesSchema()
 
     def to_list(self) -> List[str]:
         """Convert all schema field values to a list.

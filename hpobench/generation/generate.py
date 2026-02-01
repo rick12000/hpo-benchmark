@@ -7,9 +7,6 @@ from ConfigSpace import Configuration
 from abc import ABC, abstractmethod
 
 from yahpo_gym import BenchmarkSet
-from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
 
 from hpobench.generation.black_box_functions import (
     rastrigin,
@@ -21,14 +18,6 @@ from hpobench.generation.black_box_functions import (
 )
 from hpobench.config.constants import SYNTHETIC_TABULAR_STORAGE_DIR
 from hpobench.generation.tabular.storage import DatasetStorage
-from hpobench.generation.tabular.metafeatures import calculate_metafeatures
-from hpobench.config.schema import DatasetMetafeaturesSchema
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
-from sklearn.metrics import accuracy_score
-
-import threading
-import openml
-import pandas as pd
 
 import logging
 logger = logging.getLogger(__name__)
@@ -191,6 +180,8 @@ class YahpoGenerator(ObjectiveMetricGenerator):
 
     Handles instance-specific and fidelity-aware configuration evaluation.
     Automatically uses maximum fidelity values for all fidelity parameters.
+    
+    Tracks all queries to build surrogate data for metafeature calculation.
 
     Args:
         dataset: Name of the YAHPO benchmark scenario.
@@ -275,7 +266,8 @@ class YahpoGenerator(ObjectiveMetricGenerator):
             Negative primary metric.
         """
         batch_results = self._batch_evaluate_configurations([configuration])
-        return self._extract_performance_metric(batch_results[0])
+        performance = self._extract_performance_metric(batch_results[0])
+        return performance
 
     def _batch_evaluate_configurations(self, configurations: list[dict]) -> list[dict]:
         """Helper method to filter and evaluate multiple configurations in batch.
@@ -331,6 +323,8 @@ class YahpoGenerator(ObjectiveMetricGenerator):
 
     def predict_batch(self, configurations: list[dict]) -> list[float]:
         """Evaluate multiple configurations in batch for improved performance.
+        
+        Also tracks queries in history for surrogate metafeature calculation.
 
         Args:
             configurations: List of configuration dictionaries to evaluate.
@@ -339,7 +333,8 @@ class YahpoGenerator(ObjectiveMetricGenerator):
             List of performance values (negated for minimization).
         """
         batch_results = self._batch_evaluate_configurations(configurations)
-        return [self._extract_performance_metric(result) for result in batch_results]
+        performances = [self._extract_performance_metric(result) for result in batch_results]
+        return performances
 
     def predict_runtime(
         self, configuration: dict[str, Union[str, int, float, bool]]
@@ -367,70 +362,15 @@ class YahpoGenerator(ObjectiveMetricGenerator):
         batch_results = self._batch_evaluate_configurations(configurations)
         return [self._extract_runtime_metric(result) for result in batch_results]
 
-    def get_metafeatures(self) -> dict[str, Union[int, float, str]] | None:
-        """Fetch and calculate metafeatures for the OpenML dataset.
-
-        Fetches the original dataset from OpenML using the instance value (task ID),
-        calculates metafeatures in the same format as SyntheticTabularGenerator,
-        and returns them as a dictionary.
-
-        Returns:
-            Dictionary of metafeatures in the same format as calculate_metafeatures(),
-            or None if fetching or calculation fails/times out.
-        """
-        def _fetch_openml_dataset_internal():
-            """Internal function to fetch OpenML dataset and calculate metafeatures."""
-            openml.config.server = "https://www.openml.org/api/v1/xml"
-
-            task_id = int(self.generator.instance)
-            task = openml.tasks.get_task(task_id)
-            dataset_id = task.dataset_id
-
-            dataset = openml.datasets.get_dataset(dataset_id)
-            X, y, _, _ = dataset.get_data(target=dataset.default_target_attribute)
-
-            task_type = "classification" if dataset.data_type == "supervised classification" else "regression"
-
-            schema = DatasetMetafeaturesSchema()
-            metafeatures = calculate_metafeatures(
-                features=X,
-                targets=pd.DataFrame(y),
-                task_type=task_type,
-                schema=schema,
-            )
-
-            return metafeatures
-
-        result = [None]
-        exception = [None]
-
-        def target():
-            try:
-                result[0] = _fetch_openml_dataset_internal()
-            except Exception as e:
-                exception[0] = e
-                logger.warning(
-                    f"Failed to fetch metafeatures for instance {self.generator.instance}: {str(e)}"
-                )
-
-        thread = threading.Thread(target=target)
-        thread.daemon = True
-        thread.start()
-        thread.join(timeout=120)
-
-        if thread.is_alive():
-            logger.warning(
-                f"Metafeature fetching timed out after 120 seconds for instance {self.generator.instance}"
-            )
-            return None
-
-        if exception[0]:
-            return None
-
-        return result[0]
-
 
 class SyntheticTabularGenerator(ObjectiveMetricGenerator):
+    """Generator for synthetic surrogate data.
+    
+    The SCM-generated synthetic data represents surrogate performance landscapes
+    (hyperparameter configurations and their performances). The features (X) represent
+    hyperparameter configurations, and the targets (y) represent performance values.
+    """
+    
     def __init__(
         self,
         generator: str,
@@ -442,119 +382,92 @@ class SyntheticTabularGenerator(ObjectiveMetricGenerator):
         self.generator = generator
         self.dataset = dataset
         self.storage_dir = Path(SYNTHETIC_TABULAR_STORAGE_DIR)
-        self.model_type = model_type
-        self.train_size = train_size
+        self.model_type = model_type  # Kept for compatibility but not used
+        self.train_size = train_size  # Kept for compatibility but not used
         self.random_state = random_state
         
-        self.dataset_features = None
-        self.dataset_targets = None
+        # Surrogate data (X = configs, y = performances)
+        self.surrogate_features = None  # Hyperparameter configurations
+        self.surrogate_targets = None  # Performance values
         self.dataset_metadata = None
-        self.task_type = None
         self._initialized = False
-        self._metafeatures = None
     
     def initialize(self) -> None:
+        """Load SCM-generated surrogate data.
+        
+        The SCM generator creates synthetic data where:
+        - Features (X) = hyperparameter configurations
+        - Targets (y) = performance values
+        """
         if self._initialized:
             return
 
         try:
             storage = DatasetStorage(str(self.storage_dir))
             dataset_id = int(self.dataset)
-            self.dataset_features, self.dataset_targets, self.dataset_metadata = storage.load_dataset(dataset_id)
+            
+            # Load dataset using existing method
+            # X represents hyperparameter configs, y represents performances
+            self.surrogate_features, self.surrogate_targets, self.dataset_metadata = (
+                storage.load_dataset(dataset_id)
+            )
+            logger.info(
+                f"Loaded surrogate dataset {dataset_id} with "
+                f"{len(self.surrogate_features)} configurations"
+            )
         except Exception as e:
             logger.error(f"Failed to load dataset {self.dataset}: {e}", exc_info=True)
             raise
 
-        self.task_type = self.dataset_metadata.get("task_type", "regression")
-
         self._initialized = True
     
     def predict(self, configuration: dict[str, Union[str, int, float, bool]]) -> float:
+        """Predict performance by looking up in surrogate data.
+        
+        The surrogate data (X, y) represents (configs, performances).
+        We find the nearest configuration and return its performance.
+        """
         self.initialize()
         
-        X = self.dataset_features.values
-        y = self.dataset_targets.values.ravel()
+        # Convert configuration to feature vector
+        config_vec = self._config_to_vector(configuration)
         
-        # Filter out rows with NaN or Inf values
-        valid_mask = ~(np.isnan(X).any(axis=1) | np.isinf(X).any(axis=1) | np.isnan(y) | np.isinf(y))
-        X = X[valid_mask]
-        y = y[valid_mask]
+        # Find nearest neighbor in surrogate data
+        X = self.surrogate_features.values
+        y = self.surrogate_targets.values.ravel()
         
-        # Ensure we have enough samples for train/test split
-        if len(X) < 4:
-            # Not enough valid samples - return worst case
-            return 0.0 if self.task_type == "classification" else float('inf')
+        # Calculate distances
+        distances = np.linalg.norm(X - config_vec, axis=1)
+        nearest_idx = np.argmin(distances)
         
-        X_train, X_val, y_train, y_val = train_test_split(
-            X, y, train_size=self.train_size, random_state=self.random_state
-        )
+        return float(y[nearest_idx])
+    
+    def _config_to_vector(self, configuration: dict) -> np.ndarray:
+        """Convert configuration dict to feature vector matching surrogate data format."""
+        # Get feature names from surrogate data
+        feature_names = self.surrogate_features.columns.tolist()
         
-        if self.model_type in ["random_forest", "gradient_boosted_trees"]:
-            apply_normalization = False
-        else:
-            apply_normalization = True
-        
-        if apply_normalization:
-            scaler = StandardScaler()
-            X_train = scaler.fit_transform(X_train)
-            X_val = scaler.transform(X_val)
-        
-        if self.task_type == "classification":
-            y_train = y_train.astype(int)
-            y_val = y_val.astype(int)
-            
-            if self.model_type == "random_forest":
-                model = RandomForestClassifier(
-                    n_estimators=configuration["n_estimators"],
-                    max_depth=configuration["max_depth"],
-                    min_samples_split=configuration["min_samples_split"],
-                    min_samples_leaf=configuration["min_samples_leaf"],
-                    random_state=self.random_state,
-                )
-            elif self.model_type == "gradient_boosted_trees":
-                model = GradientBoostingClassifier(
-                    n_estimators=configuration["n_estimators"],
-                    learning_rate=configuration["learning_rate"],
-                    max_depth=configuration["max_depth"],
-                    min_samples_split=configuration["min_samples_split"],
-                    min_samples_leaf=configuration["min_samples_leaf"],
-                    random_state=self.random_state,
-                )
+        # Create vector in same order as features
+        vec = []
+        for feature_name in feature_names:
+            if feature_name in configuration:
+                val = configuration[feature_name]
+                if isinstance(val, (int, float)):
+                    vec.append(float(val))
+                else:
+                    # For categorical, try to convert or use hash
+                    try:
+                        vec.append(float(val))
+                    except:
+                        vec.append(float(hash(str(val)) % 1000))
             else:
-                raise ValueError(f"Unknown model type: {self.model_type}")
-            
-            model.fit(X_train, y_train)
-            val_predictions = model.predict(X_val)
-            val_accuracy = accuracy_score(y_val, val_predictions)
-            return -val_accuracy
-        else:
-            if self.model_type == "random_forest":
-                model = RandomForestRegressor(
-                    n_estimators=configuration["n_estimators"],
-                    max_depth=configuration["max_depth"],
-                    min_samples_split=configuration["min_samples_split"],
-                    min_samples_leaf=configuration["min_samples_leaf"],
-                    random_state=self.random_state,
-                )
-            elif self.model_type == "gradient_boosted_trees":
-                model = GradientBoostingRegressor(
-                    n_estimators=configuration["n_estimators"],
-                    learning_rate=configuration["learning_rate"],
-                    max_depth=configuration["max_depth"],
-                    min_samples_split=configuration["min_samples_split"],
-                    min_samples_leaf=configuration["min_samples_leaf"],
-                    random_state=self.random_state,
-                )
-            else:
-                raise ValueError(f"Unknown model type: {self.model_type}")
-            
-            model.fit(X_train, y_train)
-            val_predictions = model.predict(X_val)
-            val_mse = np.mean((val_predictions - y_val) ** 2)
-            return val_mse
+                # Feature not in config, use 0
+                vec.append(0.0)
+        
+        return np.array(vec).reshape(1, -1)
     
     def predict_batch(self, configurations: list[dict]) -> list[float]:
-        # TODO: Implement proper batch logic to avoid re-training model for each configuration
+        """Batch prediction using surrogate data lookup."""
         results = []
         for config in configurations:
             results.append(self.predict(config))
@@ -567,19 +480,3 @@ class SyntheticTabularGenerator(ObjectiveMetricGenerator):
     
     def predict_runtime_batch(self, configurations: list[dict]) -> list[float]:
         return [0.0] * len(configurations)
-    
-    def get_metafeatures(self) -> dict[str, Union[int, float, str]]:
-        self.initialize()
-        
-        if self._metafeatures is not None:
-            return self._metafeatures
-        
-        schema = DatasetMetafeaturesSchema()
-        self._metafeatures = calculate_metafeatures(
-            features=self.dataset_features,
-            targets=self.dataset_targets,
-            task_type=self.task_type,
-            schema=schema
-        )
-        
-        return self._metafeatures
