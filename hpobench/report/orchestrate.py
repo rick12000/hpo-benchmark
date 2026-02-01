@@ -29,7 +29,7 @@ from hpobench.prepare import (
     setup_synthetic_tabular_configs,
     _generate_randomized_search_spaces,
 )
-from hpobench.config.schema import BenchmarkDataSchema, SearchSpaceMetafeaturesSchema
+from hpobench.config.schema import BenchmarkDataSchema
 from hpobench.config.constants import Aliases, SYNTHETIC_TABULAR_STORAGE_DIR
 from hpobench.config.benchmark_data import (
     SYNTHETIC_TABULAR_SEARCH_SPACE_RF,
@@ -279,88 +279,6 @@ def generate_configs_per_repetition(
 
 
 
-def extract_search_space_metafeatures(
-    search_space: dict,
-    schema: Optional[SearchSpaceMetafeaturesSchema] = None,
-) -> dict[str, float]:
-    """Extract metafeatures from search space configuration.
-    
-    Args:
-        search_space: Dictionary defining the hyperparameter search space
-        schema: Optional SearchSpaceMetafeaturesSchema for column naming
-        
-    Returns:
-        Dictionary with search space metafeatures using schema column names
-    """
-    if schema is None:
-        from hpobench.config.schema import SearchSpaceMetafeaturesSchema
-        schema = SearchSpaceMetafeaturesSchema()
-    
-    n_int = 0
-    n_float = 0
-    n_categorical = 0
-    categorical_cardinalities = []
-    total_combinations = 1
-    max_combinations = 10**15
-
-    for param_name, param_range in search_space.items():
-        if isinstance(param_range, IntRange):
-            n_int += 1
-            combinations = param_range.upper - param_range.lower + 1
-            if total_combinations <= max_combinations:
-                total_combinations *= combinations
-            else:
-                total_combinations = max_combinations
-
-        elif isinstance(param_range, FloatRange):
-            n_float += 1
-            combinations = 1000
-            if total_combinations <= max_combinations:
-                total_combinations *= combinations
-            else:
-                total_combinations = max_combinations
-
-        elif isinstance(param_range, CategoricalRange):
-            n_categorical += 1
-            cardinality = len(param_range.choices)
-            categorical_cardinalities.append(cardinality)
-            if total_combinations <= max_combinations:
-                total_combinations *= cardinality
-            else:
-                total_combinations = max_combinations
-
-    n_hyperparameters = n_int + n_float + n_categorical
-    categorical_ratio = (
-        n_categorical / n_hyperparameters if n_hyperparameters > 0 else 0.0
-    )
-    continuous_ratio = (
-        (n_int + n_float) / n_hyperparameters if n_hyperparameters > 0 else 0.0
-    )
-
-    if categorical_cardinalities:
-        avg_categorical_cardinality = float(np.mean(categorical_cardinalities))
-        min_categorical_cardinality = float(np.min(categorical_cardinalities))
-        max_categorical_cardinality = float(np.max(categorical_cardinalities))
-    else:
-        avg_categorical_cardinality = 0.0
-        min_categorical_cardinality = 0.0
-        max_categorical_cardinality = 0.0
-
-    total_combinations = min(total_combinations, max_combinations)
-
-    return {
-        schema.n_integer_hyperparameters: n_int,
-        schema.n_float_hyperparameters: n_float,
-        schema.n_categorical_hyperparameters: n_categorical,
-        schema.ratio_continuous_hyperparameters: continuous_ratio,
-        schema.ratio_categorical_hyperparameters: categorical_ratio,
-        schema.avg_categorical_cardinality: avg_categorical_cardinality,
-        schema.min_categorical_cardinality: min_categorical_cardinality,
-        schema.max_categorical_cardinality: max_categorical_cardinality,
-        schema.total_search_space_combinations: total_combinations,
-    }
-
-
 def run_main_benchmark(
     experiment_configs: list[ExperimentConfig],
     n_repetitions: int,
@@ -440,11 +358,6 @@ def run_main_benchmark(
 
         logger.info(f"Initializing objective function for: {dataset_name}...")
         experiment_config.objective_function.initialize()
-        
-        search_space_metafeatures = extract_search_space_metafeatures(
-            experiment_config.search_space
-        )
-        logger.info(f"Extracted search space metafeatures: {search_space_metafeatures}")
 
         # Loop over each warm start count
         for ws_idx, n_ws in enumerate(experiment_config.n_warm_starts, 1):
@@ -471,28 +384,31 @@ def run_main_benchmark(
             logger.info(
                 f"Generated {len(warm_start_configs_per_repetition[0])} warm start configurations."
             )
-            
-            # Calculate surrogate metafeatures from warm-start configs (first repetition)
-            # These metafeatures are the same for all tuners and repetitions with this n_ws
+
             from hpobench.generation.tabular.metafeatures import calculate_surrogate_metafeatures
             from hpobench.config.schema import SurrogateMetafeaturesSchema
-            
-            configs = [config for config, _ in warm_start_configs_per_repetition[0]]
-            performances = [perf for _, perf in warm_start_configs_per_repetition[0]]
-            
-            schema = SurrogateMetafeaturesSchema()
-            surrogate_metafeatures = calculate_surrogate_metafeatures(
-                configs=configs,
-                performances=performances,
-                schema=schema
-            )
-            logger.info(f"Calculated surrogate metafeatures from {len(configs)} warm-start configs: {surrogate_metafeatures}")
 
             for tuner in experiment_config.tuner_configurations:
                 logger.info(f"Loop Level | Tuner: {tuner}")
                 for repetition in range(n_repetitions):
                     logger.info(f"Loop Level | Repetition: {repetition}")
                     tune_start = datetime.now()
+
+                    # Calculate surrogate metafeatures for THIS REPETITION's warm-start configs
+                    # Each repetition has different random warm-starts, so metafeatures differ
+                    configs = [config for config, _ in warm_start_configs_per_repetition[repetition]]
+                    performances = [perf for _, perf in warm_start_configs_per_repetition[repetition]]
+                    
+                    schema = SurrogateMetafeaturesSchema()
+                    surrogate_metafeatures = calculate_surrogate_metafeatures(
+                        configs=configs,
+                        performances=performances,
+                        schema=schema
+                    )
+                    logger.info(
+                        f"Calculated surrogate metafeatures for repetition {repetition} "
+                        f"from {len(configs)} warm-start configs: {surrogate_metafeatures}"
+                    )
 
                     # Run for exactly 1 trial after warm-start (n_trials = n_ws + 1)
                     n_trials_for_tuner = n_ws + 1
@@ -513,6 +429,10 @@ def run_main_benchmark(
                         tune_start=tune_start,
                         performance_generator=experiment_config.objective_function,
                     )
+                    
+                    # Keep only the final tuned trial (last row), not the warm-start history
+                    # The tune() function returns all n_ws + 1 trials, but we only want the optimized one
+                    historical_performance = historical_performance.tail(1).copy()
 
                     aliased_benchmark_identifier = (
                         aliases.benchmark_aliases[experiment_config.benchmark_identifier]
@@ -533,9 +453,7 @@ def run_main_benchmark(
                     # Add the number of random warm starts used
                     historical_performance["n_random_warm_starts"] = n_ws
                     
-                    for key, value in search_space_metafeatures.items():
-                        historical_performance[key] = value
-                    
+                    # Add surrogate metafeatures
                     for key, value in surrogate_metafeatures.items():
                         historical_performance[key] = value
 
@@ -833,19 +751,18 @@ def run_learning_to_rank_analysis(
     
     naive_ranker = train_naive_ranker(train_data, schema)
     
-    # Include n_random_warm_starts and surrogate metafeatures instead of iteration and dataset metafeatures
+    # Include repetition, n_random_warm_starts and surrogate metafeatures
     cols_to_include = (
-        [schema.data_col, schema.n_random_warm_starts_col, schema.tuner_col, 
+        [schema.data_col, schema.rep_col, schema.n_random_warm_starts_col, schema.tuner_col, 
          schema.performance_col, schema.ranking_group_col, schema.label_col] +
-        schema.search_space_metafeatures.to_list() +
-        schema.surrogate_metafeatures.to_list() +
-        [schema.n_random_warm_starts_col]
+        schema.surrogate_metafeatures.to_list()
     )
     
     # Filter to only include columns that exist in the data
+    # Exclude grouping/target columns, keep only features
     feature_cols = [
         col for col in ranking_data.columns 
-        if col in cols_to_include and col not in [schema.data_col, schema.tuner_col, 
+        if col in cols_to_include and col not in [schema.data_col, schema.rep_col, schema.tuner_col, 
                                                     schema.performance_col, schema.ranking_group_col, 
                                                     schema.label_col]
     ]

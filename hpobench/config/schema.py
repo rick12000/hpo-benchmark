@@ -2,27 +2,6 @@ from pydantic import BaseModel
 from typing import Any, Dict, List
 
 
-class SearchSpaceMetafeaturesSchema(BaseModel):
-    """Schema for search space metafeature column names.
-    
-    These features describe the hyperparameter search space structure and dimensionality.
-    """
-    
-    n_integer_hyperparameters: str = "n_integer_hyperparameters"
-    n_float_hyperparameters: str = "n_float_hyperparameters"
-    n_categorical_hyperparameters: str = "n_categorical_hyperparameters"
-    ratio_continuous_hyperparameters: str = "ratio_continuous_hyperparameters"
-    ratio_categorical_hyperparameters: str = "ratio_categorical_hyperparameters"
-    avg_categorical_cardinality: str = "avg_categorical_cardinality"
-    min_categorical_cardinality: str = "min_categorical_cardinality"
-    max_categorical_cardinality: str = "max_categorical_cardinality"
-    total_search_space_combinations: str = "total_search_space_combinations"
-    
-    def to_list(self) -> List[str]:
-        """Get all search space metafeature column names as a list."""
-        return list(self.model_dump().values())
-
-
 class SurrogateMetafeaturesSchema(BaseModel):
     """Schema for surrogate data metafeature column names.
     
@@ -89,9 +68,7 @@ class BenchmarkDataSchema(BaseModel):
         norm_iter_unit: Name for normalized iteration columns.
     """
 
-    # Coverage error columns
-    cumulative_coverage_error_col: str = "cumulative_coverage_error"
-    rolling_coverage_error_col: str = "rolling_coverage_error"
+    # Core columns
     rep_col: str = "repetition"
     perf_col: str = "performance"
     tuner_col: str = "tuner"
@@ -104,10 +81,6 @@ class BenchmarkDataSchema(BaseModel):
     sampler_adapter_col: str = "sampler_adapter"
     tuner_searcher_tuning_framework_col: str = "tuner_searcher_tuning_framework"
     n_pre_conformal_trials_col: str = "n_pre_conformal_trials"
-    data_size_col: str = "data_size"
-    tuning_iterations_col: str = "tuning_iterations"
-    estimator_error_col: str = "mean_pinball_loss"
-    breach_col: str = "breach_status"
     n_random_warm_starts_col: str = "n_random_warm_starts"
 
     runtime_unit: str = "runtime"
@@ -119,8 +92,7 @@ class BenchmarkDataSchema(BaseModel):
     label_col: str = "label"
     predicted_score_col: str = "predicted_score"
     
-    # Nested schemas for specific use cases
-    search_space_metafeatures: SearchSpaceMetafeaturesSchema = SearchSpaceMetafeaturesSchema()
+    # Nested schema for surrogate metafeatures
     surrogate_metafeatures: SurrogateMetafeaturesSchema = SurrogateMetafeaturesSchema()
 
     def to_list(self) -> List[str]:

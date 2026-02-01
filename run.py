@@ -38,18 +38,21 @@ def _generate_synthetic_tabular_datasets() -> None:
     if not datasets_exist:
         logger.info("No datasets found, generating synthetic tabular datasets using SCM approach...")
         
-        # Generate both classification and regression datasets using OpenTab's SCM approach
+        # Generate regression datasets using OpenTab's SCM approach
+        # Surrogate data represents continuous performance landscapes, so always regression
+        # Now using larger sample sizes (50,000 rows) to provide better coverage of the causal surface
+        # Random warm starts will sample smaller subsets from this larger surrogate data
         generate_and_save_batch(
-            num_classification=25,
-            num_regression=25,
+            num_classification=0,  # Never classification for surrogate data
+            num_regression=50,  # All 50 datasets are regression
             storage_dir=str(storage_dir),
-            n_samples_range=(10, 512),
+            n_samples_range=(50000, 50000),  # Fixed at 50K for substantial coverage
             n_features_range=(1, 160),
             n_classes_range=(2, 10),
             base_seed=42,
             start_id=1,
         )
-        logger.info("Successfully generated 50 synthetic datasets (25 classification, 25 regression)")
+        logger.info("Successfully generated 50 regression synthetic datasets (50,000 rows each)")
     else:
         logger.info("Datasets already exist, skipping generation")
 

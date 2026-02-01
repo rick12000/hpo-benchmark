@@ -145,77 +145,11 @@ def apply_retroactive_timestamps(
     return warm_start_runtimes + runtimes
 
 
-def calculate_breach_status(
-    lower_bound: float,
-    upper_bound: float,
-    realization: float,
-) -> int:
-    """Calculates whether the true performance breaches the prediction interval.
-
-    Args:
-        lower_bound: Lower bound of the conformal prediction interval.
-        upper_bound: Upper bound of the conformal prediction interval.
-        realization: Actual observed performance value.
-
-    Returns:
-        1 if the realization falls outside the prediction interval (breach), 0 otherwise.
-    """
-    return 1 if (realization < lower_bound or realization > upper_bound) else 0
-
-
-def calculate_winkler_components(
-    lower_bound: float,
-    upper_bound: float,
-    realization: float,
-    alpha: float,
-) -> tuple[float, float, float]:
-    """Calculates components of the Winkler score for conformal prediction evaluation.
-
-    The Winkler score combines prediction interval width with penalties for miscoverage,
-    providing a balanced evaluation metric for uncertainty quantification quality.
-
-    Args:
-        lower_bound: Lower bound of the conformal prediction interval.
-        upper_bound: Upper bound of the conformal prediction interval.
-        realization: Actual observed performance value.
-        alpha: Miscoverage rate (1 - confidence level), typically 0.1 for 90% confidence.
-
-    Returns:
-        Tuple of (winkler_score, width, miscoverage_penalty) where winkler_score
-        is the sum of width and miscoverage_penalty.
-    """
-    if upper_bound < lower_bound:
-        width = 0.0
-    else:
-        width = upper_bound - lower_bound
-
-    # Calculate miscoverage penalty
-    lower_penalty = (
-        (2 / alpha) * (lower_bound - realization) if realization <= lower_bound else 0.0
-    )
-    upper_penalty = (
-        (2 / alpha) * (realization - upper_bound) if realization >= upper_bound else 0.0
-    )
-    miscoverage_penalty = lower_penalty + upper_penalty
-
-    winkler_score = width + miscoverage_penalty
-
-    return winkler_score, width, miscoverage_penalty
-
-
 def build_history_entry(
     end_time: Optional[Any] = None,
     performance: Optional[Any] = None,
     configurations: Optional[Any] = None,
     iteration: Optional[int] = None,
-    estimator_error: Optional[Any] = None,
-    searcher_training_time: Optional[Any] = None,
-    breach_status: Optional[int] = None,
-    winkler_score: Optional[float] = None,
-    width: Optional[float] = None,
-    miscoverage_penalty: Optional[float] = None,
-    tabularized_configuration: Optional[Any] = None,
-    acquisition_source: Optional[str] = None,
 ) -> dict[str, Any]:
     """Creates a standardized dictionary entry for tuning history records.
 
@@ -224,14 +158,6 @@ def build_history_entry(
         performance: Observed performance metric value.
         configurations: Dictionary of hyperparameter configuration.
         iteration: Trial iteration number (1-based indexing).
-        estimator_error: Prediction error from surrogate model, if applicable.
-        searcher_training_time: Time spent training the searcher model.
-        breach_status: Binary indicator (0/1) of prediction interval breach.
-        winkler_score: Winkler score evaluating prediction interval quality.
-        width: Width of the conformal prediction interval.
-        miscoverage_penalty: Penalty for prediction interval not containing true value.
-        tabularized_configuration: Processed configuration data for analysis.
-        acquisition_source: Identifier for the acquisition function used.
 
     Returns:
         Dictionary containing all trial information with standardized keys.
@@ -241,14 +167,6 @@ def build_history_entry(
         "performance": performance,
         "configurations": configurations,
         "iteration": iteration,
-        "estimator_error": estimator_error,
-        "searcher_training_time": searcher_training_time,
-        "breach_status": breach_status,
-        "winkler_score": winkler_score,
-        "width": width,
-        "miscoverage_penalty": miscoverage_penalty,
-        "tabularized_configuration": tabularized_configuration,
-        "acquisition_source": acquisition_source,
     }
 
 
@@ -449,13 +367,6 @@ def optuna_tune(
             performance=trial.value,
             configurations=trial.params,
             iteration=idx + 1,
-            estimator_error=None,
-            searcher_training_time=None,
-            breach_status=None,
-            winkler_score=None,
-            width=None,
-            miscoverage_penalty=None,
-            tabularized_configuration=None,
         )
         for idx, trial in enumerate(study.trials)
     ]
@@ -550,10 +461,6 @@ def confopt_tune(
     
     search_space_size = _calculate_search_space_size(raw_params)
     n_candidates = min(N_CANDIDATES, max(100, search_space_size))
-    logger.info(
-        f"ConfOpt search space size: ~{search_space_size} combinations, "
-        f"capping n_candidates to {n_candidates} (default: {N_CANDIDATES})"
-    )
     
     conformal_tuner = ConformalTuner(
         objective_function=objective_fn,
@@ -590,37 +497,12 @@ def confopt_tune(
 
     history = []
     for idx, trial in enumerate(conformal_tuner.study.trials):
-        # Only extract alpha and calculate metrics if sampler.sampler is LowerBoundSampler or PessimisticLowerBoundSampler
-        if (
-            isinstance(
-                searcher.sampler, (LowerBoundSampler, PessimisticLowerBoundSampler)
-            )
-            and trial.lower_bound is not None
-            and trial.upper_bound is not None
-        ):
-            breach_status = calculate_breach_status(
-                trial.lower_bound, trial.upper_bound, trial.performance
-            )
-            winkler_score, width, miscoverage_penalty = calculate_winkler_components(
-                trial.lower_bound, trial.upper_bound, trial.performance, alpha
-            )
-        else:
-            breach_status = None
-            winkler_score = None
-            width = None
-            miscoverage_penalty = None
         history.append(
             build_history_entry(
                 end_time=all_runtimes[idx],
                 performance=trial.performance,
                 configurations=trial.configuration,
                 iteration=idx + 1,
-                searcher_training_time=trial.searcher_runtime,
-                breach_status=breach_status,
-                winkler_score=winkler_score,
-                width=width,
-                miscoverage_penalty=miscoverage_penalty,
-                tabularized_configuration=trial.tabularized_configuration,
             )
         )
     return pd.DataFrame(history)
@@ -785,13 +667,6 @@ def skopt_tune(
             performance=performance,
             iteration=idx + 1,
             configurations=dict(zip(param_names, params_list)),
-            estimator_error=None,
-            searcher_training_time=None,
-            breach_status=None,
-            winkler_score=None,
-            width=None,
-            miscoverage_penalty=None,
-            tabularized_configuration=None,
         )
         for idx, (performance, params_list, end_time) in enumerate(zipped)
     ]
@@ -1028,13 +903,6 @@ def smac_tune(
                 performance=trial_value.cost,
                 configurations=config_dict,
                 iteration=idx + 1,
-                estimator_error=None,
-                searcher_training_time=None,
-                breach_status=None,
-                winkler_score=None,
-                width=None,
-                miscoverage_penalty=None,
-                tabularized_configuration=None,
             )
         )
 
@@ -1167,8 +1035,6 @@ def gp_opt_tune(
                 performance=trial.performance,
                 configurations=trial.configuration,
                 iteration=idx + 1,
-                searcher_training_time=trial.searcher_runtime,
-                tabularized_configuration=trial.tabularized_configuration,
             )
         )
     return pd.DataFrame(history)
