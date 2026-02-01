@@ -9,8 +9,8 @@ from hpobench.generation.tabular.generation_utils import generate_and_save_batch
 from hpobench.report.orchestrate import (
     load_experiment_configs,
     run_main_benchmark,
+    run_learning_to_rank_analysis,
 )
-from hpobench.report.learning_to_rank import run_learning_to_rank_analysis
 from hpobench.utils import setup_environment
 
 BASE_RANDOM_STATE = 42
@@ -101,6 +101,7 @@ def main():
     logger.info("Running learning-to-rank analysis on benchmark results")
     ltr_results = run_learning_to_rank_analysis(
         raw_benchmark_data=raw_benchmark_data,
+        schema=BenchmarkDataSchema(),
         train_size=0.7,
         val_size=0.15,
         random_state=BASE_RANDOM_STATE,

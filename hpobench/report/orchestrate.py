@@ -3,6 +3,7 @@ from datetime import datetime
 import os
 import logging
 from typing import Literal, Optional
+from pathlib import Path
 import gc
 import numpy as np
 
@@ -753,3 +754,161 @@ def run_and_analyze_main_benchmark(
         run_start_str=run_start_str,
     )
 
+
+def run_learning_to_rank_analysis(
+    raw_benchmark_data: pd.DataFrame,
+    schema: BenchmarkDataSchema,
+    train_size: float = 0.7,
+    val_size: float = 0.15,
+    random_state: int = 42,
+    k_values: list[int] = [1, 3],
+    xgb_params: Optional[dict] = None,
+    run_shap_analysis: bool = True,
+    shap_output_dir: Optional[Path] = None,
+    shap_sample_size: Optional[int] = None,
+    shap_n_jobs: int = 1,
+    shap_top_k_features: int = 20,
+) -> dict:
+    """Run complete learning-to-rank analysis pipeline.
+    
+    Args:
+        raw_benchmark_data: Raw benchmark results from run_main_benchmark
+        train_size: Proportion of ranking groups for training
+        val_size: Proportion of ranking groups for validation
+        random_state: Random seed for reproducibility
+        k_values: List of k values for evaluation metrics
+        schema: Optional BenchmarkDataSchema for column naming
+        xgb_params: Optional XGBoost parameters
+        run_shap_analysis: Whether to run ShaRP explainability analysis
+        shap_output_dir: Directory to save SHAP plots and results
+        shap_sample_size: Number of samples for SHAP perturbation (None uses all)
+        shap_n_jobs: Number of parallel jobs for SHAP computation
+        shap_top_k_features: Number of top features to display in plots
+        
+    Returns:
+        Dictionary containing:
+            - ltr_model: Trained XGBoost model
+            - naive_ranker: Naive popularity ranker
+            - ltr_metrics: LTR model evaluation metrics
+            - naive_metrics: Naive ranker evaluation metrics
+            - test_data: Test data for further analysis
+            - feature_cols: List of feature columns used
+            - shap_results: SHAP analysis results (if run_shap_analysis=True)
+    """
+    from hpobench.report.learning_to_rank import (
+        prepare_ranking_data,
+        split_ranking_groups,
+        train_naive_ranker,
+        train_ltr_model,
+        evaluate_ltr_model,
+        evaluate_naive_ranker,
+        run_sharp_analysis,
+    )
+    
+    logger.info("Starting learning-to-rank analysis")
+    
+    ranking_data = prepare_ranking_data(raw_benchmark_data, schema)
+    
+    train_data, val_data, test_data = split_ranking_groups(
+        ranking_data=ranking_data,
+        train_size=train_size,
+        val_size=val_size,
+        random_state=random_state,
+        schema=schema,
+    )
+    
+    naive_ranker = train_naive_ranker(train_data, schema)
+    
+    cols_to_include = (
+        [schema.data_col, schema.iter_unit, schema.tuner_col, 
+         schema.performance_col, schema.ranking_group_col, schema.label_col] +
+        schema.search_space_metafeatures.to_list() +
+        schema.dataset_metafeatures.to_list() +
+        [schema.iter_unit]
+    )
+    
+    feature_cols = [
+        col for col in ranking_data.columns 
+        if col in cols_to_include
+    ]
+    
+    logger.info(f"Using {len(feature_cols)} features for LTR model")
+    
+    ltr_model = train_ltr_model(
+        train_data=train_data,
+        val_data=val_data,
+        feature_cols=feature_cols,
+        schema=schema,
+        xgb_params=xgb_params,
+    )
+    
+    logger.info("Evaluating models on test set")
+    
+    ltr_metrics = evaluate_ltr_model(
+        model=ltr_model,
+        test_data=test_data,
+        feature_cols=feature_cols,
+        k_values=k_values,
+        schema=schema,
+    )
+    
+    naive_metrics = evaluate_naive_ranker(
+        naive_ranker=naive_ranker,
+        test_data=test_data,
+        k_values=k_values,
+        schema=schema,
+    )
+    
+    logger.info("\n=== Learning-to-Rank Results ===")
+    logger.info("LTR Model:")
+    for metric_name, metric_value in ltr_metrics.items():
+        logger.info(f"  {metric_name}: {metric_value:.4f}")
+    
+    logger.info("\nNaive Ranker:")
+    for metric_name, metric_value in naive_metrics.items():
+        logger.info(f"  {metric_name}: {metric_value:.4f}")
+    
+    logger.info("\nImprovement over Naive Ranker:")
+    for k in k_values:
+        precision_improvement = (
+            ltr_metrics[f'precision@{k}'] - naive_metrics[f'precision@{k}']
+        )
+        ndcg_improvement = (
+            ltr_metrics[f'ndcg@{k}'] - naive_metrics[f'ndcg@{k}']
+        )
+        logger.info(f"  Precision@{k}: {precision_improvement:+.4f}")
+        logger.info(f"  NDCG@{k}: {ndcg_improvement:+.4f}")
+    
+    results = {
+        'ltr_model': ltr_model,
+        'naive_ranker': naive_ranker,
+        'ltr_metrics': ltr_metrics,
+        'naive_metrics': naive_metrics,
+        'test_data': test_data,
+        'feature_cols': feature_cols,
+    }
+    
+    if run_shap_analysis:
+        try:
+            logger.info("\n=== Starting ShaRP Explainability Analysis ===")
+            shap_results = run_sharp_analysis(
+                model=ltr_model,
+                test_data=test_data,
+                feature_cols=feature_cols,
+                output_dir=shap_output_dir,
+                qoi="rank",
+                sample_size=shap_sample_size,
+                random_state=random_state,
+                n_jobs=shap_n_jobs,
+                top_k_features=shap_top_k_features,
+                schema=schema,
+            )
+            results['shap_results'] = shap_results
+            logger.info("ShaRP explainability analysis completed successfully")
+        except ImportError as e:
+            logger.warning(f"Skipping SHAP analysis: {e}")
+        except Exception as e:
+            logger.error(f"Error during SHAP analysis: {e}", exc_info=True)
+            logger.warning("Continuing without SHAP results")
+    
+    return results

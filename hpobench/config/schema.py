@@ -93,7 +93,6 @@ class BenchmarkDataSchema(BaseModel):
     iter_unit: str = "iteration"
     norm_runtime_unit: str = f"normalized_{runtime_unit}"
     norm_iter_unit: str = f"normalized_{iter_unit}"
-    trial_col: str = "trial"
     performance_col: str = "performance"
     ranking_group_col: str = "ranking_group"
     label_col: str = "label"

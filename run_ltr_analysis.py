@@ -11,8 +11,8 @@ This script shows how to:
 import pandas as pd
 import logging
 from pathlib import Path
-from hpobench.report.learning_to_rank import run_learning_to_rank_analysis
-
+from hpobench.report.orchestrate import run_learning_to_rank_analysis
+from hpobench.config.schema import BenchmarkDataSchema
 from hpobench.utils import setup_environment
 
 CACHE_PATH = "cache/"
@@ -59,6 +59,7 @@ def main():
     
     results = run_learning_to_rank_analysis(
         raw_benchmark_data=raw_benchmark_data,
+        schema=BenchmarkDataSchema(),
         train_size=0.7,
         val_size=0.15,
         random_state=42,

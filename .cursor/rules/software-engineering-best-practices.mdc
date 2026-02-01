@@ -1,7 +1,5 @@
 ---
-description:
-globs:
-alwaysApply: true
+alwaysApply: false
 ---
 - Always comply with DRY and SOLID principles.
 - Use as little code as is necessary to carry out the desired functionality, do not over-engineer or over-validate your code.
