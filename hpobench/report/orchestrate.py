@@ -53,7 +53,6 @@ def _get_nan_surrogate_metafeatures() -> dict:
     from hpobench.config.schema import SurrogateMetafeaturesSchema
     schema = SurrogateMetafeaturesSchema()
     return {
-        schema.n_surrogate_samples: np.nan,
         schema.n_hyperparameters: np.nan,
         schema.n_integer_hyperparameters: np.nan,
         schema.n_float_hyperparameters: np.nan,

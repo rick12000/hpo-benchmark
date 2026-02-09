@@ -18,7 +18,6 @@ class SurrogateMetafeaturesSchema(BaseModel):
     """
     
     # Size metafeatures
-    n_surrogate_samples: str = "n_surrogate_samples"
     n_hyperparameters: str = "n_hyperparameters"
     
     # Hyperparameter type statistics

@@ -1,388 +1,275 @@
-import pandas as pd
+"""
+Feature importance and explainability for learning-to-rank models.
+"""
+
 import numpy as np
-import logging
+import pandas as pd
 import xgboost as xgb
 from pathlib import Path
-from hpobench.config.schema import BenchmarkDataSchema
-
-logger = logging.getLogger(__name__)
+from dataclasses import dataclass
 
 
-def create_xgboost_score_function(
-    model: xgb.Booster,
-    feature_cols: list[str],
-):
-    """Create a scoring function wrapper for XGBoost model.
+@dataclass
+class SharpResults:
+    """Results from ShaRP explainability analysis."""
+    shap_values: np.ndarray
+    feature_names: list[str]
+    feature_matrix: np.ndarray
+    base_value: float
+
+
+def get_feature_importance(model: xgb.Booster, importance_type: str = 'gain') -> pd.DataFrame:
+    """Get feature importance from XGBoost model.
     
     Args:
         model: Trained XGBoost booster
-        feature_cols: List of feature column names
+        importance_type: 'gain', 'weight', or 'cover'
         
     Returns:
-        Function that takes feature matrix and returns scores
+        DataFrame with feature importance sorted by importance
     """
-    def score_function(X: np.ndarray) -> np.ndarray:
-        """Score function for ShaRP explainability.
-        
-        Args:
-            X: Feature matrix of shape (n_samples, n_features)
-            
-        Returns:
-            Array of scores of shape (n_samples,)
-        """
-        dmatrix = xgb.DMatrix(X)
-        scores = model.predict(dmatrix)
-        return scores
-    
-    return score_function
+    scores = model.get_score(importance_type=importance_type)
+    df = pd.DataFrame([
+        {'feature': k, 'importance': v}
+        for k, v in scores.items()
+    ])
+    return df.sort_values('importance', ascending=False).reset_index(drop=True)
 
 
-def compute_sharp_explanations(
+def compute_shap_values(
     model: xgb.Booster,
-    test_data: pd.DataFrame,
+    data: pd.DataFrame,
     feature_cols: list[str],
-    qoi: str = "rank",
     sample_size: int | None = None,
     random_state: int = 42,
-    n_jobs: int = 1,
-    schema: BenchmarkDataSchema | None = None,
-) -> dict:
-    """Compute ShaRP explanations for learning-to-rank model.
+) -> SharpResults:
+    """Compute SHAP values using the ShaRP library.
     
     Args:
-        model: Trained XGBoost model
-        test_data: Test data with features and rankings
-        feature_cols: List of feature column names
-        qoi: Quantity of interest ("rank", "rank_score", or "top_k")
-        sample_size: Number of samples for perturbation (None uses all)
-        random_state: Random seed for reproducibility
-        n_jobs: Number of parallel jobs
-        schema: Optional BenchmarkDataSchema for column naming
+        model: Trained XGBoost booster
+        data: Data to explain
+        feature_cols: Feature column names
+        sample_size: Sample size for perturbation (None uses default)
+        random_state: Random seed
         
     Returns:
-        Dictionary containing:
-            - sharp_values: Array of SHAP values (n_samples, n_features)
-            - feature_names: List of feature names
-            - feature_matrix: Feature matrix used for explanations
-            - base_value: Mean rank in the reference dataset
+        SharpResults with SHAP values and metadata
     """
     try:
         from sharp import ShaRP
     except ImportError:
-        raise ImportError(
-            "ShaRP package not installed. Install with: pip install xai-sharp"
-        )
+        raise ImportError("ShaRP required: pip install xai-sharp")
     
-    if schema is None:
-        schema = BenchmarkDataSchema()
+    X = data[feature_cols].values
     
-    logger.info(f"Computing ShaRP explanations with QoI: {qoi}")
+    def score_fn(x: np.ndarray) -> np.ndarray:
+        return model.predict(xgb.DMatrix(x))
     
-    X_test = test_data[feature_cols].values
-    feature_names = feature_cols
-    
-    logger.info(f"Test set size: {X_test.shape[0]} samples, {X_test.shape[1]} features")
-    
-    score_function = create_xgboost_score_function(model, feature_cols)
-    
-    logger.info("Initializing ShaRP explainer")
     explainer = ShaRP(
-        qoi=qoi,
-        target_function=score_function,
-        measure="shapley",
+        qoi='rank',
+        target_function=score_fn,
+        measure='shapley',
         sample_size=sample_size,
         replace=False,
         random_state=random_state,
-        cache=True,
-        n_jobs=n_jobs,
-        verbose=1,
+        n_jobs=1,
+        verbose=0,
     )
+    explainer.fit(X, feature_names=feature_cols)
+    shap_values = explainer.all(X=X)
     
-    logger.info("Fitting ShaRP explainer on test data")
-    explainer.fit(X_test, feature_names=feature_names)
-    
-    logger.info("Computing SHAP values for all test samples")
-    sharp_values = explainer.all(X=X_test)
-    
-    scores = score_function(X_test)
+    scores = score_fn(X)
     ranks = np.argsort(np.argsort(-scores)) + 1
-    base_value = ranks.mean()
     
-    logger.info(f"Computed SHAP values for {sharp_values.shape[0]} samples")
-    logger.info(f"Mean rank (base value): {base_value:.2f}")
-    
-    return {
-        'sharp_values': sharp_values,
-        'feature_names': feature_names,
-        'feature_matrix': X_test,
-        'base_value': base_value,
-        'explainer': explainer,
-    }
-
-
-def create_global_importance_plot(
-    sharp_values: np.ndarray,
-    feature_names: list[str],
-    output_path: Path | None = None,
-    top_k: int = 20,
-) -> None:
-    """Create waterfall plot of global feature importance.
-    
-    Args:
-        sharp_values: Array of SHAP values (n_samples, n_features)
-        feature_names: List of feature names
-        output_path: Optional path to save the plot
-        top_k: Number of top features to display
-    """
-    try:
-        import matplotlib.pyplot as plt
-    except ImportError:
-        raise ImportError("matplotlib required for plotting")
-    
-    logger.info("Creating global feature importance waterfall plot")
-    
-    mean_abs_sharp = np.abs(sharp_values).mean(axis=0)
-    
-    feature_importance_df = pd.DataFrame({
-        'feature': feature_names,
-        'importance': mean_abs_sharp,
-    })
-    feature_importance_df = feature_importance_df.sort_values(
-        'importance', 
-        ascending=False
-    ).head(top_k)
-    
-    plt.figure(figsize=(10, max(6, top_k * 0.3)))
-    
-    colors = ['#ff0051' if x > 0 else '#008bfb' for x in feature_importance_df['importance']]
-    
-    plt.barh(
-        range(len(feature_importance_df)),
-        feature_importance_df['importance'],
-        color=colors,
+    return SharpResults(
+        shap_values=shap_values,
+        feature_names=feature_cols,
+        feature_matrix=X,
+        base_value=ranks.mean(),
     )
-    
-    plt.yticks(
-        range(len(feature_importance_df)),
-        feature_importance_df['feature'],
-        fontsize=10,
-    )
-    plt.xlabel('Mean |SHAP value| (average impact on rank)', fontsize=12)
-    plt.title(f'Global Feature Importance (Top {top_k})', fontsize=14, pad=20)
-    plt.gca().invert_yaxis()
-    plt.grid(axis='x', alpha=0.3)
-    plt.tight_layout()
-    
-    if output_path is not None:
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        plt.savefig(output_path, dpi=300, bbox_inches='tight')
-        logger.info(f"Saved global importance plot to {output_path}")
-    
-    plt.close()
 
 
-def create_beeswarm_plot(
-    sharp_values: np.ndarray,
-    feature_matrix: np.ndarray,
-    feature_names: list[str],
-    output_path: Path | None = None,
-    top_k: int = 20,
-) -> None:
-    """Create beeswarm plot showing feature value distributions and SHAP values.
+def create_importance_summary(results: SharpResults) -> pd.DataFrame:
+    """Create feature importance summary from SHAP values.
     
     Args:
-        sharp_values: Array of SHAP values (n_samples, n_features)
-        feature_matrix: Feature matrix (n_samples, n_features)
-        feature_names: List of feature names
-        output_path: Optional path to save the plot
-        top_k: Number of top features to display
-    """
-    try:
-        import matplotlib.pyplot as plt
-        from matplotlib import cm
-    except ImportError:
-        raise ImportError("matplotlib required for plotting")
-    
-    logger.info("Creating beeswarm plot")
-    
-    mean_abs_sharp = np.abs(sharp_values).mean(axis=0)
-    top_indices = np.argsort(mean_abs_sharp)[-top_k:][::-1]
-    
-    fig, ax = plt.subplots(figsize=(10, max(6, top_k * 0.4)))
-    
-    for i, feat_idx in enumerate(top_indices):
-        shap_vals = sharp_values[:, feat_idx]
-        feat_vals = feature_matrix[:, feat_idx]
-        
-        feat_min = feat_vals.min()
-        feat_max = feat_vals.max()
-        feat_range = feat_max - feat_min
-        
-        if feat_range > 0:
-            normalized_feat_vals = (feat_vals - feat_min) / feat_range
-        else:
-            normalized_feat_vals = np.zeros_like(feat_vals)
-        
-        y_positions = np.full_like(shap_vals, i, dtype=float)
-        
-        jitter_amount = 0.3
-        y_jitter = np.random.RandomState(42 + i).uniform(
-            -jitter_amount, 
-            jitter_amount, 
-            size=len(shap_vals)
-        )
-        y_positions = y_positions + y_jitter
-        
-        scatter = ax.scatter(
-            shap_vals,
-            y_positions,
-            c=normalized_feat_vals,
-            cmap='coolwarm',
-            s=20,
-            alpha=0.6,
-            edgecolors='none',
-        )
-    
-    ax.set_yticks(range(len(top_indices)))
-    ax.set_yticklabels([feature_names[idx] for idx in top_indices], fontsize=10)
-    ax.set_xlabel('SHAP value (impact on rank)', fontsize=12)
-    ax.set_title(f'Feature Impact Distribution (Top {top_k})', fontsize=14, pad=20)
-    ax.axvline(x=0, color='black', linestyle='-', linewidth=0.8, alpha=0.5)
-    ax.grid(axis='x', alpha=0.3)
-    
-    cbar = plt.colorbar(scatter, ax=ax, pad=0.02)
-    cbar.set_label('Feature value\n(low to high)', fontsize=10)
-    
-    plt.tight_layout()
-    
-    if output_path is not None:
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        plt.savefig(output_path, dpi=300, bbox_inches='tight')
-        logger.info(f"Saved beeswarm plot to {output_path}")
-    
-    plt.close()
-
-
-def create_feature_importance_summary(
-    sharp_values: np.ndarray,
-    feature_names: list[str],
-    output_path: Path | None = None,
-) -> pd.DataFrame:
-    """Create summary table of feature importance statistics.
-    
-    Args:
-        sharp_values: Array of SHAP values (n_samples, n_features)
-        feature_names: List of feature names
-        output_path: Optional path to save the CSV
+        results: SharpResults from compute_shap_values
         
     Returns:
-        DataFrame with feature importance statistics
+        DataFrame with importance statistics per feature
     """
-    logger.info("Creating feature importance summary")
+    return pd.DataFrame({
+        'feature': results.feature_names,
+        'mean_abs_shap': np.abs(results.shap_values).mean(axis=0),
+        'mean_shap': results.shap_values.mean(axis=0),
+        'std_shap': results.shap_values.std(axis=0),
+    }).sort_values('mean_abs_shap', ascending=False).reset_index(drop=True)
+
+
+def plot_global_importance(
+    results: SharpResults,
+    output_path: Path | None = None,
+    top_k: int = 20,
+) -> None:
+    """Create bar plot of global feature importance.
     
-    summary_df = pd.DataFrame({
-        'feature': feature_names,
-        'mean_abs_shap': np.abs(sharp_values).mean(axis=0),
-        'mean_shap': sharp_values.mean(axis=0),
-        'std_shap': sharp_values.std(axis=0),
-        'min_shap': sharp_values.min(axis=0),
-        'max_shap': sharp_values.max(axis=0),
-    })
+    Args:
+        results: SharpResults from compute_shap_values
+        output_path: Path to save plot (displays if None)
+        top_k: Number of top features to show
+    """
+    import matplotlib.pyplot as plt
     
-    summary_df = summary_df.sort_values('mean_abs_shap', ascending=False)
+    importance = np.abs(results.shap_values).mean(axis=0)
+    indices = np.argsort(importance)[-top_k:][::-1]
     
-    if output_path is not None:
+    fig, ax = plt.subplots(figsize=(10, max(6, top_k * 0.3)))
+    ax.barh(range(len(indices)), importance[indices], color='#ff0051')
+    ax.set_yticks(range(len(indices)))
+    ax.set_yticklabels([results.feature_names[i] for i in indices])
+    ax.set_xlabel('Mean |SHAP value|')
+    ax.set_title(f'Feature Importance (Top {top_k})')
+    ax.invert_yaxis()
+    ax.grid(axis='x', alpha=0.3)
+    plt.tight_layout()
+    
+    if output_path:
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        summary_df.to_csv(output_path, index=False)
-        logger.info(f"Saved feature importance summary to {output_path}")
-    
-    logger.info("\nTop 10 Most Important Features:")
-    for idx, row in summary_df.head(10).iterrows():
-        logger.info(
-            f"  {row['feature']}: "
-            f"mean_abs={row['mean_abs_shap']:.4f}, "
-            f"mean={row['mean_shap']:.4f}"
-        )
-    
-    return summary_df
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.close()
+    else:
+        plt.show()
 
 
-def run_sharp_analysis(
+def plot_beeswarm(
+    results: SharpResults,
+    output_path: Path | None = None,
+    top_k: int = 20,
+) -> None:
+    """Create beeswarm plot showing SHAP value distributions.
+    
+    Args:
+        results: SharpResults from compute_shap_values
+        output_path: Path to save plot (displays if None)
+        top_k: Number of top features to show
+    """
+    import matplotlib.pyplot as plt
+    
+    importance = np.abs(results.shap_values).mean(axis=0)
+    top_indices = np.argsort(importance)[-top_k:][::-1]
+    
+    fig, ax = plt.subplots(figsize=(10, max(6, top_k * 0.4)))
+    rng = np.random.RandomState(42)
+    
+    for i, feat_idx in enumerate(top_indices):
+        shap_vals = results.shap_values[:, feat_idx]
+        feat_vals = results.feature_matrix[:, feat_idx]
+        
+        # Normalize feature values for coloring
+        vmin, vmax = feat_vals.min(), feat_vals.max()
+        if vmax > vmin:
+            colors = (feat_vals - vmin) / (vmax - vmin)
+        else:
+            colors = np.zeros_like(feat_vals)
+        
+        y_pos = i + rng.uniform(-0.3, 0.3, len(shap_vals))
+        ax.scatter(shap_vals, y_pos, c=colors, cmap='coolwarm', s=20, alpha=0.6)
+    
+    ax.set_yticks(range(len(top_indices)))
+    ax.set_yticklabels([results.feature_names[i] for i in top_indices])
+    ax.set_xlabel('SHAP value')
+    ax.set_title(f'Feature Impact Distribution (Top {top_k})')
+    ax.axvline(0, color='black', linewidth=0.8, alpha=0.5)
+    ax.grid(axis='x', alpha=0.3)
+    plt.tight_layout()
+    
+    if output_path:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.close()
+    else:
+        plt.show()
+
+
+def run_explainability_analysis(
     model: xgb.Booster,
     test_data: pd.DataFrame,
     feature_cols: list[str],
     output_dir: Path | None = None,
-    qoi: str = "rank",
+    top_k: int = 20,
     sample_size: int | None = None,
-    random_state: int = 42,
-    n_jobs: int = 1,
-    top_k_features: int = 20,
-    schema: BenchmarkDataSchema | None = None,
 ) -> dict:
-    """Run complete ShaRP explainability analysis.
+    """Run complete explainability analysis.
     
     Args:
-        model: Trained XGBoost model
-        test_data: Test data with features and rankings
-        feature_cols: List of feature column names
-        output_dir: Optional directory to save plots and results
-        qoi: Quantity of interest ("rank", "rank_score", or "top_k")
-        sample_size: Number of samples for perturbation (None uses all)
-        random_state: Random seed for reproducibility
-        n_jobs: Number of parallel jobs
-        top_k_features: Number of top features to display in plots
-        schema: Optional BenchmarkDataSchema for column naming
+        model: Trained XGBoost booster
+        test_data: Test data with features
+        feature_cols: Feature column names
+        output_dir: Directory to save outputs
+        top_k: Number of features to show in plots
+        sample_size: Sample size for SHAP computation
         
     Returns:
-        Dictionary containing:
-            - sharp_results: Results from compute_sharp_explanations
-            - importance_summary: Feature importance summary DataFrame
+        Dictionary with results and summary DataFrame
     """
-    logger.info("Starting ShaRP explainability analysis")
+    results = compute_shap_values(model, test_data, feature_cols, sample_size)
+    summary = create_importance_summary(results)
     
-    sharp_results = compute_sharp_explanations(
-        model=model,
-        test_data=test_data,
-        feature_cols=feature_cols,
-        qoi=qoi,
-        sample_size=sample_size,
-        random_state=random_state,
-        n_jobs=n_jobs,
-        schema=schema,
-    )
-    
-    if output_dir is not None:
+    if output_dir:
         output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
         
-        create_global_importance_plot(
-            sharp_values=sharp_results['sharp_values'],
-            feature_names=sharp_results['feature_names'],
-            output_path=output_dir / 'global_feature_importance.png',
-            top_k=top_k_features,
-        )
-        
-        create_beeswarm_plot(
-            sharp_values=sharp_results['sharp_values'],
-            feature_matrix=sharp_results['feature_matrix'],
-            feature_names=sharp_results['feature_names'],
-            output_path=output_dir / 'feature_beeswarm.png',
-            top_k=top_k_features,
-        )
-        
-        importance_summary = create_feature_importance_summary(
-            sharp_values=sharp_results['sharp_values'],
-            feature_names=sharp_results['feature_names'],
-            output_path=output_dir / 'feature_importance_summary.csv',
-        )
-    else:
-        importance_summary = create_feature_importance_summary(
-            sharp_values=sharp_results['sharp_values'],
-            feature_names=sharp_results['feature_names'],
-        )
+        summary.to_csv(output_dir / 'feature_importance.csv', index=False)
+        plot_global_importance(results, output_dir / 'importance_bar.png', top_k)
+        plot_beeswarm(results, output_dir / 'importance_beeswarm.png', top_k)
     
-    logger.info("ShaRP explainability analysis completed")
-    
+    return {'shap_results': results, 'summary': summary}
+
+
+# Backwards compatibility aliases
+def create_xgboost_score_function(model: xgb.Booster, feature_cols: list[str]):
+    """Create scoring function wrapper (backwards compatible)."""
+    def score_function(X: np.ndarray) -> np.ndarray:
+        return model.predict(xgb.DMatrix(X))
+    return score_function
+
+
+def compute_sharp_explanations(model, test_data, feature_cols, **kwargs):
+    """Compute ShaRP explanations (backwards compatible)."""
+    results = compute_shap_values(model, test_data, feature_cols, 
+                                   kwargs.get('sample_size'), kwargs.get('random_state', 42))
     return {
-        'sharp_results': sharp_results,
-        'importance_summary': importance_summary,
+        'sharp_values': results.shap_values,
+        'feature_names': results.feature_names,
+        'feature_matrix': results.feature_matrix,
+        'base_value': results.base_value,
     }
+
+
+def create_global_importance_plot(sharp_values, feature_names, output_path=None, top_k=20):
+    """Create global importance plot (backwards compatible)."""
+    results = SharpResults(sharp_values, feature_names, np.zeros((len(sharp_values), len(feature_names))), 0)
+    plot_global_importance(results, output_path, top_k)
+
+
+def create_beeswarm_plot(sharp_values, feature_matrix, feature_names, output_path=None, top_k=20):
+    """Create beeswarm plot (backwards compatible)."""
+    results = SharpResults(sharp_values, feature_names, feature_matrix, 0)
+    plot_beeswarm(results, output_path, top_k)
+
+
+def create_feature_importance_summary(sharp_values, feature_names, output_path=None):
+    """Create feature importance summary (backwards compatible)."""
+    results = SharpResults(sharp_values, feature_names, np.zeros((len(sharp_values), len(feature_names))), 0)
+    summary = create_importance_summary(results)
+    if output_path:
+        summary.to_csv(output_path, index=False)
+    return summary
+
+
+def run_sharp_analysis(model, test_data, feature_cols, output_dir=None, **kwargs):
+    """Run ShaRP analysis (backwards compatible)."""
+    return run_explainability_analysis(
+        model, test_data, feature_cols, output_dir,
+        kwargs.get('top_k_features', 20), kwargs.get('sample_size')
+    )

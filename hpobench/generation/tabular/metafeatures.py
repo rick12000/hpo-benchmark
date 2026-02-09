@@ -376,7 +376,6 @@ def calculate_surrogate_metafeatures(
     
     # Build metafeatures dictionary
     metafeatures = {
-        schema.n_surrogate_samples: n_rows,
         schema.n_hyperparameters: n_cols,
         'n_integer_hyperparameters': integer_cols,
         'n_float_hyperparameters': float_cols,
@@ -409,7 +408,6 @@ def _get_nan_surrogate_metafeatures(
         schema = SurrogateMetafeaturesSchema()
     
     return {
-        schema.n_surrogate_samples: np.nan,
         schema.n_hyperparameters: np.nan,
         'n_integer_hyperparameters': np.nan,
         'n_float_hyperparameters': np.nan,

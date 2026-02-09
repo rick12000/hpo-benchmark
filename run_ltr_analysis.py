@@ -45,7 +45,7 @@ def load_raw_benchmark_data(data_path: str) -> pd.DataFrame:
 def main():
     """Run learning-to-rank analysis on benchmark data."""
     
-    data_path = "cache/data/2026-02-08_03-04-42/raw_benchmark_data.csv"
+    data_path = "cache/data/2026-02-09_02-38-54/raw_benchmark_data.csv"
     
     if not Path(data_path).exists():
         logger.error(f"Data file not found: {data_path}")
