@@ -5,7 +5,34 @@ import logging
 from typing import Literal, Optional
 from pathlib import Path
 import gc
+import json
 import numpy as np
+
+try:
+    from confopt.selection.conformalization import QuantileConformalEstimator
+    from confopt.utils.configurations.encoding import ConfigurationEncoder
+except ImportError:
+    raise ImportError(
+        "confopt is a core dependency of this repository, but it is not automatically installed via pyproject.toml, please refer to the README.md for instructions on how to install this separately"
+    )
+
+from hpobench.config.config_types import ExperimentConfig, TunerConfig, IntRange, FloatRange, CategoricalRange
+from hpobench.utils import generate_hyperparameter_combinations, add_runtime
+from hpobench.prepare import (
+    setup_yahpo_instance_configs,
+    setup_synthetic_tabular_configs,
+    _generate_randomized_search_spaces,
+)
+from hpobench.config.schema import BenchmarkDataSchema
+from hpobench.config.constants import Aliases, SyntheticGenerationParameters
+from hpobench.generation.tabular.storage import DatasetStorage
+from hpobench.tune import tune
+from hpobench.report.learning_to_rank.pipeline import run_all_partition_analyses
+
+logger = logging.getLogger(__name__)
+os.environ["SYNETUNE_FOLDER"] = "cache/syne-tune"
+
+aliases = Aliases()
 
 
 try:
@@ -15,105 +42,6 @@ except ImportError:
     raise ImportError(
         "confopt is a core dependency of this repository, but it is not automatically installed via pyproject.toml, please refer to the README.md for instructions on how to install this separately"
     )
-from hpobench.config.config_types import (
-    ExperimentConfig,
-    TunerConfig,
-)
-from hpobench.config.config_types import IntRange, FloatRange, CategoricalRange
-from hpobench.utils import (
-    generate_hyperparameter_combinations,
-    add_runtime,
-)
-from hpobench.prepare import (
-    setup_yahpo_instance_configs,
-    setup_synthetic_tabular_configs,
-    _generate_randomized_search_spaces,
-)
-from hpobench.config.schema import BenchmarkDataSchema
-from hpobench.config.constants import Aliases, SYNTHETIC_TABULAR_STORAGE_DIR
-from hpobench.config.benchmark_data import (
-    SYNTHETIC_TABULAR_SEARCH_SPACE_RF,
-    SYNTHETIC_TABULAR_SEARCH_SPACE_GBT,
-)
-from hpobench.generation.tabular.storage import DatasetStorage
-
-from hpobench.tune import tune
-
-logger = logging.getLogger(__name__)
-os.environ["SYNETUNE_FOLDER"] = "cache/syne-tune"
-
-aliases = Aliases()
-
-
-def _infer_search_space_from_dataset(dataset_id: str) -> dict[str, IntRange | FloatRange | CategoricalRange]:
-    """Infer search space from a synthetic dataset by analyzing column types and ranges.
-    
-    For each feature column in the dataset:
-    - Integer columns: create IntRange(min, max)
-    - Float columns: create FloatRange(min, max)
-    - Categorical columns (binary or multi-category): create CategoricalRange(unique_values)
-    
-    Args:
-        dataset_id: The dataset ID (e.g., "1", "2", etc.)
-        
-    Returns:
-        Dictionary mapping column names to appropriate Range objects
-    """
-    try:
-        storage_dir = Path(SYNTHETIC_TABULAR_STORAGE_DIR)
-        storage = DatasetStorage(str(storage_dir))
-        dataset_id_int = int(dataset_id)
-        
-        features, _, _ = storage.load_dataset(dataset_id_int)
-        
-        search_space = {}
-        
-        for col in features.columns:
-            col_data = features[col]
-            
-            # Try to classify the column type
-            # First check if it looks like integer (all values are whole numbers or close to it)
-            is_integer = False
-            try:
-                # Check if all non-null values are integers or very close to integers
-                non_null = col_data.dropna()
-                if len(non_null) > 0:
-                    int_check = np.allclose(non_null, non_null.astype(int), rtol=1e-9)
-                    if int_check:
-                        is_integer = True
-            except:
-                pass
-            
-            # Check if it's categorical (limited unique values)
-            unique_count = col_data.nunique()
-            is_categorical = unique_count <= 20  # Heuristic: if <= 20 unique values, treat as categorical
-            
-            if is_categorical and not is_integer:
-                # Categorical column
-                unique_values = sorted(col_data.dropna().unique().tolist())
-                search_space[col] = CategoricalRange(choices=unique_values)
-                logger.debug(f"  {col}: CategoricalRange with {len(unique_values)} choices")
-            
-            elif is_integer:
-                # Integer column
-                min_val = int(col_data.min())
-                max_val = int(col_data.max())
-                search_space[col] = IntRange(min=min_val, max=max_val)
-                logger.debug(f"  {col}: IntRange({min_val}, {max_val})")
-            
-            else:
-                # Float column
-                min_val = float(col_data.min())
-                max_val = float(col_data.max())
-                search_space[col] = FloatRange(min=min_val, max=max_val)
-                logger.debug(f"  {col}: FloatRange({min_val}, {max_val})")
-        
-        logger.info(f"Inferred search space for dataset {dataset_id}: {len(search_space)} parameters")
-        return search_space
-    
-    except Exception as e:
-        logger.error(f"Failed to infer search space for dataset {dataset_id}: {e}", exc_info=True)
-        raise
 
 
 def _get_nan_surrogate_metafeatures() -> dict:
@@ -127,6 +55,10 @@ def _get_nan_surrogate_metafeatures() -> dict:
     return {
         schema.n_surrogate_samples: np.nan,
         schema.n_hyperparameters: np.nan,
+        schema.n_integer_hyperparameters: np.nan,
+        schema.n_float_hyperparameters: np.nan,
+        schema.n_binary_categorical_hyperparameters: np.nan,
+        schema.n_multicategory_hyperparameters: np.nan,
         schema.performance_mean: np.nan,
         schema.performance_std: np.nan,
         schema.performance_min: np.nan,
@@ -134,9 +66,17 @@ def _get_nan_surrogate_metafeatures() -> dict:
         schema.performance_range: np.nan,
         schema.performance_skewness: np.nan,
         schema.performance_kurtosis: np.nan,
+        schema.conditional_performance_skewness: np.nan,
+        schema.performance_heteroscedasticity: np.nan,
         schema.best_performance: np.nan,
         schema.avg_config_performance_correlation: np.nan,
         schema.max_config_performance_correlation: np.nan,
+        schema.max_mi_with_target: np.nan,
+        schema.min_mi_with_target: np.nan,
+        schema.avg_mi_with_target: np.nan,
+        schema.max_mi_between_features: np.nan,
+        schema.min_mi_between_features: np.nan,
+        schema.avg_mi_between_features: np.nan,
     }
 
 
@@ -234,80 +174,15 @@ def load_experiment_configs(
         else:
             selected_datasets = all_datasets
 
-        logger.info(
-            f"Setting up synthetic tabular benchmark with {len(selected_datasets)} datasets"
+        configs = setup_synthetic_tabular_configs(
+            datasets=selected_datasets,
+            tuning_configurations=tuning_configurations,
+            n_warm_starts=n_warm_starts,
+            n_trials=n_trials,
+            timeout=timeout,
         )
-        
-        has_confopt_tuners = any(
-            hasattr(t.tuner, "backend") and t.tuner.backend == "confopt"
-            for t in tuning_configurations
-        )
-        
-        if has_confopt_tuners:
-            logger.info(
-                "Confopt tuners detected: using base search spaces only "
-                "(conformal estimators require fixed encoding)"
-            )
-            n_search_space_variations = 1
-        else:
-            n_search_space_variations = 5
-            logger.info(
-                f"Using {n_search_space_variations} randomized search space variations "
-                "(no confopt tuners detected)"
-            )
-        
-        total_configs_before = len(experiment_configs)
-        
-        # For each dataset, infer its search space from the data and create configs
-        for dataset_idx, dataset_id in enumerate(selected_datasets, 1):
-            logger.info(f"[Dataset {dataset_idx}/{len(selected_datasets)}] Processing dataset {dataset_id}")
-            
-            # Infer search space from the dataset itself
-            base_search_space = _infer_search_space_from_dataset(dataset_id)
-            logger.info(
-                f"[Dataset {dataset_idx}] Inferred search space with {len(base_search_space)} parameters"
-            )
-            
-            # Generate search space variations if needed
-            if n_search_space_variations > 1:
-                search_space_variations = _generate_randomized_search_spaces(
-                    base_search_space=base_search_space,
-                    n_variations=n_search_space_variations,
-                    random_state=42 + int(dataset_id),  # Different seed per dataset
-                )
-                logger.info(
-                    f"[Dataset {dataset_idx}] Generated {len(search_space_variations)} search space variation(s)"
-                )
-            else:
-                search_space_variations = [base_search_space]
-            
-            # Create configs for all variations of this dataset
-            for var_idx, search_space in enumerate(search_space_variations, 1):
-                from hpobench.prepare import _calculate_search_space_size
-                space_size = _calculate_search_space_size(search_space)
-                logger.debug(
-                    f"[Dataset {dataset_idx}, Variation {var_idx}] Search space: {len(search_space)} params, ~{space_size} combinations"
-                )
-                
-                configs = setup_synthetic_tabular_configs(
-                    datasets=[dataset_id],
-                    tuning_configurations=tuning_configurations,
-                    n_warm_starts=n_warm_starts,
-                    n_trials=n_trials,
-                    timeout=timeout,
-                    search_space=search_space,
-                )
-                experiment_configs.extend(configs)
-            
-            logger.info(
-                f"[Dataset {dataset_idx}] Created {len(search_space_variations)} config(s) for dataset {dataset_id}"
-            )
-        
-        total_configs_added = len(experiment_configs) - total_configs_before
-        logger.info(
-            f"Synthetic tabular benchmark setup complete: added {total_configs_added} configurations "
-            f"({n_search_space_variations} variation(s) × {len(selected_datasets)} datasets)"
-        )
+        experiment_configs.extend(configs)
+
 
     return experiment_configs
 
@@ -417,18 +292,10 @@ def run_main_benchmark(
     
     for config_idx, experiment_config in enumerate(experiment_configs, 1):
         dataset_name = experiment_config.dataset_identifier
-        benchmark_name = experiment_config.benchmark_identifier
-        search_space_size = len(experiment_config.search_space)
-        n_tuners = len(experiment_config.tuner_configurations)
-        n_warm_start_counts = len(experiment_config.n_warm_starts)
-        
         logger.info(
             f"[Config {config_idx}/{len(experiment_configs)}] Dataset: {dataset_name} | "
-            f"Benchmark: {benchmark_name} | Search space: {search_space_size} params | "
-            f"Tuners: {n_tuners} | Warm start configurations: {n_warm_start_counts}"
         )
 
-        logger.info(f"Initializing objective function for: {dataset_name}...")
         experiment_config.objective_function.initialize()
 
         # Loop over each warm start count
@@ -633,6 +500,28 @@ def run_main_benchmark(
     return raw_benchmark_data
 
 
+
+def run_learning_to_rank_analysis(
+    raw_benchmark_data: pd.DataFrame,
+    schema: BenchmarkDataSchema,
+    train_size: float = 0.7,
+    val_size: float = 0.15,
+    random_state: int = 42,
+    k_values: list[int] = [1, 3],
+    xgb_params: dict | None = None,
+) -> dict:
+    """Run learning-to-rank analysis on all data partitions."""
+    return run_all_partition_analyses(
+        raw_benchmark_data=raw_benchmark_data,
+        schema=schema,
+        train_size=train_size,
+        val_size=val_size,
+        random_state=random_state,
+        k_values=k_values,
+        xgb_params=xgb_params,
+    )
+
+
 def run_and_analyze_main_benchmark(
     benchmarks: list[
         Literal[
@@ -654,25 +543,7 @@ def run_and_analyze_main_benchmark(
     schema: BenchmarkDataSchema,
     cache_path: str,
     run_start_str: str,
-    analysis_type: str,
-    analysis_components: list[
-        Literal[
-            "friedman",
-            "nemenyi",
-            "wilcoxon",
-            "permutation_test",
-            "coverage",
-            "dataset_performances",
-            "rank_analysis",
-            "sampler_comparison",
-            "architecture_comparison",
-            "conformalization_effect",
-            "quantile_count_comparison",
-            "search_tuning_effect_comparison",
-        ]
-    ],
     max_n_instances_per_benchmark: int = 10,
-    starting_coverage_trial: Optional[int] = None,
     n_repetitions: int = 10,
     datasets_per_benchmark: Optional[list[list[str]]] = None,
 ) -> pd.DataFrame:
@@ -758,164 +629,56 @@ def run_and_analyze_main_benchmark(
         run_start_str=run_start_str,
     )
 
+    # Run learning-to-rank analysis
+    logger.info("Running learning-to-rank analysis on benchmark results")
+    from hpobench.report.learning_to_rank.pipeline import run_all_partition_analyses
+    
+    results_dir = Path(cache_path) / "ltr_results" / run_start_str
+    ltr_results = run_all_partition_analyses(
+        raw_benchmark_data=raw_benchmark_data,
+        schema=schema,
+        train_size=0.7,
+        val_size=0.15,
+        random_state=base_random_state,
+        k_values=[1, 3],
+        xgb_params=None,
+        output_dir=results_dir,
+    )
+    
+    # Save detailed results per partition
+    _save_partition_results(ltr_results, results_dir)
+    
+    logger.info("Learning-to-rank analysis completed successfully")
+    return raw_benchmark_data
 
-def run_learning_to_rank_analysis(
-    raw_benchmark_data: pd.DataFrame,
-    schema: BenchmarkDataSchema,
-    train_size: float = 0.7,
-    val_size: float = 0.15,
-    random_state: int = 42,
-    k_values: list[int] = [1, 3],
-    xgb_params: Optional[dict] = None,
-    run_shap_analysis: bool = True,
-    shap_output_dir: Optional[Path] = None,
-    shap_sample_size: Optional[int] = None,
-    shap_n_jobs: int = 1,
-    shap_top_k_features: int = 20,
-) -> dict:
-    """Run complete learning-to-rank analysis pipeline.
+
+def _save_partition_results(ltr_results: dict[str, dict], results_dir: Path) -> None:
+    """Save LTR results for each partition."""
+    import json
     
-    Args:
-        raw_benchmark_data: Raw benchmark results from run_main_benchmark
-        train_size: Proportion of ranking groups for training
-        val_size: Proportion of ranking groups for validation
-        random_state: Random seed for reproducibility
-        k_values: List of k values for evaluation metrics
-        schema: Optional BenchmarkDataSchema for column naming
-        xgb_params: Optional XGBoost parameters
-        run_shap_analysis: Whether to run ShaRP explainability analysis
-        shap_output_dir: Directory to save SHAP plots and results
-        shap_sample_size: Number of samples for SHAP perturbation (None uses all)
-        shap_n_jobs: Number of parallel jobs for SHAP computation
-        shap_top_k_features: Number of top features to display in plots
+    for config_name, result in ltr_results.items():
+        if not result:
+            continue
         
-    Returns:
-        Dictionary containing:
-            - ltr_model: Trained XGBoost model
-            - naive_ranker: Naive popularity ranker
-            - ltr_metrics: LTR model evaluation metrics
-            - naive_metrics: Naive ranker evaluation metrics
-            - test_data: Test data for further analysis
-            - feature_cols: List of feature columns used
-            - shap_results: SHAP analysis results (if run_shap_analysis=True)
-    """
-    from hpobench.report.learning_to_rank import (
-        prepare_ranking_data,
-        split_ranking_groups,
-        train_naive_ranker,
-        train_ltr_model,
-        evaluate_ltr_model,
-        evaluate_naive_ranker,
-        run_sharp_analysis,
-    )
+        partition_dir = results_dir / config_name
+        partition_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Save metrics
+        metrics = {
+            'config_name': config_name,
+            'partition': result['partition'],
+            'strategy': result['strategy'],
+            'n_train_rows': result['n_train_rows'],
+            'n_val_rows': result['n_val_rows'],
+            'n_test_rows': result['n_test_rows'],
+            'ltr_metrics': result['ltr_metrics'],
+            'naive_metrics': result['naive_metrics'],
+        }
+        
+        with open(partition_dir / "metrics.json", 'w') as f:
+            json.dump(metrics, f, indent=2)
+        
+        result['test_data'].to_csv(partition_dir / "test_data.csv", index=False)
     
-    logger.info("Starting learning-to-rank analysis")
-    
-    ranking_data = prepare_ranking_data(raw_benchmark_data, schema)
-    
-    train_data, val_data, test_data = split_ranking_groups(
-        ranking_data=ranking_data,
-        train_size=train_size,
-        val_size=val_size,
-        random_state=random_state,
-        schema=schema,
-    )
-    
-    naive_ranker = train_naive_ranker(train_data, schema)
-    
-    # Include repetition, n_random_warm_starts and surrogate metafeatures
-    cols_to_include = (
-        [schema.data_col, schema.rep_col, schema.n_random_warm_starts_col, schema.tuner_col, 
-         schema.performance_col, schema.ranking_group_col, schema.label_col] +
-        schema.surrogate_metafeatures.to_list()
-    )
-    
-    # Filter to only include columns that exist in the data
-    # Exclude grouping/target columns, keep only features
-    feature_cols = [
-        col for col in ranking_data.columns 
-        if col in cols_to_include and col not in [schema.data_col, schema.rep_col, schema.tuner_col, 
-                                                    schema.performance_col, schema.ranking_group_col, 
-                                                    schema.label_col]
-    ]
-    
-    logger.info(f"Using {len(feature_cols)} features for LTR model")
-    
-    ltr_model = train_ltr_model(
-        train_data=train_data,
-        val_data=val_data,
-        feature_cols=feature_cols,
-        schema=schema,
-        xgb_params=xgb_params,
-    )
-    
-    logger.info("Evaluating models on test set")
-    
-    ltr_metrics = evaluate_ltr_model(
-        model=ltr_model,
-        test_data=test_data,
-        feature_cols=feature_cols,
-        k_values=k_values,
-        schema=schema,
-    )
-    
-    naive_metrics = evaluate_naive_ranker(
-        naive_ranker=naive_ranker,
-        test_data=test_data,
-        k_values=k_values,
-        schema=schema,
-    )
-    
-    logger.info("\n=== Learning-to-Rank Results ===")
-    logger.info("LTR Model:")
-    for metric_name, metric_value in ltr_metrics.items():
-        logger.info(f"  {metric_name}: {metric_value:.4f}")
-    
-    logger.info("\nNaive Ranker:")
-    for metric_name, metric_value in naive_metrics.items():
-        logger.info(f"  {metric_name}: {metric_value:.4f}")
-    
-    logger.info("\nImprovement over Naive Ranker:")
-    for k in k_values:
-        precision_improvement = (
-            ltr_metrics[f'precision@{k}'] - naive_metrics[f'precision@{k}']
-        )
-        ndcg_improvement = (
-            ltr_metrics[f'ndcg@{k}'] - naive_metrics[f'ndcg@{k}']
-        )
-        logger.info(f"  Precision@{k}: {precision_improvement:+.4f}")
-        logger.info(f"  NDCG@{k}: {ndcg_improvement:+.4f}")
-    
-    results = {
-        'ltr_model': ltr_model,
-        'naive_ranker': naive_ranker,
-        'ltr_metrics': ltr_metrics,
-        'naive_metrics': naive_metrics,
-        'test_data': test_data,
-        'feature_cols': feature_cols,
-    }
-    
-    if run_shap_analysis:
-        try:
-            logger.info("\n=== Starting ShaRP Explainability Analysis ===")
-            shap_results = run_sharp_analysis(
-                model=ltr_model,
-                test_data=test_data,
-                feature_cols=feature_cols,
-                output_dir=shap_output_dir,
-                qoi="rank",
-                sample_size=shap_sample_size,
-                random_state=random_state,
-                n_jobs=shap_n_jobs,
-                top_k_features=shap_top_k_features,
-                schema=schema,
-            )
-            results['shap_results'] = shap_results
-            logger.info("ShaRP explainability analysis completed successfully")
-        except ImportError as e:
-            logger.warning(f"Skipping SHAP analysis: {e}")
-        except Exception as e:
-            logger.error(f"Error during SHAP analysis: {e}", exc_info=True)
-            logger.warning("Continuing without SHAP results")
-    
-    return results
+    logger.info(f"Results saved to {results_dir}")
+

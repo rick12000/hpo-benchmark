@@ -1,7 +1,6 @@
 import pandas as pd
 import numpy as np
 import logging
-from typing import Optional
 import xgboost as xgb
 from pathlib import Path
 from hpobench.config.schema import BenchmarkDataSchema
@@ -43,10 +42,10 @@ def compute_sharp_explanations(
     test_data: pd.DataFrame,
     feature_cols: list[str],
     qoi: str = "rank",
-    sample_size: Optional[int] = None,
+    sample_size: int | None = None,
     random_state: int = 42,
     n_jobs: int = 1,
-    schema: Optional[BenchmarkDataSchema] = None,
+    schema: BenchmarkDataSchema | None = None,
 ) -> dict:
     """Compute ShaRP explanations for learning-to-rank model.
     
@@ -124,7 +123,7 @@ def compute_sharp_explanations(
 def create_global_importance_plot(
     sharp_values: np.ndarray,
     feature_names: list[str],
-    output_path: Optional[Path] = None,
+    output_path: Path | None = None,
     top_k: int = 20,
 ) -> None:
     """Create waterfall plot of global feature importance.
@@ -186,7 +185,7 @@ def create_beeswarm_plot(
     sharp_values: np.ndarray,
     feature_matrix: np.ndarray,
     feature_names: list[str],
-    output_path: Optional[Path] = None,
+    output_path: Path | None = None,
     top_k: int = 20,
 ) -> None:
     """Create beeswarm plot showing feature value distributions and SHAP values.
@@ -267,7 +266,7 @@ def create_beeswarm_plot(
 def create_feature_importance_summary(
     sharp_values: np.ndarray,
     feature_names: list[str],
-    output_path: Optional[Path] = None,
+    output_path: Path | None = None,
 ) -> pd.DataFrame:
     """Create summary table of feature importance statistics.
     
@@ -312,13 +311,13 @@ def run_sharp_analysis(
     model: xgb.Booster,
     test_data: pd.DataFrame,
     feature_cols: list[str],
-    output_dir: Optional[Path] = None,
+    output_dir: Path | None = None,
     qoi: str = "rank",
-    sample_size: Optional[int] = None,
+    sample_size: int | None = None,
     random_state: int = 42,
     n_jobs: int = 1,
     top_k_features: int = 20,
-    schema: Optional[BenchmarkDataSchema] = None,
+    schema: BenchmarkDataSchema | None = None,
 ) -> dict:
     """Run complete ShaRP explainability analysis.
     

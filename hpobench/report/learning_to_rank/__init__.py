@@ -1,7 +1,7 @@
 from hpobench.report.learning_to_rank.data_preparation import (
     aggregate_raw_benchmark_data_across_seeds,
     prepare_ranking_data,
-    split_ranking_groups,
+    filter_data_by_partition,
 )
 from hpobench.report.learning_to_rank.training import (
     train_naive_ranker,
@@ -25,7 +25,7 @@ from hpobench.report.learning_to_rank.explainability import (
 __all__ = [
     'aggregate_raw_benchmark_data_across_seeds',
     'prepare_ranking_data',
-    'split_ranking_groups',
+    'filter_data_by_partition',
     'train_naive_ranker',
     'train_ltr_model',
     'calculate_precision_at_k',

@@ -1,7 +1,6 @@
 import pandas as pd
 import numpy as np
 import logging
-from typing import Optional
 import xgboost as xgb
 from sklearn.metrics import ndcg_score
 from hpobench.config.schema import BenchmarkDataSchema
@@ -59,7 +58,7 @@ def evaluate_ltr_model(
     test_data: pd.DataFrame,
     feature_cols: list[str],
     k_values: list[int] = [1, 3],
-    schema: Optional[BenchmarkDataSchema] = None,
+    schema: BenchmarkDataSchema | None = None,
 ) -> dict[str, float]:
     """Evaluate learning-to-rank model on test data.
     
@@ -122,7 +121,7 @@ def evaluate_naive_ranker(
     naive_ranker: dict[str, float],
     test_data: pd.DataFrame,
     k_values: list[int] = [1, 3],
-    schema: Optional[BenchmarkDataSchema] = None,
+    schema: BenchmarkDataSchema | None = None,
 ) -> dict[str, float]:
     """Evaluate naive popularity ranker on test data.
     

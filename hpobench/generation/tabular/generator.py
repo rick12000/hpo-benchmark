@@ -17,7 +17,7 @@ Key Features:
 
 import random
 import numpy as np
-from typing import Tuple, Optional, Dict, Callable, List
+from typing import Tuple, Optional, Dict, Callable, List, Union
 from dataclasses import dataclass
 import logging
 
@@ -484,11 +484,13 @@ class SCMDataGenerator:
         n_features_range: Tuple[int, int] = (2, 20),
         n_classes_range: Tuple[int, int] = (2, 10),
         is_regression: bool = False,
+        search_space: Optional[Dict] = None,
     ):
         self.n_samples_range = n_samples_range
         self.n_features_range = n_features_range
         self.n_classes_range = n_classes_range
         self.is_regression = is_regression
+        self.search_space = search_space
     
     def generate(
         self,
@@ -672,7 +674,7 @@ class SCMDataGenerator:
         train_size = max(1, int(hp.n_samples * train_ratio))
         train_size = min(train_size, hp.n_samples - 1)
         
-        return SyntheticDataset(
+        dataset = SyntheticDataset(
             X=X.astype(np.float32),
             y=y,
             train_size=train_size,
@@ -681,3 +683,102 @@ class SCMDataGenerator:
             categorical_mask=categorical_mask,
             missing_mask=missing_mask,
         )
+        
+        # If search space is provided, post-process to match it
+        if self.search_space is not None:
+            dataset = self._match_to_search_space(dataset)
+        
+        return dataset
+    
+    def _match_to_search_space(self, dataset: SyntheticDataset) -> SyntheticDataset:
+        """Post-process dataset to match search space specifications.
+        
+        Args:
+            dataset: Generated synthetic dataset
+            
+        Returns:
+            Modified dataset matching search space constraints
+        """
+        from hpobench.config.config_types import IntRange, FloatRange, CategoricalRange
+        
+        n_hp = len(self.search_space)
+        X = dataset.X
+        
+        # Ensure we have the right number of features
+        if X.shape[1] < n_hp:
+            # Pad with random features
+            n_missing = n_hp - X.shape[1]
+            padding = np.random.randn(X.shape[0], n_missing)
+            X = np.concatenate([X, padding], axis=1)
+        elif X.shape[1] > n_hp:
+            # Truncate
+            X = X[:, :n_hp]
+        
+        # Process each hyperparameter
+        new_X = np.zeros_like(X)
+        new_categorical_mask = np.zeros(n_hp, dtype=bool)
+        
+        for i, (hp_name, hp_range) in enumerate(self.search_space.items()):
+            col = X[:, i]
+            
+            if isinstance(hp_range, IntRange):
+                # Scale to integer range
+                col_min, col_max = col.min(), col.max()
+                if col_max - col_min > 1e-8:
+                    # Normalize to [0, 1]
+                    col_norm = (col - col_min) / (col_max - col_min)
+                else:
+                    col_norm = np.ones_like(col) * 0.5
+                
+                # Scale to target range
+                new_col = col_norm * (hp_range.upper - hp_range.lower) + hp_range.lower
+                new_col = np.round(new_col).astype(int)
+                new_col = np.clip(new_col, hp_range.lower, hp_range.upper)
+                new_X[:, i] = new_col.astype(float)
+                
+            elif isinstance(hp_range, FloatRange):
+                # Scale to float range
+                col_min, col_max = col.min(), col.max()
+                if col_max - col_min > 1e-8:
+                    # Normalize to [0, 1]
+                    col_norm = (col - col_min) / (col_max - col_min)
+                else:
+                    col_norm = np.ones_like(col) * 0.5
+                
+                # Scale to target range
+                if hp_range.log:
+                    # Log scale
+                    log_lower = np.log10(max(hp_range.lower, 1e-10))
+                    log_upper = np.log10(max(hp_range.upper, 1e-10))
+                    new_col = 10 ** (col_norm * (log_upper - log_lower) + log_lower)
+                else:
+                    # Linear scale
+                    new_col = col_norm * (hp_range.upper - hp_range.lower) + hp_range.lower
+                
+                new_col = np.clip(new_col, hp_range.lower, hp_range.upper)
+                new_X[:, i] = new_col
+                
+            elif isinstance(hp_range, CategoricalRange):
+                # Discretize to categorical choices
+                n_categories = len(hp_range.choices)
+                
+                # Normalize column
+                col_min, col_max = col.min(), col.max()
+                if col_max - col_min > 1e-8:
+                    col_norm = (col - col_min) / (col_max - col_min)
+                else:
+                    col_norm = np.random.rand(len(col))
+                
+                # Map to category indices
+                category_indices = (col_norm * n_categories).astype(int)
+                category_indices = np.clip(category_indices, 0, n_categories - 1)
+                
+                # For now, store as numeric indices (will be mapped to actual values later)
+                new_X[:, i] = category_indices.astype(float)
+                new_categorical_mask[i] = True
+        
+        # Update dataset
+        dataset.X = new_X.astype(np.float32)
+        dataset.categorical_mask = new_categorical_mask
+        
+        return dataset

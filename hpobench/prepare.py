@@ -17,11 +17,8 @@ from hpobench.config.config_types import (
 )
 from hpobench.config.benchmark_data import (
     BLACK_BOX_SEARCH_SPACE,
-    YAHPO_SUBSETS,
-    SYNTHETIC_TABULAR_SEARCH_SPACE_RF,
-    SYNTHETIC_TABULAR_SEARCH_SPACE_GBT,
-)
-from hpobench.config.constants import SYNTHETIC_TABULAR_STORAGE_DIR
+    YAHPO_SUBSETS)
+from hpobench.config.constants import SyntheticGenerationParameters
 from yahpo_gym import BenchmarkSet
 import ConfigSpace as CS
 from typing import Optional, Union
@@ -400,12 +397,11 @@ def setup_synthetic_tabular_configs(
     n_warm_starts: list[int],
     n_trials: int,
     timeout: int,
-    search_space: Optional[dict[str, Union[IntRange, FloatRange, CategoricalRange]]] = None,
 ) -> list[ExperimentConfig]:
     """Create experiment configurations for synthetic tabular benchmark.
     
-    Synthetic data represents precomputed surrogate performance landscapes (like YAHPO/lcbench).
-    No model type is needed since the data is already computed.
+    Loads search spaces from central metadata.json. Each dataset has an associated
+    search space that was used during generation.
     
     Args:
         datasets: List of dataset identifiers
@@ -413,17 +409,38 @@ def setup_synthetic_tabular_configs(
         n_warm_starts: List of warm start configuration counts
         n_trials: Number of optimization trials
         timeout: Timeout per evaluation
-        search_space: Hyperparameter search space. If None, uses default.
         
     Returns:
         List of experiment configurations
     """
-    experiment_configs = []
+    from pathlib import Path
+    from hpobench.generation.tabular.metadata_manager import CentralMetadataManager
     
-    if search_space is None:
-        search_space = SYNTHETIC_TABULAR_SEARCH_SPACE_RF
+    synthetic_generation = SyntheticGenerationParameters()
+    experiment_configs = []
+    storage_dir = Path(synthetic_generation.storage_dir)
+    
+    # Use central metadata manager
+    metadata_manager = CentralMetadataManager(str(storage_dir))
+
     
     for dataset in datasets:
+        dataset_id = int(dataset)
+        
+        # Load search space from central metadata
+        search_space = metadata_manager.get_search_space_for_dataset(dataset_id)
+        
+        if search_space is None:
+            logger.warning(
+                f"No search space found for dataset {dataset} in central metadata. Skipping."
+            )
+            continue
+        
+        logger.info(
+            f"Loaded search space for dataset {dataset} with "
+            f"{len(search_space)} hyperparameters"
+        )
+        
         experiment_configs.append(
             ExperimentConfig(
                 search_space=search_space,
@@ -436,7 +453,7 @@ def setup_synthetic_tabular_configs(
                 n_warm_starts=n_warm_starts,
                 n_trials=n_trials,
                 timeout=timeout,
-                benchmark_identifier="synthetic_tabular",
+                benchmark_identifier=synthetic_generation.benchmark_identifier,
                 dataset_identifier=dataset,
             )
         )

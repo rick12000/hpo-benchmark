@@ -1,7 +1,16 @@
 from pydantic import BaseModel
 from typing import Optional, List, Dict
 
-SYNTHETIC_TABULAR_STORAGE_DIR = "cache/tabular_datasets"
+
+class SyntheticGenerationParameters(BaseModel):
+    """Configuration for synthetic tabular dataset generation."""
+    
+    storage_dir: str = "cache/tabular_datasets"
+    benchmark_identifier: str = "Synthetic-Tabular"
+    n_benchmarks: int = 3
+    n_datasets_per_benchmark: int = 5
+    min_hyperparameters: int = 3
+    max_hyperparameters: int = 15
 
 
 class ExperimentParameters(BaseModel):
@@ -18,13 +27,13 @@ class ExperimentParameters(BaseModel):
         large_n_repetitions_per_tuner_config: Repetitions for large experiments.
     """
 
-    n_trials: Optional[int] = 50
+    n_trials: Optional[int] = 1
 
     timeout: Optional[int] = None
-    n_warm_starts: List[int] = [15, 30, 50]
-    default_max_n_instances: int = 10
+    n_warm_starts: List[int] = [15, 30]
+    max_n_instances: int = 20
 
-    medium_n_repetitions_per_tuner_config: int = 2
+    n_repetitions_per_tuner_config: int = 5
 
 
 class Aliases(BaseModel):
@@ -53,3 +62,7 @@ class Aliases(BaseModel):
     benchmark_aliases: Dict[str, str] = {
         "synthetic_tabular": "Synthetic-Tabular",
     }
+
+
+# Create global instances
+synthetic_generation = SyntheticGenerationParameters()

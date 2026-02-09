@@ -1,6 +1,5 @@
 import pandas as pd
 import logging
-from typing import Optional
 import xgboost as xgb
 from hpobench.config.schema import BenchmarkDataSchema
 
@@ -29,7 +28,7 @@ def train_ltr_model(
     val_data: pd.DataFrame,
     feature_cols: list[str],
     schema: BenchmarkDataSchema,
-    xgb_params: Optional[dict] = None,
+    xgb_params: dict | None = None,
 ) -> xgb.Booster:
 
     logger.info("Training XGBoost learning-to-rank model")

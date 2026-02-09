@@ -34,19 +34,3 @@ BLACK_BOX_SEARCH_SPACE = {}
 for n in range(n_synthetic_params):
     BLACK_BOX_SEARCH_SPACE[f"param{n}"] = FloatRange(lower=0, upper=100)
 BLACK_BOX_IDS: list[str] = ["rastrigin", "shekel", "weierstrass", "griewank", "ackley"]
-
-# TODO: Create more varied mix of int and cat:
-SYNTHETIC_TABULAR_SEARCH_SPACE_RF = {
-    "n_estimators": IntRange(lower=50, upper=300),
-    "max_depth": IntRange(lower=5, upper=30),
-    "min_samples_split": IntRange(lower=2, upper=10),
-    "min_samples_leaf": IntRange(lower=1, upper=4),
-}
-
-SYNTHETIC_TABULAR_SEARCH_SPACE_GBT = {
-    "n_estimators": IntRange(lower=50, upper=300),
-    "learning_rate": FloatRange(lower=0.01, upper=0.3, log=True),
-    "max_depth": IntRange(lower=3, upper=10),
-    "min_samples_split": IntRange(lower=2, upper=10),
-    "min_samples_leaf": IntRange(lower=1, upper=4),
-}

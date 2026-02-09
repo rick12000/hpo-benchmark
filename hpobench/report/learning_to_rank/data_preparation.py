@@ -1,10 +1,41 @@
 import pandas as pd
 import logging
-from typing import Optional
-from sklearn.model_selection import GroupShuffleSplit
+from typing import Literal
 from hpobench.config.schema import BenchmarkDataSchema
+from hpobench.config.constants import SyntheticGenerationParameters
 
 logger = logging.getLogger(__name__)
+synthetic_generation = SyntheticGenerationParameters()
+
+
+def filter_data_by_partition(
+    data: pd.DataFrame,
+    partition: Literal['all', 'synthetic', 'real'],
+) -> pd.DataFrame:
+    """Filter benchmark data by partition type.
+    
+    Args:
+        data: Raw benchmark data
+        partition: Partition type - 'all', 'synthetic', or 'real'
+        
+    Returns:
+        Filtered DataFrame
+    """
+    if partition == 'all':
+        return data.copy()
+    
+    elif partition == 'synthetic':
+        filtered = data[data['benchmark_identifier'] == synthetic_generation.benchmark_identifier].copy()
+        logger.info(f"Synthetic only: {len(filtered)} rows ({len(filtered)/len(data)*100:.1f}%)")
+        return filtered
+    
+    elif partition == 'real':
+        filtered = data[data['benchmark_identifier'] != synthetic_generation.benchmark_identifier].copy()
+        logger.info(f"Real only: {len(filtered)} rows ({len(filtered)/len(data)*100:.1f}%)")
+        return filtered
+    
+    else:
+        raise ValueError(f"Unknown partition: {partition}")
 
 
 def aggregate_raw_benchmark_data_across_seeds(
@@ -20,7 +51,7 @@ def aggregate_raw_benchmark_data_across_seeds(
     # Include repetition in grouping since metafeatures differ per repetition
     group_cols = [schema.data_col, schema.rep_col, schema.n_random_warm_starts_col]
     
-    # Only surrogate metafeatures (no search space metafeatures)
+    # Only surrogate metafeatures
     metafeature_cols = schema.surrogate_metafeatures.to_list()
     
     ranked_data = raw_benchmark_data.copy()
@@ -52,16 +83,27 @@ def prepare_ranking_data(
     """
     ranked_data = aggregate_raw_benchmark_data_across_seeds(raw_benchmark_data, schema)
     
-    # Only surrogate metafeatures
+    # Only surrogate metafeatures (now includes conditional_performance_skewness, 
+    # performance_heteroscedasticity, and MI features via updated schema)
     metafeature_cols = schema.surrogate_metafeatures.to_list()
     
     # Filter to only include columns that exist in the data
     existing_metafeatures = [m for m in metafeature_cols if m in ranked_data.columns]
     
-    # Include repetition in the ranking data
-    ranking_data = ranked_data[
-        [schema.data_col, schema.rep_col, schema.n_random_warm_starts_col, schema.tuner_col, schema.label_col] + existing_metafeatures
-    ].copy()
+    # Include benchmark_identifier for partition filtering
+    cols_to_include = [
+        schema.data_col, 
+        schema.rep_col, 
+        schema.n_random_warm_starts_col, 
+        schema.tuner_col, 
+        schema.label_col,
+        'benchmark_identifier',  # Add benchmark identifier for filtering
+    ] + existing_metafeatures
+    
+    # Filter to only columns that exist
+    cols_to_include = [c for c in cols_to_include if c in ranked_data.columns]
+    
+    ranking_data = ranked_data[cols_to_include].copy()
     
     # Create ranking group using dataset + repetition + n_warm_starts (for learning-to-rank)
     ranking_data[schema.ranking_group_col] = (
@@ -85,65 +127,3 @@ def prepare_ranking_data(
     )
     
     return ranking_data
-
-
-def split_ranking_groups(
-    ranking_data: pd.DataFrame,
-    schema: BenchmarkDataSchema,
-    train_size: float = 0.7,
-    val_size: float = 0.15,
-    random_state: int = 42,
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Split ranking data by dataset (keeping all repetitions together).
-    
-    Uses 'split_group' (dataset + n_warm_starts without repetition) for splitting,
-    ensuring all repetitions of a dataset stay together in the same split.
-    This prevents the model from overfitting by accidentally seeing different
-    repetitions of the same dataset in train/test/val sets.
-    """
-    
-    unique_split_groups = ranking_data['split_group'].unique()
-    n_split_groups = len(unique_split_groups)
-    
-    logger.info(f"Total split groups (dataset + n_warm_starts): {n_split_groups}")
-    
-    # Split on split_group to keep all repetitions of a dataset together
-    train_val_splitter = GroupShuffleSplit(
-        n_splits=1, 
-        train_size=train_size + val_size,
-        random_state=random_state
-    )
-    
-    train_val_idx, test_idx = next(
-        train_val_splitter.split(
-            ranking_data, 
-            groups=ranking_data['split_group']
-        )
-    )
-    
-    train_val_data = ranking_data.iloc[train_val_idx]
-    test_data = ranking_data.iloc[test_idx]
-    
-    val_proportion_of_train_val = val_size / (train_size + val_size)
-    
-    train_val_splitter_2 = GroupShuffleSplit(
-        n_splits=1,
-        test_size=val_proportion_of_train_val,
-        random_state=random_state
-    )
-    
-    train_idx, val_idx = next(
-        train_val_splitter_2.split(
-            train_val_data,
-            groups=train_val_data['split_group']
-        )
-    )
-    
-    train_data = train_val_data.iloc[train_idx]
-    val_data = train_val_data.iloc[val_idx]
-    
-    logger.info(f"Train: {train_data['split_group'].nunique()} split groups, {len(train_data)} rows")
-    logger.info(f"Val: {val_data['split_group'].nunique()} split groups, {len(val_data)} rows")
-    logger.info(f"Test: {test_data['split_group'].nunique()} split groups, {len(test_data)} rows")
-    
-    return train_data, val_data, test_data

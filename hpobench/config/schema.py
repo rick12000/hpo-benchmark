@@ -13,11 +13,19 @@ class SurrogateMetafeaturesSchema(BaseModel):
     - Size of the surrogate dataset (number of config-performance pairs)
     - Performance landscape statistics (mean, std, range, distribution shape)
     - Relationships between hyperparameters and performance
+    - Conditional performance characteristics and heteroscedasticity
+    - Mutual information between features and target
     """
     
     # Size metafeatures
     n_surrogate_samples: str = "n_surrogate_samples"
     n_hyperparameters: str = "n_hyperparameters"
+    
+    # Hyperparameter type statistics
+    n_integer_hyperparameters: str = "n_integer_hyperparameters"
+    n_float_hyperparameters: str = "n_float_hyperparameters"
+    n_binary_categorical_hyperparameters: str = "n_binary_categorical_hyperparameters"
+    n_multicategory_hyperparameters: str = "n_multicategory_hyperparameters"
     
     # Performance statistics
     performance_mean: str = "performance_mean"
@@ -28,12 +36,26 @@ class SurrogateMetafeaturesSchema(BaseModel):
     performance_skewness: str = "performance_skewness"
     performance_kurtosis: str = "performance_kurtosis"
     
+    # Conditional performance characteristics
+    conditional_performance_skewness: str = "conditional_performance_skewness"
+    performance_heteroscedasticity: str = "performance_heteroscedasticity"
+    
     # Best performance (for reference)
     best_performance: str = "best_performance"
     
     # Correlation between hyperparameters and performance
     avg_config_performance_correlation: str = "avg_config_performance_correlation"
     max_config_performance_correlation: str = "max_config_performance_correlation"
+    
+    # Mutual information between features and target
+    max_mi_with_target: str = "max_mi_with_target"
+    min_mi_with_target: str = "min_mi_with_target"
+    avg_mi_with_target: str = "avg_mi_with_target"
+    
+    # Mutual information between features
+    max_mi_between_features: str = "max_mi_between_features"
+    min_mi_between_features: str = "min_mi_between_features"
+    avg_mi_between_features: str = "avg_mi_between_features"
     
     def to_list(self) -> List[str]:
         """Get all surrogate metafeature column names as a list."""

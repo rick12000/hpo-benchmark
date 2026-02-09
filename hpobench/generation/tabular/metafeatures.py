@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 from typing import Dict, Optional, List, Union
 import logging
+import warnings
 from scipy import stats
 from sklearn.preprocessing import StandardScaler
 from sklearn.neighbors import NearestNeighbors
@@ -11,6 +12,8 @@ from sklearn.cluster import KMeans
 import statsmodels.api as sm
 from sklearn.feature_selection import mutual_info_regression
 from hpobench.config.schema import SurrogateMetafeaturesSchema
+from hpobench.generation.tabular.preprocessing import preprocess_for_metafeatures
+from hpobench.config.config_types import IntRange, FloatRange, CategoricalRange
 
 logger = logging.getLogger(__name__)
 
@@ -144,7 +147,15 @@ def calculate_heteroscedasticity_score(X: np.ndarray, y: np.ndarray, max_samples
             n_restarts_optimizer=2,
             random_state=42,
         )
-        gp.fit(X_scaled, y_scaled)
+        
+        # Suppress sklearn GP convergence warnings about length_scale bounds
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                category=Warning,
+                message=".*length_scale.*close to.*bound.*",
+            )
+            gp.fit(X_scaled, y_scaled)
         
         # Get predictions and residuals
         X_scaled_all = scaler_X.transform(X)
@@ -263,6 +274,7 @@ def calculate_surrogate_metafeatures(
     configs: List[Dict[str, Union[int, float, str]]],
     performances: List[float],
     schema: Optional[SurrogateMetafeaturesSchema] = None,
+    search_space: Optional[Dict[str, Union[IntRange, FloatRange, CategoricalRange]]] = None,
 ) -> Dict:
     """Calculate meaningful metafeatures from surrogate data.
     
@@ -272,10 +284,15 @@ def calculate_surrogate_metafeatures(
     - Mutual information (max/min/avg MI with target, max/min/avg MI between features)
     - Conditional skewness and heteroscedasticity
     
+    Preprocessing is applied before metafeature calculation:
+    1. One-hot encode categorical features
+    2. Normalize non-binary features
+    
     Args:
         configs: List of hyperparameter configuration dictionaries
         performances: List of performance values
         schema: Optional SurrogateMetafeaturesSchema
+        search_space: Optional search space to identify categorical features
         
     Returns:
         Dictionary of calculated metafeatures
@@ -297,6 +314,22 @@ def calculate_surrogate_metafeatures(
     # Convert configs to dataframe for analysis
     configs_df = pd.DataFrame(configs)
     
+    # Apply preprocessing: one-hot encode categoricals and normalize non-binary features
+    try:
+        X_preprocessed, preprocess_metadata = preprocess_for_metafeatures(
+            configs, search_space
+        )
+    except Exception as e:
+        logger.warning(f"Preprocessing failed: {e}. Using raw features.")
+        # Fall back to simple numeric conversion
+        X_preprocessed = configs_df.copy()
+        for col in X_preprocessed.columns:
+            try:
+                X_preprocessed[col] = pd.to_numeric(X_preprocessed[col], errors='coerce')
+            except:
+                X_preprocessed[col] = pd.factorize(X_preprocessed[col])[0]
+        X_preprocessed = X_preprocessed.fillna(0).values
+    
     # Calculate column types
     n_rows = len(configs_df)
     n_cols = len(configs_df.columns)
@@ -317,29 +350,18 @@ def calculate_surrogate_metafeatures(
         else:  # multicategory
             multi_cat_cols += 1
     
-    # Convert configs to numeric for MI and heteroscedasticity calculation
-    X_numeric = configs_df.copy()
-    for col in X_numeric.columns:
-        try:
-            X_numeric[col] = pd.to_numeric(X_numeric[col], errors='coerce')
-        except:
-            # For non-numeric, use label encoding
-            X_numeric[col] = pd.factorize(X_numeric[col])[0]
-    
-    X_array = X_numeric.values
-    
-    # Calculate mutual information
-    mi_target = calculate_mutual_information(X_array, performances)
-    mi_features = calculate_feature_correlation(X_array)
+    # Calculate mutual information using preprocessed features
+    mi_target = calculate_mutual_information(X_preprocessed, performances)
+    mi_features = calculate_feature_correlation(X_preprocessed)
     
     # Calculate skewness metrics
     overall_skewness = float(stats.skew(performances))
     if not np.isfinite(overall_skewness):
         overall_skewness = 0.0
-    conditional_skewness = calculate_conditional_asymmetry(X_array, performances)
+    conditional_skewness = calculate_conditional_asymmetry(X_preprocessed, performances)
     
-    # Calculate heteroscedasticity
-    heteroscedasticity = calculate_heteroscedasticity_score(X_array, performances)
+    # Calculate heteroscedasticity using preprocessed features
+    heteroscedasticity = calculate_heteroscedasticity_score(X_preprocessed, performances)
     
     # Calculate performance statistics
     perf_mean = float(np.mean(performances))

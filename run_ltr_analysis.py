@@ -45,7 +45,7 @@ def load_raw_benchmark_data(data_path: str) -> pd.DataFrame:
 def main():
     """Run learning-to-rank analysis on benchmark data."""
     
-    data_path = "cache/data/2026-01-30_01-55-46/raw_benchmark_data.csv"
+    data_path = "cache/data/2026-02-08_03-04-42/raw_benchmark_data.csv"
     
     if not Path(data_path).exists():
         logger.error(f"Data file not found: {data_path}")
@@ -79,47 +79,69 @@ def main():
     logger.info("LEARNING-TO-RANK ANALYSIS RESULTS")
     logger.info("="*60)
     
-    logger.info("\nLTR Model Performance:")
-    for metric_name, metric_value in results['ltr_metrics'].items():
-        logger.info(f"  {metric_name}: {metric_value:.4f}")
-    
-    logger.info("\nNaive Ranker Performance:")
-    for metric_name, metric_value in results['naive_metrics'].items():
-        logger.info(f"  {metric_name}: {metric_value:.4f}")
-    
-    logger.info("\nImprovement over Naive Ranker:")
-    for k in [1, 3, 5]:
-        if f'precision@{k}' in results['ltr_metrics']:
-            precision_improvement = (
-                results['ltr_metrics'][f'precision@{k}'] - 
-                results['naive_metrics'][f'precision@{k}']
+    # results is a dictionary where keys are config names and values are result dicts
+    for config_name, result in results.items():
+        if result is None:
+            logger.warning(f"No results for configuration: {config_name}")
+            continue
+        
+        logger.info(f"\n{'='*60}")
+        logger.info(f"Configuration: {config_name}")
+        logger.info(f"  Partition: {result['partition']}")
+        logger.info(f"  Strategy: {result['strategy']}")
+        logger.info(f"  Train samples: {result['n_train_rows']}")
+        logger.info(f"  Val samples: {result['n_val_rows']}")
+        logger.info(f"  Test samples: {result['n_test_rows']}")
+        logger.info(f"{'='*60}")
+        
+        logger.info("\nLTR Model Performance:")
+        for metric_name, metric_value in result['ltr_metrics'].items():
+            logger.info(f"  {metric_name}: {metric_value:.4f}")
+        
+        logger.info("\nNaive Ranker Performance:")
+        for metric_name, metric_value in result['naive_metrics'].items():
+            logger.info(f"  {metric_name}: {metric_value:.4f}")
+        
+        logger.info("\nImprovement over Naive Ranker:")
+        for k in [1, 3, 5]:
+            if f'precision@{k}' in result['ltr_metrics']:
+                precision_improvement = (
+                    result['ltr_metrics'][f'precision@{k}'] - 
+                    result['naive_metrics'][f'precision@{k}']
+                )
+                ndcg_improvement = (
+                    result['ltr_metrics'][f'ndcg@{k}'] - 
+                    result['naive_metrics'][f'ndcg@{k}']
+                )
+                logger.info(f"  Precision@{k}: {precision_improvement:+.4f}")
+                logger.info(f"  NDCG@{k}: {ndcg_improvement:+.4f}")
+        
+        logger.info("\nNaive Ranker Global Rankings:")
+        sorted_ranker = sorted(
+            result['naive_ranker'].items(), 
+            key=lambda x: x[1]
+        )
+        for rank, (tuner, avg_rank) in enumerate(sorted_ranker, 1):
+            logger.info(f"  {rank}. {tuner} (avg rank: {avg_rank:.2f})")
+        
+        logger.info("\nTop Features for LTR Model:")
+        try:
+            feature_importance = result['ltr_model'].get_score(
+                importance_type='gain'
             )
-            ndcg_improvement = (
-                results['ltr_metrics'][f'ndcg@{k}'] - 
-                results['naive_metrics'][f'ndcg@{k}']
+            feature_names = result['feature_cols']
+            
+            # get_score() returns {feature_name: importance_value}
+            importance_pairs = sorted(
+                feature_importance.items(),
+                key=lambda x: x[1],
+                reverse=True
             )
-            logger.info(f"  Precision@{k}: {precision_improvement:+.4f}")
-            logger.info(f"  NDCG@{k}: {ndcg_improvement:+.4f}")
-    
-    logger.info("\nNaive Ranker Global Rankings:")
-    sorted_ranker = sorted(
-        results['naive_ranker'].items(), 
-        key=lambda x: x[1]
-    )
-    for rank, (tuner, avg_rank) in enumerate(sorted_ranker, 1):
-        logger.info(f"  {rank}. {tuner} (avg rank: {avg_rank:.2f})")
-    
-    logger.info("\nTop Features for LTR Model:")
-    feature_importance = results['ltr_model'].feature_importance(
-        importance_type='gain'
-    )
-    feature_names = results['feature_cols']
-    
-    importance_pairs = list(zip(feature_names, feature_importance))
-    importance_pairs.sort(key=lambda x: x[1], reverse=True)
-    
-    for feature_name, importance in importance_pairs[:10]:
-        logger.info(f"  {feature_name}: {importance:.2f}")
+            
+            for feature_name, importance in importance_pairs[:10]:
+                logger.info(f"  {feature_name}: {importance:.2f}")
+        except Exception as e:
+            logger.warning(f"Could not extract feature importance: {e}")
     
     logger.info("\n" + "="*60)
     logger.info("Analysis complete!")

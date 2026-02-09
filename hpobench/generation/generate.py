@@ -1,5 +1,5 @@
 import numpy as np
-from typing import Union, Dict, Any
+from typing import Union, Dict, Any, Optional
 from pathlib import Path
 
 from ConfigSpace import Configuration
@@ -16,7 +16,7 @@ from hpobench.generation.black_box_functions import (
     shekel,
     hartmann6,
 )
-from hpobench.config.constants import SYNTHETIC_TABULAR_STORAGE_DIR
+from hpobench.config.constants import SyntheticGenerationParameters
 from hpobench.generation.tabular.storage import DatasetStorage
 
 import logging
@@ -378,9 +378,10 @@ class SyntheticTabularGenerator(ObjectiveMetricGenerator):
         dataset: str,
         random_state: int = 42,
     ):
+        synthetic_generation = SyntheticGenerationParameters()
         self.generator = generator
         self.dataset = dataset
-        self.storage_dir = Path(SYNTHETIC_TABULAR_STORAGE_DIR)
+        self.storage_dir = Path(synthetic_generation.storage_dir)
         self.random_state = random_state
         
         # Surrogate data (X = configs, y = performances)
@@ -395,6 +396,8 @@ class SyntheticTabularGenerator(ObjectiveMetricGenerator):
         The SCM generator creates synthetic data where:
         - Features (X) = hyperparameter configurations
         - Targets (y) = performance values
+        
+        Also loads the search space from metadata if available.
         """
         if self._initialized:
             return
@@ -408,15 +411,36 @@ class SyntheticTabularGenerator(ObjectiveMetricGenerator):
             self.surrogate_features, self.surrogate_targets, self.dataset_metadata = (
                 storage.load_dataset(dataset_id)
             )
+            
+            # Extract search space from metadata if available
+            self.search_space_dict = self.dataset_metadata.get('search_space')
+            self.benchmark_id = self.dataset_metadata.get('benchmark_id')
+            
             logger.info(
                 f"Loaded surrogate dataset {dataset_id} with "
-                f"{len(self.surrogate_features)} configurations"
+                f"{len(self.surrogate_features)} configurations "
+                f"(benchmark {self.benchmark_id})"
             )
+            
+            if self.search_space_dict:
+                logger.debug(
+                    f"Dataset has search space with "
+                    f"{len(self.search_space_dict)} hyperparameters"
+                )
         except Exception as e:
             logger.error(f"Failed to load dataset {self.dataset}: {e}", exc_info=True)
             raise
 
         self._initialized = True
+    
+    def get_search_space(self) -> Optional[Dict]:
+        """Get the search space for this dataset.
+        
+        Returns:
+            Dictionary representation of the search space, or None if not available
+        """
+        self.initialize()
+        return self.search_space_dict
     
     def predict(self, configuration: dict[str, Union[str, int, float, bool]]) -> float:
         """Predict performance by looking up in surrogate data.

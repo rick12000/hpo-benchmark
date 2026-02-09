@@ -1,6 +1,7 @@
 import pandas as pd
 import optuna
 import logging
+import warnings
 from datetime import datetime, timedelta
 from hpobench.config.config_types import TunerConfig
 from hpobench.config.config_types import IntRange, FloatRange, CategoricalRange
@@ -242,33 +243,41 @@ def build_optuna_distributions(
         for use in warm-start trial creation.
     """
     dists: dict[str, optuna.distributions.BaseDistribution] = {}
-    for name, param in raw_params.items():
-        if isinstance(param, IntRange):
-            log_flag = getattr(param, "log", False)
-            if log_flag:
-                dists[name] = optuna.distributions.IntLogUniformDistribution(
-                    low=param.lower, high=param.upper
+    # Suppress Optuna deprecation FutureWarnings that are raised when using
+    # legacy distribution names (e.g., IntLogUniformDistribution). Optuna
+    # internally converts these to the newer distribution classes but emits
+    # warnings which are noisy for our benchmarking outputs.
+    with warnings.catch_warnings():
+        # Ignore FutureWarnings about deprecated Optuna distribution classes
+        # (these are noisy and Optuna internally converts them to new classes).
+        warnings.filterwarnings("ignore", category=FutureWarning)
+        for name, param in raw_params.items():
+            if isinstance(param, IntRange):
+                log_flag = getattr(param, "log", False)
+                if log_flag:
+                    dists[name] = optuna.distributions.IntLogUniformDistribution(
+                        low=param.lower, high=param.upper
+                    )
+                else:
+                    dists[name] = optuna.distributions.IntUniformDistribution(
+                        low=param.lower, high=param.upper
+                    )
+            elif isinstance(param, FloatRange):
+                log_flag = getattr(param, "log", False)
+                if log_flag:
+                    dists[name] = optuna.distributions.LogUniformDistribution(
+                        low=param.lower, high=param.upper
+                    )
+                else:
+                    dists[name] = optuna.distributions.UniformDistribution(
+                        low=param.lower, high=param.upper
+                    )
+            elif isinstance(param, CategoricalRange):
+                dists[name] = optuna.distributions.CategoricalDistribution(
+                    choices=param.choices
                 )
             else:
-                dists[name] = optuna.distributions.IntUniformDistribution(
-                    low=param.lower, high=param.upper
-                )
-        elif isinstance(param, FloatRange):
-            log_flag = getattr(param, "log", False)
-            if log_flag:
-                dists[name] = optuna.distributions.LogUniformDistribution(
-                    low=param.lower, high=param.upper
-                )
-            else:
-                dists[name] = optuna.distributions.UniformDistribution(
-                    low=param.lower, high=param.upper
-                )
-        elif isinstance(param, CategoricalRange):
-            dists[name] = optuna.distributions.CategoricalDistribution(
-                choices=param.choices
-            )
-        else:
-            raise ValueError(f"Unknown parameter type: {type(param)}")
+                raise ValueError(f"Unknown parameter type: {type(param)}")
     return dists
 
 

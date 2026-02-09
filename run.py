@@ -3,19 +3,16 @@ from hpobench.config.tuner_configurations import (
     EXTERNAL_TUNING_CONFIGURATIONS,
     LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS,
 )
-from hpobench.config.constants import ExperimentParameters, SYNTHETIC_TABULAR_STORAGE_DIR
+from hpobench.config.constants import ExperimentParameters, SyntheticGenerationParameters
 from hpobench.config.schema import BenchmarkDataSchema
-from hpobench.generation.tabular.generation_utils import generate_and_save_batch
-from hpobench.report.orchestrate import (
-    load_experiment_configs,
-    run_main_benchmark,
-    run_learning_to_rank_analysis,
-)
+from hpobench.generation.tabular.metadata_manager import CentralMetadataManager
+from hpobench.report.orchestrate import run_and_analyze_main_benchmark
 from hpobench.utils import setup_environment
 
 BASE_RANDOM_STATE = 42
 
 experiment_params = ExperimentParameters()
+synthetic_generation = SyntheticGenerationParameters()
 
 CACHE_PATH = "cache/"
 run_start_str, logger = setup_environment(cache_path=CACHE_PATH)
@@ -23,98 +20,61 @@ run_start_str, logger = setup_environment(cache_path=CACHE_PATH)
 schema = BenchmarkDataSchema()
 
 
-def _generate_synthetic_tabular_datasets() -> None:
-    """Generate synthetic tabular datasets using OpenTab's SCM approach if they don't already exist."""
-    storage_dir = Path(SYNTHETIC_TABULAR_STORAGE_DIR)
-    
-    # Check if datasets exist
-    datasets_exist = False
-    if storage_dir.exists():
-        dataset_dirs = [d for d in storage_dir.iterdir() if d.is_dir() and d.name.startswith("dataset_")]
-        if len(dataset_dirs) > 0:
-            datasets_exist = True
-            logger.info(f"Found {len(dataset_dirs)} existing synthetic datasets")
-    else:
-        logger.warning(f"Storage directory {storage_dir} does not exist, will create it")
-    
-    if not datasets_exist:
-        logger.info("No valid datasets found, generating synthetic tabular datasets using SCM approach...")
-        
-        # Generate regression datasets using OpenTab's SCM approach
-        # Surrogate data represents continuous performance landscapes, so always regression
-        # Using 50,000 rows per dataset to provide good coverage of the causal surface
-        # Random warm starts will sample smaller subsets from this larger surrogate data
-        generate_and_save_batch(
-            num_classification=0,  # Never classification for surrogate data
-            num_regression=50,  # All 50 datasets are regression
-            storage_dir=str(storage_dir),
-            n_samples_range=(50000, 50000),  # Fixed at 50K for substantial coverage
-            n_features_range=(1, 160),
-            n_classes_range=(2, 10),
-            base_seed=42,
-            start_id=1,
-        )
-        logger.info("Successfully generated 50 regression synthetic datasets")
-    else:
-        logger.info("Datasets already exist, skipping generation")
-
-
 def _get_synthetic_tabular_ids() -> list[str]:
-    """Get list of available synthetic tabular dataset IDs."""
-    storage_dir = Path(SYNTHETIC_TABULAR_STORAGE_DIR)
-    if not storage_dir.exists():
-        return []
+    """Get list of available synthetic tabular dataset IDs from central metadata.
     
-    dataset_ids = []
-    for item in storage_dir.iterdir():
-        if item.is_dir() and item.name.startswith("dataset_"):
-            try:
-                dataset_id = item.name.replace("dataset_", "")
-                dataset_ids.append(dataset_id)
-            except (ValueError, IndexError):
-                continue
+    Returns:
+        List of dataset IDs as strings
+        
+    Raises:
+        FileNotFoundError: If metadata.json doesn't exist (datasets not generated)
+    """
+    storage_dir = Path(synthetic_generation.storage_dir)
     
-    return sorted(dataset_ids, key=lambda x: int(x) if x.isdigit() else 0)
+    try:
+        metadata_manager = CentralMetadataManager(str(storage_dir))
+        dataset_ids = metadata_manager.list_all_dataset_ids()
+        logger.info(f"Found {len(dataset_ids)} synthetic datasets in metadata")
+        return [str(id) for id in dataset_ids]
+    except FileNotFoundError as e:
+        logger.error(
+            f"\n{'='*80}\n"
+            f"ERROR: Synthetic datasets not found!\n"
+            f"{'='*80}\n"
+            f"\nThe synthetic tabular datasets have not been generated yet.\n"
+            f"Please run the following command to generate them:\n\n"
+            f"    python generate_datasets.py\n\n"
+            f"This will create the datasets in: {storage_dir}\n"
+            f"{'='*80}\n"
+        )
+        raise
 
 
 def main():
-    logger.info("Generating synthetic tabular datasets...")
-    _generate_synthetic_tabular_datasets()
+    logger.info("Loading synthetic tabular datasets from storage...")
     
-    synthetic_tabular_ids = _get_synthetic_tabular_ids()
-    logger.info(f"Available synthetic tabular dataset IDs: {synthetic_tabular_ids}")
+    try:
+        synthetic_tabular_ids = _get_synthetic_tabular_ids()
+        logger.info(f"Available synthetic tabular dataset IDs: {len(synthetic_tabular_ids)} datasets")
+    except FileNotFoundError:
+        logger.error("Cannot proceed without synthetic datasets. Exiting.")
+        return
     
-    experiment_configs = load_experiment_configs(
+    run_and_analyze_main_benchmark(
         benchmarks=["lcbench", "synthetic_tabular"],
         tuning_configurations=LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS
         + EXTERNAL_TUNING_CONFIGURATIONS,
         n_warm_starts=experiment_params.n_warm_starts,
         n_trials=experiment_params.n_trials,
         timeout=experiment_params.timeout,
-        max_n_instances_per_benchmark=experiment_params.default_max_n_instances,
-        synthetic_tabular_ids=synthetic_tabular_ids,
-    )
-
-    raw_benchmark_data = run_main_benchmark(
-        experiment_configs=experiment_configs,
-        n_repetitions=experiment_params.medium_n_repetitions_per_tuner_config,
         base_random_state=BASE_RANDOM_STATE,
+        schema=schema,
         cache_path=CACHE_PATH,
         run_start_str=run_start_str,
+        max_n_instances_per_benchmark=experiment_params.max_n_instances,
+        n_repetitions=experiment_params.n_repetitions_per_tuner_config,
+        datasets_per_benchmark=[None, synthetic_tabular_ids],
     )
-    
-    logger.info("Running learning-to-rank analysis on benchmark results")
-    ltr_results = run_learning_to_rank_analysis(
-        raw_benchmark_data=raw_benchmark_data,
-        schema=BenchmarkDataSchema(),
-        train_size=0.7,
-        val_size=0.15,
-        random_state=BASE_RANDOM_STATE,
-        k_values=[1, 3],
-    )
-    
-    logger.info("Learning-to-rank analysis completed successfully")
-    logger.info(f"Analysis results: {ltr_results}")
 
 
 if __name__ == "__main__":
