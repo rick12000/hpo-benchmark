@@ -131,7 +131,11 @@ def _evaluate_rankings(
     schema: BenchmarkDataSchema,
     ascending_scores: bool = False,
 ) -> dict[str, float]:
-    """Evaluate ranking predictions using precision@k and NDCG@k."""
+    """Evaluate ranking predictions using precision@k and NDCG@k.
+    
+    Labels are higher = better (higher rank value for better algorithms).
+    So we sort by label DESC to get the best performers first.
+    """
     test_data = test_data.copy()
     test_data['_pred_score'] = predicted_scores
     
@@ -139,20 +143,23 @@ def _evaluate_rankings(
     metrics.update({f'ndcg@{k}': [] for k in k_values})
     
     for _, group in test_data.groupby(schema.ranking_group_col):
-        true_sorted = group.sort_values(schema.label_col, ascending=True)
+        # Sort by label in DESCENDING order so best performers (highest label) come first
+        true_sorted = group.sort_values(schema.label_col, ascending=False)
         pred_sorted = group.sort_values('_pred_score', ascending=ascending_scores)
         
         true_ranking = true_sorted[schema.tuner_col].tolist()
         pred_ranking = pred_sorted[schema.tuner_col].tolist()
         
-        # True relevance: higher rank = higher relevance
+        # True relevance: first item (best performer) gets highest relevance
         true_relevance = np.arange(len(true_sorted), 0, -1)
         relevance_map = dict(zip(true_sorted[schema.tuner_col], true_relevance))
         pred_relevance = np.array([relevance_map[t] for t in pred_ranking])
         
         for k in k_values:
             metrics[f'precision@{k}'].append(_precision_at_k(pred_ranking, true_ranking, k))
-            metrics[f'ndcg@{k}'].append(ndcg_score([pred_relevance], [pred_sorted['_pred_score'].values], k=k))
+            # For NDCG, we use the true relevance scores in the predicted ranking order
+            # This gives us the DCG for our predictions relative to perfect ranking
+            metrics[f'ndcg@{k}'].append(ndcg_score([true_relevance], [pred_relevance], k=k))
     
     return {key: np.mean(values) for key, values in metrics.items()}
 

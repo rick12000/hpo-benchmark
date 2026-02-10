@@ -2,11 +2,12 @@ import pandas as pd
 from datetime import datetime
 import os
 import logging
-from typing import Literal, Optional
+from typing import Literal, Optional, Tuple, List
 from pathlib import Path
 import gc
 import json
 import numpy as np
+from enum import Enum
 
 try:
     from confopt.selection.conformalization import QuantileConformalEstimator
@@ -35,48 +36,11 @@ os.environ["SYNETUNE_FOLDER"] = "cache/syne-tune"
 aliases = Aliases()
 
 
-try:
-    from confopt.selection.conformalization import QuantileConformalEstimator
-    from confopt.utils.configurations.encoding import ConfigurationEncoder
-except ImportError:
-    raise ImportError(
-        "confopt is a core dependency of this repository, but it is not automatically installed via pyproject.toml, please refer to the README.md for instructions on how to install this separately"
-    )
-
-
-def _get_nan_surrogate_metafeatures() -> dict:
-    """Return a dictionary of surrogate metafeatures filled with NaN values.
-    
-    Returns:
-        Dictionary with surrogate metafeature keys set to NaN.
-    """
-    from hpobench.config.schema import SurrogateMetafeaturesSchema
-    schema = SurrogateMetafeaturesSchema()
-    return {
-        schema.n_hyperparameters: np.nan,
-        schema.n_integer_hyperparameters: np.nan,
-        schema.n_float_hyperparameters: np.nan,
-        schema.n_binary_categorical_hyperparameters: np.nan,
-        schema.n_multicategory_hyperparameters: np.nan,
-        schema.performance_mean: np.nan,
-        schema.performance_std: np.nan,
-        schema.performance_min: np.nan,
-        schema.performance_max: np.nan,
-        schema.performance_range: np.nan,
-        schema.performance_skewness: np.nan,
-        schema.performance_kurtosis: np.nan,
-        schema.conditional_performance_skewness: np.nan,
-        schema.performance_heteroscedasticity: np.nan,
-        schema.best_performance: np.nan,
-        schema.avg_config_performance_correlation: np.nan,
-        schema.max_config_performance_correlation: np.nan,
-        schema.max_mi_with_target: np.nan,
-        schema.min_mi_with_target: np.nan,
-        schema.avg_mi_with_target: np.nan,
-        schema.max_mi_between_features: np.nan,
-        schema.min_mi_between_features: np.nan,
-        schema.avg_mi_between_features: np.nan,
-    }
+class WarmStartStrategy(str, Enum):
+    """Enumeration of warm start generation strategies."""
+    RANDOM = "random"
+    GP_THOMPSON_SAMPLING = "gp_thompson_sampling"
+    GP_EXPECTED_IMPROVEMENT = "gp_expected_improvement"
 
 
 def load_experiment_configs(
@@ -186,6 +150,164 @@ def load_experiment_configs(
     return experiment_configs
 
 
+def _generate_random_warm_starts(
+    search_space: dict,
+    n_configs: int,
+    random_state: int,
+    objective_function,
+) -> List[Tuple[dict, float]]:
+    """Generate warm start configurations by random sampling.
+    
+    Args:
+        search_space: Dictionary defining the hyperparameter search space.
+        n_configs: Number of configurations to generate.
+        random_state: Random seed for reproducible generation.
+        objective_function: Objective function for evaluating configurations.
+        
+    Returns:
+        List of (configuration, performance) tuples.
+    """
+    configs = generate_hyperparameter_combinations(
+        params=search_space,
+        n_combinations=n_configs,
+        random_state=random_state,
+    )
+    
+    warm_starts = []
+    performances = objective_function.predict_batch(configs)
+    for combination, performance in zip(configs, performances):
+        warm_starts.append((combination, performance))
+    
+    return warm_starts
+
+
+def _generate_gp_warm_starts(
+    search_space: dict,
+    n_initial_random: int,
+    n_gp_searches: int,
+    random_state: int,
+    objective_function,
+    acquisition_strategy: Literal["TS", "EI"],
+) -> List[Tuple[dict, float]]:
+    """Generate warm start configurations using Gaussian Process optimization.
+    
+    This function:
+    1. Randomly samples n_initial_random configurations
+    2. Uses those to warm-start a GP
+    3. Runs the GP with the specified acquisition function for n_gp_searches trials
+    4. Returns ONLY the GP-searched configurations (discarding the random warm-starts)
+    
+    Args:
+        search_space: Dictionary defining the hyperparameter search space.
+        n_initial_random: Number of random configurations to warm-start the GP.
+        n_gp_searches: Number of GP-guided searches to perform.
+        random_state: Random seed for reproducible generation.
+        objective_function: Objective function for evaluating configurations.
+        acquisition_strategy: Either "TS" (Thompson Sampling) or "EI" (Expected Improvement).
+        
+    Returns:
+        List of (configuration, performance) tuples from GP searches only.
+    """
+    from hpobench.config.config_types import CustomGPModel
+    from hpobench.tune import tune as tune_function
+    
+    # Generate initial random warm-starts for the GP
+    initial_warm_starts = _generate_random_warm_starts(
+        search_space=search_space,
+        n_configs=n_initial_random,
+        random_state=random_state,
+        objective_function=objective_function,
+    )
+    
+    # Create a GP tuner config with the specified acquisition strategy
+    gp_tuner_config = TunerConfig(
+        tuner=CustomGPModel(backend="gp_opt", searcher=acquisition_strategy),
+        tuner_identifier=f"GP-{acquisition_strategy}",
+    )
+    
+    # Run GP optimization for n_gp_searches trials AFTER the warm-start
+    # Total trials = n_initial_random (warm-start) + n_gp_searches (GP-guided)
+    total_trials = n_initial_random + n_gp_searches
+    
+    history = tune_function(
+        performance_generator=objective_function,
+        tuner_config=gp_tuner_config,
+        params=search_space,
+        warm_start_configs=initial_warm_starts,
+        random_state=random_state,
+        n_trials=total_trials,
+        timeout=None,
+    )
+    
+    # Extract ONLY the GP-searched configurations (skip the warm-start portion)
+    # The history DataFrame contains all trials; we want the last n_gp_searches
+    gp_searched_history = history.tail(n_gp_searches)
+    
+    gp_warm_starts = []
+    for _, row in gp_searched_history.iterrows():
+        # The configurations are stored in a single 'configurations' column
+        if 'configurations' in row and row['configurations'] is not None:
+            config = row['configurations']
+        else:
+            # Fallback: try to extract from individual columns
+            config = {}
+            for key in search_space.keys():
+                if key in row:
+                    config[key] = row[key]
+        performance = row['performance']
+        gp_warm_starts.append((config, performance))
+    
+    return gp_warm_starts
+
+
+def generate_warm_starts_with_strategy(
+    search_space: dict,
+    n_configs: int,
+    random_state: int,
+    objective_function,
+    strategy: WarmStartStrategy,
+) -> List[Tuple[dict, float]]:
+    """Generate warm start configurations using the specified strategy.
+    
+    Args:
+        search_space: Dictionary defining the hyperparameter search space.
+        n_configs: Number of configurations to generate.
+        random_state: Random seed for reproducible generation.
+        objective_function: Objective function for evaluating configurations.
+        strategy: Warm start generation strategy.
+        
+    Returns:
+        List of (configuration, performance) tuples.
+    """
+    if strategy == WarmStartStrategy.RANDOM:
+        return _generate_random_warm_starts(
+            search_space=search_space,
+            n_configs=n_configs,
+            random_state=random_state,
+            objective_function=objective_function,
+        )
+    elif strategy == WarmStartStrategy.GP_THOMPSON_SAMPLING:
+        return _generate_gp_warm_starts(
+            search_space=search_space,
+            n_initial_random=n_configs,
+            n_gp_searches=n_configs,
+            random_state=random_state,
+            objective_function=objective_function,
+            acquisition_strategy="TS",
+        )
+    elif strategy == WarmStartStrategy.GP_EXPECTED_IMPROVEMENT:
+        return _generate_gp_warm_starts(
+            search_space=search_space,
+            n_initial_random=n_configs,
+            n_gp_searches=n_configs,
+            random_state=random_state,
+            objective_function=objective_function,
+            acquisition_strategy="EI",
+        )
+    else:
+        raise ValueError(f"Unknown warm start strategy: {strategy}")
+
+
 def generate_configs_per_repetition(
     search_space,
     n_configs,
@@ -280,6 +402,8 @@ def run_main_benchmark(
         - 'sampler_adapter': Adapter used by sampler for confopt ("None" if None, empty for others)
         - 'tuner_searcher_tuning_framework': Searcher tuning framework from tuner config ("None" if None, empty for others)
         - 'n_random_warm_starts': Number of random warm starts used for this trial
+        - 'warm_start_strategy': Strategy used to generate warm starts ('random', 'gp_thompson_sampling', 'gp_expected_improvement')
+        - Surrogate metafeatures: Various metafeatures calculated from the warm-start configurations
     """
     logger.info("Running HPO benchmark...")
 
@@ -303,187 +427,196 @@ def run_main_benchmark(
                 f"Warm start loop [{ws_idx}/{len(experiment_config.n_warm_starts)}] - "
                 f"Generating {n_ws} warm start configurations for dataset: {dataset_name}"
             )
-            # NOTE: Warm starts are identical per repetition, so all models
-            # will have the same starting hyperparameter configurations, but
-            # a new set of warm starts needs to be generated per dataset and
-            # per repetition.
-            warm_start_configs_per_repetition = []
-            for repetition in range(n_repetitions):
-                consistent_warm_starts = generate_hyperparameter_combinations(
-                    params=experiment_config.search_space,
-                    n_combinations=n_ws,
-                    random_state=base_random_state + repetition,
+            
+            # Loop over all warm-start strategies
+            for strategy in WarmStartStrategy:
+                logger.info(
+                    f"Using warm-start strategy: {strategy.value}"
                 )
-                warm_start_configs = []
-                for combination in consistent_warm_starts:
-                    performance = experiment_config.objective_function.predict(combination)
-                    warm_start_configs.append((combination, performance))
-                warm_start_configs_per_repetition.append(warm_start_configs)
-            logger.info(
-                f"Generated {len(warm_start_configs_per_repetition[0])} warm start configurations."
-            )
-
-            from hpobench.generation.tabular.metafeatures import calculate_surrogate_metafeatures
-            from hpobench.config.schema import SurrogateMetafeaturesSchema
-
-            for tuner in experiment_config.tuner_configurations:
-                logger.info(f"Loop Level | Tuner: {tuner}")
+                
+                # Generate warm starts for each repetition using the current strategy
+                warm_start_configs_per_repetition = []
                 for repetition in range(n_repetitions):
-                    logger.info(f"Loop Level | Repetition: {repetition}")
-                    tune_start = datetime.now()
-
-                    # Calculate surrogate metafeatures for THIS REPETITION's warm-start configs
-                    # Each repetition has different random warm-starts, so metafeatures differ
-                    configs = [config for config, _ in warm_start_configs_per_repetition[repetition]]
-                    performances = [perf for _, perf in warm_start_configs_per_repetition[repetition]]
-                    
-                    schema = SurrogateMetafeaturesSchema()
-                    surrogate_metafeatures = calculate_surrogate_metafeatures(
-                        configs=configs,
-                        performances=performances,
-                        schema=schema
-                    )
-                    logger.info(
-                        f"Calculated surrogate metafeatures for repetition {repetition} "
-                        f"from {len(configs)} warm-start configs: {surrogate_metafeatures}"
-                    )
-
-                    # Run for exactly 1 trial after warm-start (n_trials = n_ws + 1)
-                    n_trials_for_tuner = n_ws + 1
-                    
-                    historical_performance = tune(
-                        performance_generator=experiment_config.objective_function,
-                        tuner_config=tuner,
-                        n_trials=n_trials_for_tuner,
-                        timeout=experiment_config.timeout,
-                        params=experiment_config.search_space,
-                        # Grab the warm start configurations for this repetition (shared by all tuners):
-                        warm_start_configs=warm_start_configs_per_repetition[repetition],
+                    warm_start_configs = generate_warm_starts_with_strategy(
+                        search_space=experiment_config.search_space,
+                        n_configs=n_ws,
                         random_state=base_random_state + repetition,
+                        objective_function=experiment_config.objective_function,
+                        strategy=strategy,
                     )
+                    warm_start_configs_per_repetition.append(warm_start_configs)
+                
+                logger.info(
+                    f"Generated {len(warm_start_configs_per_repetition[0])} warm start configurations "
+                    f"using {strategy.value} strategy."
+                )
 
-                    historical_performance = add_runtime(
-                        experiment_log=historical_performance,
-                        tune_start=tune_start,
-                        performance_generator=experiment_config.objective_function,
-                    )
-                    
-                    # Keep only the final tuned trial (last row), not the warm-start history
-                    # The tune() function returns all n_ws + 1 trials, but we only want the optimized one
-                    historical_performance = historical_performance.tail(1).copy()
+                from hpobench.report.metafeatures.calculator import calculate_surrogate_metafeatures
+                from hpobench.config.schema import SurrogateMetafeaturesSchema
 
-                    aliased_benchmark_identifier = (
-                        aliases.benchmark_aliases[experiment_config.benchmark_identifier]
-                        if experiment_config.benchmark_identifier
-                        in aliases.benchmark_aliases
-                        else experiment_config.benchmark_identifier
-                    )
-                    historical_performance[
-                        "benchmark_identifier"
-                    ] = aliased_benchmark_identifier
-                    historical_performance["dataset"] = dataset_name
-                    historical_performance["tuner"] = tuner.tuner_identifier
-                    historical_performance["repetition"] = repetition + 1
-                    historical_performance[
-                        "searcher_tuning_framework"
-                    ] = tuner.searcher_tuning_framework
-                    
-                    # Add the number of random warm starts used
-                    historical_performance["n_random_warm_starts"] = n_ws
-                    
-                    # Add surrogate metafeatures
-                    for key, value in surrogate_metafeatures.items():
-                        historical_performance[key] = value
+                for tuner in experiment_config.tuner_configurations:
+                    logger.info(f"Loop Level | Tuner: {tuner}")
+                    for repetition in range(n_repetitions):
+                        logger.info(f"Loop Level | Repetition: {repetition}")
+                        tune_start = datetime.now()
 
-                    if tuner.tuner.backend == "confopt":
-                        sampler_name = tuner.tuner.searcher.sampler.__class__.__name__
-
-                        if hasattr(tuner.tuner.searcher.sampler, "interval_width"):
-                            confidence_level = str(
-                                tuner.tuner.searcher.sampler.interval_width
-                            )
-                        else:
-                            confidence_level = ""
-
-                        estimator_architecture = (
-                            tuner.tuner.searcher.quantile_estimator_architecture
+                        # Calculate surrogate metafeatures for THIS REPETITION's warm-start configs
+                        # Metafeatures are calculated on the final warm-start configs, which differ by strategy:
+                        # - For random: metafeatures from randomly sampled configs
+                        # - For GP-TS/GP-EI: metafeatures from GP-searched configs (not the initial random ones)
+                        configs = [config for config, _ in warm_start_configs_per_repetition[repetition]]
+                        performances = [perf for _, perf in warm_start_configs_per_repetition[repetition]]
+                        
+                        schema = SurrogateMetafeaturesSchema()
+                        surrogate_metafeatures = calculate_surrogate_metafeatures(
+                            configs=configs,
+                            performances=performances,
+                            schema=schema
+                        )
+                        logger.info(
+                            f"Calculated surrogate metafeatures for repetition {repetition} "
+                            f"from {len(configs)} warm-start configs ({strategy.value}): {surrogate_metafeatures}"
                         )
 
-                        if hasattr(tuner.tuner.searcher, "n_pre_conformal_trials"):
-                            n_pre_conformal_trials = (
-                                tuner.tuner.searcher.n_pre_conformal_trials
-                            )
-                        else:
-                            n_pre_conformal_trials = ""
+                        # Run for exactly 1 trial after warm-start (n_trials = n_ws + 1)
+                        n_trials_for_tuner = n_ws + 1
+                        
+                        historical_performance = tune(
+                            performance_generator=experiment_config.objective_function,
+                            tuner_config=tuner,
+                            n_trials=n_trials_for_tuner,
+                            timeout=experiment_config.timeout,
+                            params=experiment_config.search_space,
+                            # Grab the warm start configurations for this repetition (shared by all tuners):
+                            warm_start_configs=warm_start_configs_per_repetition[repetition],
+                            random_state=base_random_state + repetition,
+                        )
 
-                        if hasattr(tuner.tuner.searcher.sampler, "n_quantiles"):
-                            sampler_n_quantiles = tuner.tuner.searcher.sampler.n_quantiles
-                        else:
-                            sampler_n_quantiles = ""
+                        historical_performance = add_runtime(
+                            experiment_log=historical_performance,
+                            tune_start=tune_start,
+                            performance_generator=experiment_config.objective_function,
+                        )
+                        
+                        # Keep only the final tuned trial (last row), not the warm-start history
+                        # The tune() function returns all n_ws + 1 trials, but we only want the optimized one
+                        historical_performance = historical_performance.tail(1).copy()
 
-                        if hasattr(tuner.tuner.searcher.sampler, "adapter"):
-                            if tuner.tuner.searcher.sampler.adapter is None:
-                                sampler_adapter = "None"
+                        aliased_benchmark_identifier = (
+                            aliases.benchmark_aliases[experiment_config.benchmark_identifier]
+                            if experiment_config.benchmark_identifier
+                            in aliases.benchmark_aliases
+                            else experiment_config.benchmark_identifier
+                        )
+                        historical_performance[
+                            "benchmark_identifier"
+                        ] = aliased_benchmark_identifier
+                        historical_performance["dataset"] = dataset_name
+                        historical_performance["tuner"] = tuner.tuner_identifier
+                        historical_performance["repetition"] = repetition + 1
+                        historical_performance[
+                            "searcher_tuning_framework"
+                        ] = tuner.searcher_tuning_framework
+                        
+                        # Add the number of random warm starts used
+                        historical_performance["n_random_warm_starts"] = n_ws
+                        
+                        # Add the warm-start strategy used
+                        historical_performance["warm_start_strategy"] = strategy.value
+                        
+                        # Add surrogate metafeatures
+                        for key, value in surrogate_metafeatures.items():
+                            historical_performance[key] = value
+
+                        if tuner.tuner.backend == "confopt":
+                            sampler_name = tuner.tuner.searcher.sampler.__class__.__name__
+
+                            if hasattr(tuner.tuner.searcher.sampler, "interval_width"):
+                                confidence_level = str(
+                                    tuner.tuner.searcher.sampler.interval_width
+                                )
                             else:
-                                sampler_adapter = str(tuner.tuner.searcher.sampler.adapter)
-                        else:
-                            sampler_adapter = ""
+                                confidence_level = ""
 
-                        if tuner.searcher_tuning_framework is None:
-                            tuner_searcher_tuning_framework = "None"
-                        else:
-                            tuner_searcher_tuning_framework = str(
-                                tuner.searcher_tuning_framework
+                            estimator_architecture = (
+                                tuner.tuner.searcher.quantile_estimator_architecture
                             )
-                    else:
-                        # NOTE: Use "" instead of None or NaN to avoid bad groupby behavior
-                        sampler_name = ""
-                        confidence_level = ""
-                        estimator_architecture = ""
-                        n_pre_conformal_trials = ""
-                        sampler_n_quantiles = ""
-                        sampler_adapter = ""
-                        tuner_searcher_tuning_framework = ""
 
-                    aliased_estimator_architecture = (
-                        aliases.architecture_aliases[estimator_architecture]
-                        if estimator_architecture in aliases.architecture_aliases
-                        else estimator_architecture
-                    )
-                    aliased_sampler_name = (
-                        aliases.sampler_aliases[sampler_name]
-                        if sampler_name in aliases.sampler_aliases
-                        else sampler_name
-                    )
-                    if tuner.tuner.backend == "confopt":
-                        if sampler_name == "ThompsonSampler":
-                            if tuner.tuner.searcher.sampler.enable_optimistic_sampling:
-                                aliased_sampler_name = "OBS"
-                    historical_performance[
-                        "estimator_architecture"
-                    ] = aliased_estimator_architecture
-                    historical_performance["confidence_level"] = confidence_level
-                    historical_performance["sampler"] = aliased_sampler_name
-                    historical_performance[
-                        "n_pre_conformal_trials"
-                    ] = n_pre_conformal_trials
-                    historical_performance["sampler_n_quantiles"] = sampler_n_quantiles
-                    historical_performance["sampler_adapter"] = sampler_adapter
-                    historical_performance[
-                        "tuner_searcher_tuning_framework"
-                    ] = tuner_searcher_tuning_framework
+                            if hasattr(tuner.tuner.searcher, "n_pre_conformal_trials"):
+                                n_pre_conformal_trials = (
+                                    tuner.tuner.searcher.n_pre_conformal_trials
+                                )
+                            else:
+                                n_pre_conformal_trials = ""
 
-                    raw_benchmark_data = pd.concat(
-                        [raw_benchmark_data, historical_performance], axis=0
-                    )
+                            if hasattr(tuner.tuner.searcher.sampler, "n_quantiles"):
+                                sampler_n_quantiles = tuner.tuner.searcher.sampler.n_quantiles
+                            else:
+                                sampler_n_quantiles = ""
 
-                    data_path = os.path.join(cache_path, f"data/{run_start_str}")
-                    if not os.path.exists(data_path):
-                        os.makedirs(data_path)
-                    raw_benchmark_data.to_csv(
-                        os.path.join(data_path, "incremental_raw_benchmark_data.csv"),
-                        index=False,
-                    )
+                            if hasattr(tuner.tuner.searcher.sampler, "adapter"):
+                                if tuner.tuner.searcher.sampler.adapter is None:
+                                    sampler_adapter = "None"
+                                else:
+                                    sampler_adapter = str(tuner.tuner.searcher.sampler.adapter)
+                            else:
+                                sampler_adapter = ""
+
+                            if tuner.searcher_tuning_framework is None:
+                                tuner_searcher_tuning_framework = "None"
+                            else:
+                                tuner_searcher_tuning_framework = str(
+                                    tuner.searcher_tuning_framework
+                                )
+                        else:
+                            # NOTE: Use "" instead of None or NaN to avoid bad groupby behavior
+                            sampler_name = ""
+                            confidence_level = ""
+                            estimator_architecture = ""
+                            n_pre_conformal_trials = ""
+                            sampler_n_quantiles = ""
+                            sampler_adapter = ""
+                            tuner_searcher_tuning_framework = ""
+
+                        aliased_estimator_architecture = (
+                            aliases.architecture_aliases[estimator_architecture]
+                            if estimator_architecture in aliases.architecture_aliases
+                            else estimator_architecture
+                        )
+                        aliased_sampler_name = (
+                            aliases.sampler_aliases[sampler_name]
+                            if sampler_name in aliases.sampler_aliases
+                            else sampler_name
+                        )
+                        if tuner.tuner.backend == "confopt":
+                            if sampler_name == "ThompsonSampler":
+                                if tuner.tuner.searcher.sampler.enable_optimistic_sampling:
+                                    aliased_sampler_name = "OBS"
+                        historical_performance[
+                            "estimator_architecture"
+                        ] = aliased_estimator_architecture
+                        historical_performance["confidence_level"] = confidence_level
+                        historical_performance["sampler"] = aliased_sampler_name
+                        historical_performance[
+                            "n_pre_conformal_trials"
+                        ] = n_pre_conformal_trials
+                        historical_performance["sampler_n_quantiles"] = sampler_n_quantiles
+                        historical_performance["sampler_adapter"] = sampler_adapter
+                        historical_performance[
+                            "tuner_searcher_tuning_framework"
+                        ] = tuner_searcher_tuning_framework
+
+                        raw_benchmark_data = pd.concat(
+                            [raw_benchmark_data, historical_performance], axis=0
+                        )
+
+                        data_path = os.path.join(cache_path, f"data/{run_start_str}")
+                        if not os.path.exists(data_path):
+                            os.makedirs(data_path)
+                        raw_benchmark_data.to_csv(
+                            os.path.join(data_path, "incremental_raw_benchmark_data.csv"),
+                            index=False,
+                        )
 
         # Free up memory after processing each experiment config:
         experiment_config.objective_function = None
@@ -508,8 +641,15 @@ def run_learning_to_rank_analysis(
     random_state: int = 42,
     k_values: list[int] = [1, 3],
     xgb_params: dict | None = None,
+    tuner_encoding_method: Literal['ordinal', 'one_hot'] = 'ordinal',
 ) -> dict:
-    """Run learning-to-rank analysis on all data partitions."""
+    """Run learning-to-rank analysis on all data partitions.
+    
+    Args:
+        tuner_encoding_method: How to encode tuner algorithm identity.
+            - 'ordinal': Single numeric feature (default, efficient for XGBoost)
+            - 'one_hot': Binary features for each tuner (better for interpretability)
+    """
     return run_all_partition_analyses(
         raw_benchmark_data=raw_benchmark_data,
         schema=schema,
@@ -518,6 +658,7 @@ def run_learning_to_rank_analysis(
         random_state=random_state,
         k_values=k_values,
         xgb_params=xgb_params,
+        tuner_encoding_method=tuner_encoding_method,
     )
 
 

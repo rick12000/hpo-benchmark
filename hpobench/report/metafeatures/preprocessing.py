@@ -1,5 +1,4 @@
-"""
-Preprocessing utilities for metafeature calculation.
+"""Preprocessing utilities for metafeature calculation.
 
 This module provides preprocessing functions to prepare hyperparameter configurations
 for metafeature calculation, including one-hot encoding and normalization.

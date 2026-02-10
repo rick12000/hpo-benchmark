@@ -41,10 +41,19 @@ def prepare_data(
     raw_data: pd.DataFrame,
     schema: BenchmarkDataSchema,
     partition: Literal['all', 'synthetic', 'real'] = 'all',
+    tuner_encoding_method: Literal['ordinal', 'one_hot'] = 'ordinal',
 ) -> pd.DataFrame:
     """Prepare raw benchmark data for learning-to-rank.
     
     Filters by partition, computes rankings within groups, and selects features.
+    
+    Args:
+        raw_data: Raw benchmark data
+        schema: Column schema
+        partition: Data partition ('all', 'synthetic', 'real')
+        tuner_encoding_method: How to encode tuner algorithm identity:
+            - 'ordinal': Single numeric feature (0, 1, 2, ...). More efficient for tree-based models.
+            - 'one_hot': Binary features for each tuner. Better for linear models and interpretability.
     """
     # Filter by partition
     if partition == 'synthetic':
@@ -58,10 +67,11 @@ def prepare_data(
         raise ValueError(f"No data available for partition '{partition}'")
     
     # Compute rankings within each (dataset, repetition, n_warm_starts) group
+    # Rank in ASCENDING order of performance so that BETTER performance (lower loss) gets HIGHER rank value
     group_cols = [schema.data_col, schema.rep_col, schema.n_random_warm_starts_col]
     data[schema.label_col] = data.groupby(group_cols, group_keys=False)[
         schema.performance_col
-    ].rank(method='average', ascending=False)
+    ].rank(method='average', ascending=True)
     
     # Select feature columns (metafeatures for LTR)
     metafeature_cols = schema.surrogate_metafeatures.to_list()
@@ -77,6 +87,26 @@ def prepare_data(
     # Add features that aren't already in base columns
     all_cols = base_cols + [c for c in feature_cols if c not in base_cols]
     result = data[all_cols].copy()
+    
+    # Add algorithm identity as a feature so LTR can learn algorithm-specific rankings
+    # LTR needs to learn: "For problem X with these features, algorithm Y has rank Z"
+    # Without algorithm identity, all tuners look identical to the model
+    
+    if tuner_encoding_method == 'ordinal':
+        # Ordinal/label encoding: single numeric feature (0, 1, 2, ...)
+        # More efficient and works well with tree-based models like XGBoost
+        from sklearn.preprocessing import LabelEncoder
+        le = LabelEncoder()
+        result['tuner_encoded'] = le.fit_transform(result[schema.tuner_col])
+        feature_cols = feature_cols + ['tuner_encoded']
+    elif tuner_encoding_method == 'one_hot':
+        # One-hot encoding: binary feature for each tuner
+        # Better for linear models and provides explicit algorithm differentiation
+        tuner_dummies = pd.get_dummies(result[schema.tuner_col], prefix='tuner', drop_first=False)
+        result = pd.concat([result, tuner_dummies], axis=1)
+        feature_cols = feature_cols + list(tuner_dummies.columns)
+    else:
+        raise ValueError(f"Unknown tuner_encoding_method: {tuner_encoding_method}. Must be 'ordinal' or 'one_hot'.")
     
     # Create grouping columns
     result[schema.ranking_group_col] = (
@@ -98,6 +128,7 @@ def run_analysis(
     config: LTRConfig,
     partition: Literal['all', 'synthetic', 'real'] = 'all',
     strategy: Literal['random', 'synthetic_train_real_test'] = 'random',
+    tuner_encoding_method: Literal['ordinal', 'one_hot'] = 'ordinal',
 ) -> LTRResults:
     """Run a single learning-to-rank analysis.
     
@@ -107,11 +138,12 @@ def run_analysis(
         config: LTR configuration
         partition: Data partition ('all', 'synthetic', 'real')
         strategy: Split strategy
+        tuner_encoding_method: How to encode tuner algorithm identity ('ordinal' or 'one_hot')
         
     Returns:
         LTRResults with metrics and trained models
     """
-    data = prepare_data(raw_data, schema, partition)
+    data = prepare_data(raw_data, schema, partition, tuner_encoding_method=tuner_encoding_method)
     train_data, val_data, test_data = split_data(data, strategy, config, SYNTHETIC_BENCHMARK)
     
     # Identify feature columns (avoid duplicates)
@@ -119,6 +151,10 @@ def run_analysis(
     feature_cols = [c for c in data.columns if c in metafeature_cols]
     if schema.n_random_warm_starts_col in data.columns and schema.n_random_warm_starts_col not in feature_cols:
         feature_cols.append(schema.n_random_warm_starts_col)
+    
+    # Include algorithm identity feature (created by prepare_data)
+    if 'tuner_encoded' in data.columns and 'tuner_encoded' not in feature_cols:
+        feature_cols.append('tuner_encoded')
     
     # Train models
     naive_ranker = NaiveRanker().fit(train_data, schema.tuner_col, schema.label_col)
@@ -148,6 +184,7 @@ def run_all_analyses(
     schema: BenchmarkDataSchema | None = None,
     config: LTRConfig | None = None,
     output_dir: Path | None = None,
+    tuner_encoding_method: Literal['ordinal', 'one_hot'] = 'ordinal',
 ) -> dict[str, LTRResults]:
     """Run LTR analysis for all standard configurations.
     
@@ -156,6 +193,7 @@ def run_all_analyses(
         schema: Column schema (defaults to BenchmarkDataSchema())
         config: LTR configuration (defaults to LTRConfig())
         output_dir: Optional directory to save results
+        tuner_encoding_method: How to encode tuner algorithm identity ('ordinal' or 'one_hot')
         
     Returns:
         Dictionary mapping config names to LTRResults
@@ -172,6 +210,7 @@ def run_all_analyses(
                 raw_data, schema, config,
                 partition=analysis.partition,
                 strategy=analysis.strategy,
+                tuner_encoding_method=tuner_encoding_method,
             )
             results[analysis.name] = result
             
@@ -228,8 +267,13 @@ def run_all_partition_analyses(
     k_values: list[int] = [1, 3],
     xgb_params: dict | None = None,
     output_dir: Path | None = None,
+    tuner_encoding_method: Literal['ordinal', 'one_hot'] = 'ordinal',
 ) -> dict[str, dict]:
-    """Run LTR analysis for all partition configurations (backwards compatible)."""
+    """Run LTR analysis for all partition configurations (backwards compatible).
+    
+    Args:
+        tuner_encoding_method: How to encode tuner algorithm identity ('ordinal' or 'one_hot')
+    """
     config = LTRConfig(
         train_size=train_size,
         val_size=val_size,
@@ -238,7 +282,7 @@ def run_all_partition_analyses(
         xgb_params=xgb_params,
     )
     
-    results = run_all_analyses(raw_benchmark_data, schema, config, output_dir)
+    results = run_all_analyses(raw_benchmark_data, schema, config, output_dir, tuner_encoding_method)
     
     # Convert to old format for backwards compatibility
     return {

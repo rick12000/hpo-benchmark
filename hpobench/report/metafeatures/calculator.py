@@ -1,3 +1,15 @@
+"""Metafeature calculation for HPO surrogate data.
+
+This module calculates dataset-level metafeatures that describe characteristics of
+hyperparameter optimization surrogate data (configurations and their performances).
+
+Includes:
+- Dataset size and column type statistics
+- Performance landscape statistics (mean, std, range, distribution shape)
+- Information-theoretic metrics (mutual information)
+- Conditional performance characteristics (local skewness, heteroscedasticity)
+"""
+
 import numpy as np
 import pandas as pd
 from typing import Dict, Optional, List, Union
@@ -12,7 +24,7 @@ from sklearn.cluster import KMeans
 import statsmodels.api as sm
 from sklearn.feature_selection import mutual_info_regression
 from hpobench.config.schema import SurrogateMetafeaturesSchema
-from hpobench.generation.tabular.preprocessing import preprocess_for_metafeatures
+from hpobench.report.metafeatures.preprocessing import preprocess_for_metafeatures
 from hpobench.config.config_types import IntRange, FloatRange, CategoricalRange
 
 logger = logging.getLogger(__name__)
@@ -270,6 +282,38 @@ def calculate_feature_correlation(X: np.ndarray) -> Dict[str, float]:
         }
 
 
+def _get_nan_surrogate_metafeatures(
+    schema: Optional[SurrogateMetafeaturesSchema] = None,
+) -> Dict:
+    """Return a dictionary of surrogate metafeatures filled with NaN values."""
+    if schema is None:
+        schema = SurrogateMetafeaturesSchema()
+    
+    return {
+        schema.n_hyperparameters: np.nan,
+        'n_integer_hyperparameters': np.nan,
+        'n_float_hyperparameters': np.nan,
+        'n_binary_categorical_hyperparameters': np.nan,
+        'n_multicategory_hyperparameters': np.nan,
+        schema.performance_mean: np.nan,
+        schema.performance_std: np.nan,
+        schema.performance_min: np.nan,
+        schema.performance_max: np.nan,
+        schema.performance_range: np.nan,
+        schema.performance_skewness: np.nan,
+        schema.performance_kurtosis: np.nan,
+        schema.best_performance: np.nan,
+        'conditional_performance_skewness': np.nan,
+        'performance_heteroscedasticity': np.nan,
+        'max_mi_with_target': np.nan,
+        'min_mi_with_target': np.nan,
+        'avg_mi_with_target': np.nan,
+        'max_mi_between_features': np.nan,
+        'min_mi_between_features': np.nan,
+        'avg_mi_between_features': np.nan,
+    }
+
+
 def calculate_surrogate_metafeatures(
     configs: List[Dict[str, Union[int, float, str]]],
     performances: List[float],
@@ -398,35 +442,3 @@ def calculate_surrogate_metafeatures(
     metafeatures.update(mi_features)
     
     return metafeatures
-
-
-def _get_nan_surrogate_metafeatures(
-    schema: Optional[SurrogateMetafeaturesSchema] = None,
-) -> Dict:
-    """Return a dictionary of surrogate metafeatures filled with NaN values."""
-    if schema is None:
-        schema = SurrogateMetafeaturesSchema()
-    
-    return {
-        schema.n_hyperparameters: np.nan,
-        'n_integer_hyperparameters': np.nan,
-        'n_float_hyperparameters': np.nan,
-        'n_binary_categorical_hyperparameters': np.nan,
-        'n_multicategory_hyperparameters': np.nan,
-        schema.performance_mean: np.nan,
-        schema.performance_std: np.nan,
-        schema.performance_min: np.nan,
-        schema.performance_max: np.nan,
-        schema.performance_range: np.nan,
-        schema.performance_skewness: np.nan,
-        schema.performance_kurtosis: np.nan,
-        schema.best_performance: np.nan,
-        'conditional_performance_skewness': np.nan,
-        'performance_heteroscedasticity': np.nan,
-        'max_mi_with_target': np.nan,
-        'min_mi_with_target': np.nan,
-        'avg_mi_with_target': np.nan,
-        'max_mi_between_features': np.nan,
-        'min_mi_between_features': np.nan,
-        'avg_mi_between_features': np.nan,
-    }

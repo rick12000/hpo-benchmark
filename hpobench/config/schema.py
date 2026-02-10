@@ -103,6 +103,7 @@ class BenchmarkDataSchema(BaseModel):
     tuner_searcher_tuning_framework_col: str = "tuner_searcher_tuning_framework"
     n_pre_conformal_trials_col: str = "n_pre_conformal_trials"
     n_random_warm_starts_col: str = "n_random_warm_starts"
+    warm_start_strategy_col: str = "warm_start_strategy"
 
     runtime_unit: str = "runtime"
     iter_unit: str = "iteration"

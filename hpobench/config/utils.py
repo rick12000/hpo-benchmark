@@ -168,10 +168,10 @@ def get_external_tuning_configurations() -> List[TunerConfig]:
         List of external tuning configuration objects (e.g., for skopt, optuna).
     """
     return [
-        # TunerConfig(
-        #     tuner=CustomGPModel(backend="gp_opt", searcher="EI"),
-        #     tuner_identifier="GP-EI",
-        # ),
+        TunerConfig(
+            tuner=CustomGPModel(backend="gp_opt", searcher="EI"),
+            tuner_identifier="GP-EI",
+        ),
         # TunerConfig(
         #     tuner=CustomGPModel(backend="gp_opt", searcher="OBS"),
         #     tuner_identifier="GP-OBS",

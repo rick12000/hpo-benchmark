@@ -30,10 +30,10 @@ class ExperimentParameters(BaseModel):
     n_trials: Optional[int] = 1
 
     timeout: Optional[int] = None
-    n_warm_starts: List[int] = [15, 20, 30, 40, 50]
-    max_n_instances: int = 20
+    n_warm_starts: List[int] = [15, 30, 50]
+    max_n_instances: int = 30
 
-    n_repetitions_per_tuner_config: int = 30
+    n_repetitions_per_tuner_config: int = 20
 
 
 class Aliases(BaseModel):
