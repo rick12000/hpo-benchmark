@@ -64,9 +64,6 @@ def main():
         benchmarks=["lcbench", "synthetic_tabular"],
         tuning_configurations=LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS
         + EXTERNAL_TUNING_CONFIGURATIONS,
-        n_warm_starts=experiment_params.n_warm_starts,
-        n_trials=experiment_params.n_trials,
-        timeout=experiment_params.timeout,
         base_random_state=BASE_RANDOM_STATE,
         schema=schema,
         cache_path=CACHE_PATH,

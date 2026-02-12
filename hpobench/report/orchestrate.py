@@ -22,7 +22,6 @@ from hpobench.utils import generate_hyperparameter_combinations, add_runtime
 from hpobench.prepare import (
     setup_yahpo_instance_configs,
     setup_synthetic_tabular_configs,
-    _generate_randomized_search_spaces,
 )
 from hpobench.config.schema import BenchmarkDataSchema
 from hpobench.config.constants import Aliases, SyntheticGenerationParameters
@@ -58,9 +57,6 @@ def load_experiment_configs(
         ]
     ],
     tuning_configurations: list[TunerConfig],
-    n_warm_starts: list[int],
-    n_trials: int,
-    timeout: Optional[float],
     max_n_instances_per_benchmark: int = 10,
     datasets_per_benchmark: Optional[list[list[str]]] = None,
     synthetic_tabular_ids: Optional[list[str]] = None,
@@ -71,34 +67,15 @@ def load_experiment_configs(
     the specific initialization requirements for YAHPO (RBVS2 XGBoost, LCBench) benchmarks.
 
     Args:
-        benchmarks: List of benchmark names to initialize. Supported benchmarks are:
-            - "lcbench": Learning Curves Benchmark for machine learning algorithms
-            - "rbv2_aknn": RBVS2 XGBoost benchmark from YAHPO suite
-            - "LCBench-L": LCBench subset with largest datasets
-            - "LCBench-H": LCBench subset with most heteroscedastic datasets
-            - "LCBench-A": LCBench subset with most skewed datasets
-            - "rbv2_aknn-L": RBV2 XGBoost subset with largest datasets
-            - "rbv2_aknn-H": RBV2 XGBoost subset with most heteroscedastic datasets
-            - "rbv2_aknn-A": RBV2 XGBoost subset with most skewed datasets
-            - "synthetic_tabular": Synthetic tabular benchmark
-        tuning_configurations: List of tuner configurations defining the HPO algorithms
-            and their parameters to be evaluated on each benchmark instance.
-        n_warm_starts: List of numbers of initial random hyperparameter configurations to generate
-            for each tuner to ensure fair comparison across different optimization methods.
-        n_trials: Total number of hyperparameter evaluation trials per tuner configuration,
-            including warm start trials.
-        timeout: Maximum time in seconds allowed for each individual hyperparameter
-            evaluation. None for no timeout limit.
-        max_n_instances_per_benchmark: Maximum number of dataset instances to use per
-            benchmark.
-        datasets_per_benchmark: Optional list of lists, each containing specific dataset
-            identifiers to use for the corresponding benchmark. If provided, overrides
-            the default dataset selection logic for benchmarks.
+        benchmarks: List of benchmark names to initialize.
+        tuning_configurations: List of tuner configurations defining the HPO algorithms.
+        max_n_instances_per_benchmark: Maximum number of dataset instances to use per benchmark.
+        datasets_per_benchmark: Optional list of lists of dataset identifiers for each benchmark.
+        synthetic_tabular_ids: Optional list of synthetic tabular dataset IDs.
 
     Returns:
         List of ExperimentConfig objects, each containing a benchmark instance paired
-        with its search space, objective function, and tuning parameters. The number
-        of configs returned depends on the benchmarks selected and max_n_instances_per_benchmark.
+        with its search space, objective function, and tuning parameters.
     """
     logger.info("Setting up benchmark instances...")
 
@@ -117,9 +94,6 @@ def load_experiment_configs(
             configs = setup_yahpo_instance_configs(
                 benchmark=benchmark,
                 tuning_configurations=tuning_configurations,
-                n_warm_starts=n_warm_starts,
-                n_trials=n_trials,
-                timeout=timeout,
                 max_n_instances=max_n_instances_per_benchmark,
             )
             experiment_configs.extend(configs)
@@ -140,9 +114,6 @@ def load_experiment_configs(
         configs = setup_synthetic_tabular_configs(
             datasets=selected_datasets,
             tuning_configurations=tuning_configurations,
-            n_warm_starts=n_warm_starts,
-            n_trials=n_trials,
-            timeout=timeout,
         )
         experiment_configs.extend(configs)
 
@@ -361,12 +332,11 @@ def run_main_benchmark(
     configuration (which contains a single dataset), it:
     1. Initializes the objective function (surrogate model that returns performance of
         dataset at passed hyperparameters)
-    2. For each warm start count in the configuration's list:
+    2. For each warm start count:
         a. Generates consistent warm start configurations (one set per repetition)
         b. Runs each tuner configuration for the specified number of trials
         c. Collects performance metrics, runtime data, tuner-specific metadata, and
            the number of warm starts used
-    3. Collects performance metrics, runtime data, and tuner-specific metadata
 
     The function handles both confopt-based tuners (with detailed conformal prediction
     metadata) and external tuning frameworks (Optuna, Sk Opt, etc.) with appropriate
@@ -377,34 +347,22 @@ def run_main_benchmark(
             a specific dataset, search space, objective function, and tuning parameters.
         n_repetitions: Number of independent experimental repetitions per tuner-dataset
             combination to enable statistical significance testing and confidence intervals.
-        base_random_state: Base seed for reproducible random number generation across
-            all experiments. Each repetition uses base_random_state + repetition_index.
         cache_path: Root directory path for saving experimental data, logs, and
             intermediate results. Must be writable and have sufficient disk space.
         run_start_str: Unique timestamp-based identifier for this experimental run,
             used to organize results and prevent conflicts between concurrent runs.
+        base_random_state: Base seed for reproducible random number generation across
+            all experiments. Each repetition uses base_random_state + repetition_index.
 
     Returns:
-        DataFrame containing complete experimental results with columns:
-        - 'trial': Trial number within each tuner run
-        - 'performance': Objective function value achieved
-        - 'runtime': Wall-clock time for hyperparameter evaluation
-        - 'benchmark_identifier': Name of the benchmark dataset
-        - 'dataset': Specific dataset instance identifier
-        - 'tuner': Tuner configuration identifier
-        - 'repetition': Experimental repetition number (1-indexed)
-        - 'searcher_tuning_framework': Framework used (confopt, optuna, syne_tune)
-        - 'estimator_architecture': Architecture for confopt tuners (empty for others)
-        - 'confidence_level': Confidence interval width for confopt (empty for others)
-        - 'sampler': Sampling strategy class name for confopt (empty for others)
-        - 'n_pre_conformal_trials': Pre-conformal trials for confopt (empty for others)
-        - 'sampler_n_quantiles': Number of quantiles used by sampler for confopt (empty for others)
-        - 'sampler_adapter': Adapter used by sampler for confopt ("None" if None, empty for others)
-        - 'tuner_searcher_tuning_framework': Searcher tuning framework from tuner config ("None" if None, empty for others)
-        - 'n_random_warm_starts': Number of random warm starts used for this trial
-        - 'warm_start_strategy': Strategy used to generate warm starts ('random', 'gp_thompson_sampling', 'gp_expected_improvement')
-        - Surrogate metafeatures: Various metafeatures calculated from the warm-start configurations
+        DataFrame containing complete experimental results with performance and metadata.
     """
+    from hpobench.config.constants import ExperimentParameters
+    
+    # Hard-code n_warm_starts and timeout from constants
+    experiment_params = ExperimentParameters()
+    n_warm_starts = experiment_params.n_warm_starts
+    
     logger.info("Running HPO benchmark...")
 
     incremental_data_path = os.path.join(cache_path, f"data/{run_start_str}")
@@ -422,9 +380,9 @@ def run_main_benchmark(
         experiment_config.objective_function.initialize()
 
         # Loop over each warm start count
-        for ws_idx, n_ws in enumerate(experiment_config.n_warm_starts, 1):
+        for ws_idx, n_ws in enumerate(n_warm_starts, 1):
             logger.info(
-                f"Warm start loop [{ws_idx}/{len(experiment_config.n_warm_starts)}] - "
+                f"Warm start loop [{ws_idx}/{len(n_warm_starts)}] - "
                 f"Generating {n_ws} warm start configurations for dataset: {dataset_name}"
             )
             
@@ -478,19 +436,26 @@ def run_main_benchmark(
                             f"from {len(configs)} warm-start configs ({strategy.value}): {surrogate_metafeatures}"
                         )
 
-                        # Run for exactly 1 trial after warm-start (n_trials = n_ws + 1)
                         n_trials_for_tuner = n_ws + 1
                         
                         historical_performance = tune(
                             performance_generator=experiment_config.objective_function,
                             tuner_config=tuner,
                             n_trials=n_trials_for_tuner,
-                            timeout=experiment_config.timeout,
+                            timeout=None,
                             params=experiment_config.search_space,
                             # Grab the warm start configurations for this repetition (shared by all tuners):
                             warm_start_configs=warm_start_configs_per_repetition[repetition],
                             random_state=base_random_state + repetition,
                         )
+                        
+                        # Validate that we got exactly n_ws + 1 trials (warm-starts + 1 optimization trial)
+                        expected_total_trials = n_ws + 1
+                        actual_total_trials = len(historical_performance)
+                        if actual_total_trials != expected_total_trials:
+                            raise ValueError(
+                                f"Expected {expected_total_trials} total trials but got {actual_total_trials}"
+                            )
 
                         historical_performance = add_runtime(
                             experiment_log=historical_performance,
@@ -676,9 +641,6 @@ def run_and_analyze_main_benchmark(
         ]
     ],
     tuning_configurations: list[TunerConfig],
-    n_warm_starts: list[int],
-    n_trials: int,
-    timeout: Optional[float],
     base_random_state: int,
     schema: BenchmarkDataSchema,
     cache_path: str,
@@ -690,73 +652,25 @@ def run_and_analyze_main_benchmark(
     """
     Complete end-to-end hyperparameter optimization benchmark pipeline with analysis.
 
-    The function supports various analysis types corresponding to different research
-    questions in the HPO literature:
-    - Coverage analysis: Evaluates conformal prediction interval validity
-    - Sampler variation: Compares different acquisition functions and sampling strategies
-    - Architecture variation: Studies impact of surrogate model architectures
-    - External tuning: Benchmarks against established HPO frameworks
-    - Preconformal comparison: Analyzes effect of pre-conformal training phases
+    The architecture runs exactly 1 optimization trial after warm-start configurations.
 
     Args:
-        benchmarks: List of benchmark datasets to evaluate. Each benchmark provides
-            different characteristics (search space dimensionality, evaluation cost, etc.):
-            - "lcbench": Classical ML algorithms with learning curve data
-            - "rbv2_aknn": Gradient boosting hyperparameter optimization
-            - "LCBench-L": LCBench subset with largest datasets
-            - "LCBench-H": LCBench subset with most heteroscedastic datasets
-            - "LCBench-A": LCBench subset with most skewed datasets
-            - "rbv2_aknn-L": RBV2 XGBoost subset with largest datasets
-            - "rbv2_aknn-H": RBV2 XGBoost subset with most heteroscedastic datasets
-            - "rbv2_aknn-A": RBV2 XGBoost subset with most skewed datasets
+        benchmarks: List of benchmark datasets to evaluate.
         tuning_configurations: HPO algorithms and their parameter settings to compare.
-            Should include both confopt-based methods and baseline algorithms for
-            comprehensive evaluation.
-        n_warm_starts: List of numbers of random initial configurations per tuner to ensure
-            fair comparison. Typically [10, 15, 20] to compare multiple warm start counts.
-        n_trials: Total hyperparameter evaluations per tuner run. Should be sufficient
-            to reach convergence - typically 100-500 depending on search space complexity.
-        timeout: Per-evaluation time limit in seconds. Needed to prevent long-running evaluations
-            from blocking the pipeline.
-        base_random_state: Seed for reproducible experiments. All randomness in the
-            experimental pipeline derives from this seed to ensure exact reproducibility.
-        cache_path: Directory for storing experimental data, plots, and analysis results.
-            Should have sufficient space (several GB for large experiments).
-        run_start_str: Unique identifier for this experimental run, typically a timestamp.
-            Used to organize results and prevent conflicts between concurrent experiments.
-        analysis_type: Identifier for the type of analysis being performed, used in
-            result organization and plot titles. Examples: "01_coverage_analysis",
-            "02_sampler_variation", "03_architecture_variation".
-        analysis_components: List of specific analyses to perform on the experimental data:
-            - "friedman": Friedman test for overall statistical differences
-            - "nemenyi": Post-hoc Nemenyi test for pairwise comparisons
-            - "coverage": Conformal prediction interval coverage validation
-            - "dataset_performances": Per-dataset performance breakdowns
-            - "rank_analysis": Algorithm ranking analysis across datasets
-            - "sampler_comparison": Detailed comparison of sampling strategies
-            - "architecture_comparison": Analysis of surrogate model architectures
-            - "conformalization_effect": Impact analysis of conformalization
-        max_n_instances_per_benchmark: Limit on dataset instances per benchmark to
-            control experimental scope and runtime. Use smaller values for initial
-            experiments or when computational resources are limited.
-        n_repetitions: Number of independent experimental repetitions for statistical
-            validity. Minimum 10 recommended for meaningful confidence intervals,
-            30+ for publication-quality results.
-        datasets_per_benchmark: Optional list of lists, each containing specific dataset
-            identifiers to use for the corresponding benchmark. If provided, overrides
-            the default dataset selection logic for benchmarks.
+        base_random_state: Seed for reproducible experiments.
+        schema: BenchmarkDataSchema for result organization.
+        cache_path: Directory for storing experimental data and results.
+        run_start_str: Unique identifier for this experimental run.
+        max_n_instances_per_benchmark: Limit on dataset instances per benchmark.
+        n_repetitions: Number of independent experimental repetitions.
+        datasets_per_benchmark: Optional specific dataset identifiers per benchmark.
 
     Returns:
-        Complete experimental dataset as DataFrame with all trial results, performance
-        metrics, metadata, and derived features needed for analysis. This data serves
-        as input to the analysis functions and can be used for custom analysis.
+        Complete experimental dataset as DataFrame with all trial results and metadata.
     """
     experiment_configs = load_experiment_configs(
         benchmarks=benchmarks,
         tuning_configurations=tuning_configurations,
-        n_warm_starts=n_warm_starts,
-        n_trials=n_trials,
-        timeout=timeout,
         max_n_instances_per_benchmark=max_n_instances_per_benchmark,
         datasets_per_benchmark=datasets_per_benchmark,
     )

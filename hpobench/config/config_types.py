@@ -195,43 +195,16 @@ class ExperimentConfig(BaseModel):
         search_space: Dictionary mapping parameter names to their ranges.
         objective_function: Generator for objective function values.
         tuner_configurations: List of tuner configurations to compare.
-        n_warm_starts: List of random trial counts before optimization begins to evaluate.
         benchmark_identifier: Name of the benchmark suite.
         dataset_identifier: Specific dataset within the benchmark.
         metric: Optimization metric name (if applicable).
-        n_trials: Maximum number of optimization trials.
-        timeout: Maximum experiment duration in seconds.
     """
 
     search_space: dict[str, Union[IntRange, FloatRange, CategoricalRange]]
     objective_function: ObjectiveMetricGenerator
     tuner_configurations: list[TunerConfig]
-    n_warm_starts: list[int]
     benchmark_identifier: str
     dataset_identifier: str
     metric: Optional[str] = None
-    n_trials: Optional[int] = None
-    timeout: Optional[float] = None
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    @model_validator(mode="before")
-    @classmethod
-    def check_timeout_or_n_trials(cls, values):
-        """Validate that either n_trials or timeout is specified.
-
-        Args:
-            values: Dictionary of field values to validate.
-
-        Returns:
-            Validated values dictionary.
-
-        Raises:
-            ValueError: If neither n_trials nor timeout is specified.
-        """
-        if isinstance(values, dict):
-            if values.get("n_trials") is None and values.get("timeout") is None:
-                raise ValueError(
-                    "At least one of 'n_trials' or 'timeout' must be specified."
-                )
-        return values

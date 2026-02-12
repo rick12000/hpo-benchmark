@@ -27,11 +27,8 @@ class ExperimentParameters(BaseModel):
         large_n_repetitions_per_tuner_config: Repetitions for large experiments.
     """
 
-    n_trials: Optional[int] = 1
-
-    timeout: Optional[int] = None
-    n_warm_starts: List[int] = [15, 30, 50]
-    max_n_instances: int = 30
+    n_warm_starts: List[int] = [15, 30]
+    max_n_instances: int = 15
 
     n_repetitions_per_tuner_config: int = 20
 
