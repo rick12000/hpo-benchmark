@@ -19,14 +19,14 @@ except ImportError:
 
 from hpobench.config.config_types import ExperimentConfig, TunerConfig, IntRange, FloatRange, CategoricalRange
 from hpobench.utils import generate_hyperparameter_combinations, add_runtime
-from hpobench.prepare import (
+from hpobench.report.orchestration.prepare import (
     setup_yahpo_instance_configs,
     setup_synthetic_tabular_configs,
 )
 from hpobench.config.schema import BenchmarkDataSchema, Aliases
 from hpobench.config.constants import SyntheticGenerationParameters
 from hpobench.generation.tabular.storage import DatasetStorage
-from hpobench.tune import tune
+from hpobench.tuning.tune import tune
 from hpobench.report.learning_to_rank.pipeline import run_all_partition_analyses
 
 logger = logging.getLogger(__name__)
@@ -180,7 +180,7 @@ def _generate_gp_warm_starts(
         List of (configuration, performance) tuples from GP searches only.
     """
     from hpobench.config.config_types import CustomGPModel
-    from hpobench.tune import tune as tune_function
+    from hpobench.tuning.tune import tune as tune_function
     
     # Generate initial random warm-starts for the GP
     initial_warm_starts = _generate_random_warm_starts(

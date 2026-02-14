@@ -1,13 +1,13 @@
 import logging
 import random
 from typing import Optional, Dict, Tuple, get_type_hints, List
-from hpobench.gp_opt.wrapping import ParameterRange
+from hpobench.tuning.gp_opt.wrapping import ParameterRange
 
 import numpy as np
 from tqdm import tqdm
 from datetime import datetime
 import inspect
-from hpobench.gp_opt.utils.tracking import (
+from hpobench.tuning.gp_opt.utils.tracking import (
     Trial,
     Study,
     RuntimeTracker,
@@ -15,8 +15,8 @@ from hpobench.gp_opt.utils.tracking import (
     StaticConfigurationManager,
     ProgressBarManager,
 )
-from hpobench.gp_opt.surrogate import GPEstimator
-from hpobench.gp_opt.acquisition_functions import (
+from hpobench.tuning.gp_opt.surrogate import GPEstimator
+from hpobench.tuning.gp_opt.acquisition_functions import (
     BaseAcquisitionFunction,
     optimize_acquisition,
 )
@@ -510,8 +510,8 @@ class GPTuner:
         Example:
             Basic usage::
 
-                from hpobench.gp_opt.tuning import ConformalTuner
-                from hpobench.gp_opt.wrapping import IntRange, FloatRange
+                from hpobench.tuning.gp_opt.tuning import ConformalTuner
+                from hpobench.tuning.gp_opt.wrapping import IntRange, FloatRange
 
                 def objective(configuration):
                     model = SomeModel(

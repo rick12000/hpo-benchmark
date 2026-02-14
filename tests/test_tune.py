@@ -1,6 +1,6 @@
 import pytest
 import pandas as pd
-from hpobench.tune import (
+from hpobench.tuning.tune import (
     optuna_tune,
     confopt_tune,
     skopt_tune,
@@ -9,7 +9,7 @@ from hpobench.tune import (
     calculate_breach_status,
     calculate_winkler_components,
 )
-from hpobench.syne_tune_integration import syne_tune_cqr_tune
+from hpobench.tuning.syne_tune_integration import syne_tune_cqr_tune
 from confopt.selection.acquisition import (
     QuantileConformalSearcher,
     LowerBoundSampler,

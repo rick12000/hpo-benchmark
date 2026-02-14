@@ -3,7 +3,7 @@ from typing import Dict, List
 
 import numpy as np
 import pandas as pd
-from hpobench.gp_opt.wrapping import CategoricalRange, ParameterRange
+from hpobench.tuning.gp_opt.wrapping import CategoricalRange, ParameterRange
 
 logger = logging.getLogger(__name__)
 

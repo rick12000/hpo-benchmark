@@ -3,12 +3,12 @@ import time
 from pydantic import BaseModel
 from datetime import datetime
 from typing import Optional, Literal
-from hpobench.gp_opt.wrapping import ParameterRange
+from hpobench.tuning.gp_opt.wrapping import ParameterRange
 import numpy as np
-from hpobench.gp_opt.utils.configurations.encoding import ConfigurationEncoder
-from hpobench.gp_opt.utils.configurations.sampling import get_tuning_configurations
+from hpobench.tuning.gp_opt.utils.configurations.encoding import ConfigurationEncoder
+from hpobench.tuning.gp_opt.utils.configurations.sampling import get_tuning_configurations
 from tqdm import tqdm
-from hpobench.gp_opt.utils.configurations.utils import create_config_hash
+from hpobench.tuning.gp_opt.utils.configurations.utils import create_config_hash
 
 
 logger = logging.getLogger(__name__)

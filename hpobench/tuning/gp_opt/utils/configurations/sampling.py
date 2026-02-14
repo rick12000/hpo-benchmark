@@ -4,13 +4,13 @@ import logging
 import random
 import numpy as np
 from scipy.stats import qmc
-from hpobench.gp_opt.wrapping import (
+from hpobench.tuning.gp_opt.wrapping import (
     IntRange,
     FloatRange,
     CategoricalRange,
     ParameterRange,
 )
-from hpobench.gp_opt.utils.configurations.utils import create_config_hash
+from hpobench.tuning.gp_opt.utils.configurations.utils import create_config_hash
 
 logger = logging.getLogger(__name__)
 

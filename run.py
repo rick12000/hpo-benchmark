@@ -6,7 +6,7 @@ from hpobench.config.tuner_configurations import (
 from hpobench.config.constants import ExperimentParameters, SyntheticGenerationParameters
 from hpobench.config.schema import BenchmarkDataSchema
 from hpobench.generation.tabular.metadata_manager import CentralMetadataManager
-from hpobench.report.orchestrate import run_and_analyze_main_benchmark
+from hpobench.report.orchestration.orchestrate import run_and_analyze_main_benchmark
 from hpobench.utils import setup_environment
 
 BASE_RANDOM_STATE = 42

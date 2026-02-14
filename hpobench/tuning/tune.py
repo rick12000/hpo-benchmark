@@ -30,7 +30,7 @@ def _calculate_search_space_size(
 
 
 from optuna.samplers import TPESampler, RandomSampler, CmaEsSampler, GPSampler
-from hpobench.optuna_gp_integration import (
+from hpobench.tuning.optuna_gp_integration import (
     StrippedGPSampler,
     ExpandedAcquisitionFunction,
 )
@@ -58,7 +58,7 @@ except ImportError:
     )
 from copy import deepcopy
 from functools import partial
-from hpobench.syne_tune_integration import syne_tune_cqr_tune
+from hpobench.tuning.syne_tune_integration import syne_tune_cqr_tune
 from ConfigSpace import (
     ConfigurationSpace,
     Configuration,
@@ -83,9 +83,9 @@ except ImportError:
         "smac is a core dependency of this repository, but it is not automatically installed via pyproject.toml, please refer to the README.md for instructions on how to install this separately"
     )
 
-from hpobench.gp_opt.tuning import GPTuner
-from hpobench.gp_opt import wrapping as gp_opt_ranges
-from hpobench.gp_opt.acquisition_functions import (
+from hpobench.tuning.gp_opt.tuning import GPTuner
+from hpobench.tuning.gp_opt import wrapping as gp_opt_ranges
+from hpobench.tuning.gp_opt.acquisition_functions import (
     ExpectedImprovement,
     LogExpectedImprovement,
     ThompsonSampling,
