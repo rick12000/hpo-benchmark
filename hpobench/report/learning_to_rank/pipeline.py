@@ -3,12 +3,13 @@ Learning-to-rank pipeline for HPO algorithm selection.
 """
 
 import logging
+import numpy as np
 import pandas as pd
 from pathlib import Path
 from typing import Literal
 from dataclasses import dataclass
 
-from hpobench.config.schema import BenchmarkDataSchema
+from hpobench.config.schema import BenchmarkDataSchema, SurrogateMetafeaturesSchema
 from hpobench.config.constants import SyntheticGenerationParameters
 from hpobench.report.learning_to_rank.models import (
     LTRConfig, LTRResults, LTRModel, NaiveRanker,
@@ -74,7 +75,7 @@ def prepare_data(
     ].rank(method='average', ascending=True)
     
     # Select feature columns (metafeatures for LTR)
-    metafeature_cols = schema.surrogate_metafeatures.to_list()
+    metafeature_cols = SurrogateMetafeaturesSchema().to_list()
     feature_cols = [c for c in metafeature_cols if c in data.columns]
     
     # Build output columns (avoid duplicates)
@@ -147,7 +148,7 @@ def run_analysis(
     train_data, val_data, test_data = split_data(data, strategy, config, SYNTHETIC_BENCHMARK)
     
     # Identify feature columns (avoid duplicates)
-    metafeature_cols = schema.surrogate_metafeatures.to_list()
+    metafeature_cols = SurrogateMetafeaturesSchema().to_list()
     feature_cols = [c for c in data.columns if c in metafeature_cols]
     if schema.n_random_warm_starts_col in data.columns and schema.n_random_warm_starts_col not in feature_cols:
         feature_cols.append(schema.n_random_warm_starts_col)
@@ -185,6 +186,11 @@ def run_all_analyses(
     config: LTRConfig | None = None,
     output_dir: Path | None = None,
     tuner_encoding_method: Literal['ordinal', 'one_hot'] = 'ordinal',
+    compute_pdp: bool = True,
+    pdp_n_grid_points: int = 20,
+    pdp_show_std: bool = True,
+    compute_downsampling: bool = True,
+    downsampling_sample_sizes: list[int] | None = None,
 ) -> dict[str, LTRResults]:
     """Run LTR analysis for all standard configurations.
     
@@ -194,6 +200,11 @@ def run_all_analyses(
         config: LTR configuration (defaults to LTRConfig())
         output_dir: Optional directory to save results
         tuner_encoding_method: How to encode tuner algorithm identity ('ordinal' or 'one_hot')
+        compute_pdp: Whether to compute rank-based partial dependence plots (default: True)
+        pdp_n_grid_points: Number of grid points for PDP computation (default: 20)
+        pdp_show_std: Whether to show standard deviation bands in PDP plots (default: True)
+        compute_downsampling: Whether to compute downsampling curves for scaling analysis (default: True)
+        downsampling_sample_sizes: List of sample sizes for downsampling (None for automatic)
         
     Returns:
         Dictionary mapping config names to LTRResults
@@ -203,6 +214,7 @@ def run_all_analyses(
     
     results = {}
     summary_rows = []
+    pdp_summary_rows = []
     
     for analysis in ANALYSIS_CONFIGS:
         try:
@@ -227,6 +239,97 @@ def run_all_analyses(
                 f"{analysis.name}: P@1={result.ltr_metrics['precision@1']:.3f} "
                 f"(+{result.ltr_metrics['precision@1'] - result.naive_metrics['precision@1']:.3f})"
             )
+            
+            # Compute PDP for this partition if requested
+            if compute_pdp and output_dir:
+                try:
+                    from hpobench.report.learning_to_rank.explainability import (
+                        compute_partial_dependence,
+                        plot_partial_dependence,
+                    )
+                    
+                    logger.info(f"Computing partial dependence for {analysis.name}")
+                    
+                    pdp_result = compute_partial_dependence(
+                        model=result.model,
+                        test_data=result.test_data,
+                        feature_cols=result.feature_cols,
+                        ranking_group_col=schema.ranking_group_col,
+                        tuner_col=schema.tuner_col,
+                        partition_name=analysis.name,
+                        n_grid_points=pdp_n_grid_points,
+                    )
+                    
+                    # Save plots for this partition
+                    partition_pdp_dir = Path(output_dir) / 'pdp_plots' / analysis.name
+                    plot_partial_dependence(
+                        pdp_results=pdp_result,
+                        output_dir=partition_pdp_dir,
+                        show_std=pdp_show_std,
+                    )
+                    
+                    # Collect summary statistics
+                    for (feature_name, tuner_name), pdp in pdp_result.results.items():
+                        rank_range = pdp.rank_values.max() - pdp.rank_values.min()
+                        mean_rank = pdp.rank_values.mean()
+                        
+                        pdp_summary_rows.append({
+                            'partition': analysis.name,
+                            'tuner': tuner_name,
+                            'feature': feature_name,
+                            'rank_range': rank_range,
+                            'mean_rank': mean_rank,
+                            'std_rank': pdp.rank_std.mean(),
+                            'n_groups': pdp.n_groups,
+                            'n_grid_points': len(pdp.x_values),
+                        })
+                    
+                    logger.info(f"Saved PDP plots to {partition_pdp_dir}")
+                    
+                except Exception as e:
+                    logger.warning(f"Failed to compute PDP for {analysis.name}: {e}")
+            
+            # Compute downsampling curve for this partition if requested
+            if compute_downsampling and output_dir:
+                try:
+                    logger.info(f"Computing downsampling curve for {analysis.name}")
+                    
+                    # Prepare data to get train/val/test splits
+                    data = prepare_data(raw_data, schema, analysis.partition, tuner_encoding_method=tuner_encoding_method)
+                    train_data, val_data, test_data = split_data(data, analysis.strategy, config, SYNTHETIC_BENCHMARK)
+                    
+                    # Compute downsampling curve
+                    downsampling_result = compute_downsampling_curve(
+                        train_data=train_data,
+                        val_data=val_data,
+                        test_data=test_data,
+                        feature_cols=result.feature_cols,
+                        schema=schema,
+                        config=config,
+                        sample_sizes=downsampling_sample_sizes,
+                    )
+                    
+                    # Save results for this partition
+                    partition_downsampling_dir = Path(output_dir) / 'downsampling' / analysis.name
+                    partition_downsampling_dir.mkdir(parents=True, exist_ok=True)
+                    
+                    # Save CSV
+                    df = pd.DataFrame(downsampling_result)
+                    csv_path = partition_downsampling_dir / 'downsampling_curve.csv'
+                    df.to_csv(csv_path, index=False)
+                    
+                    # Save plot
+                    plot_path = partition_downsampling_dir / 'downsampling_curve.png'
+                    plot_downsampling_curve(
+                        downsampling_result,
+                        analysis.name,
+                        plot_path
+                    )
+                    
+                    logger.info(f"Saved downsampling results to {partition_downsampling_dir}")
+                    
+                except Exception as e:
+                    logger.warning(f"Failed to compute downsampling curve for {analysis.name}: {e}")
             
         except ValueError as e:
             logger.warning(f"Skipping {analysis.name}: {e}")
@@ -253,11 +356,218 @@ def run_all_analyses(
                     'n_val': result.n_val,
                     'n_test': result.n_test,
                 }, f, indent=2)
+        
+        # Save PDP summary if computed
+        if pdp_summary_rows:
+            summary_df = pd.DataFrame(pdp_summary_rows)
+            summary_df.to_csv(output_dir / 'pdp_summary.csv', index=False)
+            logger.info(f"Saved PDP summary to {output_dir / 'pdp_summary.csv'}")
+            
+            # Log top features by rank impact
+            feature_impact = summary_df.groupby('feature')['rank_range'].mean().sort_values(ascending=False)
+            logger.info("Top 5 features by average rank impact:")
+            for i, (feature, impact) in enumerate(feature_impact.head(5).items(), 1):
+                logger.info(f"  {i}. {feature}: {impact:.2f} rank positions")
     
     return results
 
 
 # Backwards compatibility aliases
+def compute_downsampling_curve(
+    train_data: pd.DataFrame,
+    val_data: pd.DataFrame,
+    test_data: pd.DataFrame,
+    feature_cols: list[str],
+    schema: BenchmarkDataSchema,
+    config: LTRConfig,
+    sample_sizes: list[int] | None = None,
+) -> dict[str, list[float]]:
+    """Compute downsampling curve to study scaling laws.
+    
+    Trains LTR models on progressively larger subsets of training/validation data
+    and evaluates on the full test set to understand how performance scales with
+    training data size.
+    
+    Args:
+        train_data: Training data (will be downsampled)
+        val_data: Validation data (will be downsampled)
+        test_data: Test data (kept fixed for all evaluations)
+        feature_cols: List of feature column names
+        schema: Column schema
+        config: LTR configuration
+        sample_sizes: List of sample sizes (number of groups) to try.
+                     If None, generates logarithmic sequence from 10 to full size.
+        
+    Returns:
+        Dictionary with keys:
+            - 'sample_sizes': List of sample sizes (number of groups)
+            - 'n_train_groups': List of training group counts
+            - 'n_val_groups': List of validation group counts
+            - 'precision@k': List of precision@k values for each k in config.k_values
+            - 'ndcg@k': List of NDCG@k values for each k in config.k_values
+    """
+    # Combine train and val for downsampling
+    train_val_data = pd.concat([train_data, val_data], ignore_index=True)
+    n_total_groups = train_val_data[schema.ranking_group_col].nunique()
+    
+    # Determine sample sizes (based on number of groups, not rows)
+    if sample_sizes is None:
+        # Generate logarithmic sequence: 10, 20, 50, 100, 200, 500, 1000, ...
+        sample_sizes = []
+        size = 10
+        while size < n_total_groups:
+            sample_sizes.append(size)
+            if size < 100:
+                size = int(size * 2)  # 10, 20, 40, 80
+            elif size < 1000:
+                size = int(size * 2.5)  # 100, 250, 625
+            else:
+                size = int(size * 2)  # 1000, 2000, 4000, ...
+        sample_sizes.append(n_total_groups)  # Always include full size
+    else:
+        # Filter out sizes larger than available data
+        sample_sizes = [s for s in sample_sizes if s <= n_total_groups]
+        if n_total_groups not in sample_sizes:
+            sample_sizes.append(n_total_groups)
+    
+    logger.info(f"Running downsampling analysis with {len(sample_sizes)} sample sizes")
+    logger.info(f"Sample sizes (groups): {sample_sizes}")
+    
+    # Storage for results
+    results = {
+        'sample_sizes': [],
+        'n_train_groups': [],
+        'n_val_groups': [],
+    }
+    for k in config.k_values:
+        results[f'precision@{k}'] = []
+        results[f'ndcg@{k}'] = []
+    
+    # Train and evaluate for each sample size
+    for n_groups in sample_sizes:
+        logger.info(f"  Training with {n_groups} groups...")
+        
+        # Sample groups from train_val_data
+        if n_groups < n_total_groups:
+            unique_groups = train_val_data[schema.ranking_group_col].unique()
+            np.random.seed(config.random_state)
+            sampled_groups = np.random.choice(unique_groups, size=n_groups, replace=False)
+            sampled_train_val = train_val_data[
+                train_val_data[schema.ranking_group_col].isin(sampled_groups)
+            ].copy()
+        else:
+            sampled_train_val = train_val_data.copy()
+        
+        # Split sampled data into train and val (maintain proportions)
+        val_prop = config.val_size / (config.train_size + config.val_size)
+        n_val_groups = max(1, int(n_groups * val_prop))
+        n_train_groups = n_groups - n_val_groups
+        
+        unique_sampled_groups = sampled_train_val[schema.ranking_group_col].unique()
+        np.random.seed(config.random_state)
+        np.random.shuffle(unique_sampled_groups)
+        
+        train_groups = unique_sampled_groups[:n_train_groups]
+        val_groups = unique_sampled_groups[n_train_groups:]
+        
+        sampled_train = sampled_train_val[
+            sampled_train_val[schema.ranking_group_col].isin(train_groups)
+        ].copy()
+        sampled_val = sampled_train_val[
+            sampled_train_val[schema.ranking_group_col].isin(val_groups)
+        ].copy()
+        
+        # Train model
+        ltr_model = LTRModel(config.xgb_params).fit(
+            sampled_train, sampled_val, feature_cols, schema.label_col, schema.ranking_group_col
+        )
+        
+        # Evaluate on full test set
+        ltr_metrics = evaluate_ltr(ltr_model, test_data, config.k_values, schema)
+        
+        # Store results
+        results['sample_sizes'].append(n_groups)
+        results['n_train_groups'].append(n_train_groups)
+        results['n_val_groups'].append(n_val_groups)
+        for k in config.k_values:
+            results[f'precision@{k}'].append(ltr_metrics[f'precision@{k}'])
+            results[f'ndcg@{k}'].append(ltr_metrics[f'ndcg@{k}'])
+    
+    return results
+
+
+def plot_downsampling_curve(
+    results: dict[str, list[float]],
+    partition_name: str,
+    output_path: Path,
+) -> None:
+    """Plot downsampling analysis results showing scaling laws.
+    
+    Creates a 2x2 grid showing how precision@1, precision@3, NDCG@1, and NDCG@3
+    vary with training sample size.
+    
+    Args:
+        results: Results from run_downsampling_analysis
+        partition_name: Name of the data partition
+        output_path: Path to save the plot
+    """
+    import matplotlib.pyplot as plt
+    
+    sample_sizes = results['sample_sizes']
+    
+    # Determine which metrics are available
+    metrics = []
+    for key in results.keys():
+        if key.startswith('precision@') or key.startswith('ndcg@'):
+            metrics.append(key)
+    
+    # Create 2x2 subplot grid
+    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+    axes = axes.flatten()
+    
+    for idx, metric in enumerate(metrics[:4]):  # Plot up to 4 metrics
+        ax = axes[idx]
+        values = results[metric]
+        
+        # Plot with markers
+        ax.plot(sample_sizes, values, 'o-', linewidth=2, markersize=6, color='#1f77b4')
+        
+        # Formatting
+        ax.set_xlabel('Training Sample Size (number of groups)', fontsize=11)
+        ax.set_ylabel(metric.replace('@', ' @ ').title(), fontsize=11)
+        ax.set_title(metric.replace('@', ' @ ').upper(), fontsize=12, fontweight='bold')
+        ax.grid(alpha=0.3)
+        
+        # Use log scale for x-axis if range is large
+        if max(sample_sizes) / min(sample_sizes) > 10:
+            ax.set_xscale('log')
+        
+        # Add horizontal line at final value for reference
+        final_value = values[-1]
+        ax.axhline(final_value, color='red', linestyle='--', alpha=0.5, linewidth=1.5,
+                   label=f'Full data: {final_value:.3f}')
+        ax.legend(fontsize=9)
+    
+    # Hide unused subplots
+    for idx in range(len(metrics), 4):
+        axes[idx].set_visible(False)
+    
+    fig.suptitle(
+        f'Learning-to-Rank Scaling Analysis\nPartition: {partition_name}',
+        fontsize=14,
+        fontweight='bold',
+    )
+    plt.tight_layout()
+    
+    # Save plot
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    logger.info(f"Saved downsampling plot to {output_path}")
+
+
+
+
 def run_all_partition_analyses(
     raw_benchmark_data: pd.DataFrame,
     schema: BenchmarkDataSchema,
@@ -268,11 +578,32 @@ def run_all_partition_analyses(
     xgb_params: dict | None = None,
     output_dir: Path | None = None,
     tuner_encoding_method: Literal['ordinal', 'one_hot'] = 'ordinal',
+    compute_pdp: bool = True,
+    pdp_n_grid_points: int = 20,
+    pdp_show_std: bool = True,
+    compute_downsampling: bool = True,
+    downsampling_sample_sizes: list[int] | None = None,
 ) -> dict[str, dict]:
     """Run LTR analysis for all partition configurations (backwards compatible).
     
     Args:
+        raw_benchmark_data: Raw benchmark data
+        schema: Column schema
+        train_size: Proportion of data for training
+        val_size: Proportion of data for validation
+        random_state: Random seed for reproducibility
+        k_values: Values of k for precision@k and NDCG@k metrics
+        xgb_params: XGBoost parameters (None uses defaults)
+        output_dir: Directory to save results (None skips saving)
         tuner_encoding_method: How to encode tuner algorithm identity ('ordinal' or 'one_hot')
+        compute_pdp: Whether to compute rank-based partial dependence plots (default: True)
+        pdp_n_grid_points: Number of grid points for PDP computation (default: 20)
+        pdp_show_std: Whether to show standard deviation bands in PDP plots (default: True)
+        compute_downsampling: Whether to compute downsampling curves for scaling analysis (default: True)
+        downsampling_sample_sizes: List of sample sizes for downsampling (None for automatic)
+        
+    Returns:
+        Dictionary mapping config names to result dictionaries (old format for compatibility)
     """
     config = LTRConfig(
         train_size=train_size,
@@ -282,7 +613,14 @@ def run_all_partition_analyses(
         xgb_params=xgb_params,
     )
     
-    results = run_all_analyses(raw_benchmark_data, schema, config, output_dir, tuner_encoding_method)
+    results = run_all_analyses(
+        raw_benchmark_data, schema, config, output_dir, tuner_encoding_method,
+        compute_pdp=compute_pdp,
+        pdp_n_grid_points=pdp_n_grid_points,
+        pdp_show_std=pdp_show_std,
+        compute_downsampling=compute_downsampling,
+        downsampling_sample_sizes=downsampling_sample_sizes,
+    )
     
     # Convert to old format for backwards compatibility
     return {

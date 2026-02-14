@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional, List, Dict
+from typing import Optional, List
 
 
 class SyntheticGenerationParameters(BaseModel):
@@ -33,33 +33,3 @@ class ExperimentParameters(BaseModel):
     n_repetitions_per_tuner_config: int = 20
 
 
-class Aliases(BaseModel):
-    """Human-readable aliases for various benchmark components.
-
-    Args:
-        sampler_aliases: Short names for conformal prediction samplers.
-        architecture_aliases: Short names for quantile estimator architectures.
-        benchmark_aliases: Display names for benchmark suites.
-    """
-
-    sampler_aliases: Dict[str, str] = {
-        "ThompsonSampler": "TS",
-        "ExpectedImprovementSampler": "EI",
-        "LowerBoundSampler": "LBS",
-        "PessimisticLowerBoundSampler": "PLBS",
-    }
-    architecture_aliases: Dict[str, str] = {
-        "qknn": "QKNN",
-        "qgp": "QGP",
-        "ql": "QL",
-        "qrf": "QRF",
-        "qgbm": "QGBM",
-        "qens5": "QE",
-    }
-    benchmark_aliases: Dict[str, str] = {
-        "synthetic_tabular": "Synthetic-Tabular",
-    }
-
-
-# Create global instances
-synthetic_generation = SyntheticGenerationParameters()

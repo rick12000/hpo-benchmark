@@ -23,8 +23,8 @@ from hpobench.prepare import (
     setup_yahpo_instance_configs,
     setup_synthetic_tabular_configs,
 )
-from hpobench.config.schema import BenchmarkDataSchema
-from hpobench.config.constants import Aliases, SyntheticGenerationParameters
+from hpobench.config.schema import BenchmarkDataSchema, Aliases
+from hpobench.config.constants import SyntheticGenerationParameters
 from hpobench.generation.tabular.storage import DatasetStorage
 from hpobench.tune import tune
 from hpobench.report.learning_to_rank.pipeline import run_all_partition_analyses
@@ -607,13 +607,29 @@ def run_learning_to_rank_analysis(
     k_values: list[int] = [1, 3],
     xgb_params: dict | None = None,
     tuner_encoding_method: Literal['ordinal', 'one_hot'] = 'ordinal',
+    compute_pdp: bool = True,
+    pdp_n_grid_points: int = 20,
+    pdp_show_std: bool = True,
 ) -> dict:
     """Run learning-to-rank analysis on all data partitions.
     
     Args:
+        raw_benchmark_data: Raw benchmark data
+        schema: Column schema
+        train_size: Proportion of data for training
+        val_size: Proportion of data for validation
+        random_state: Random seed for reproducibility
+        k_values: Values of k for precision@k and NDCG@k metrics
+        xgb_params: XGBoost parameters (None uses defaults)
         tuner_encoding_method: How to encode tuner algorithm identity.
             - 'ordinal': Single numeric feature (default, efficient for XGBoost)
             - 'one_hot': Binary features for each tuner (better for interpretability)
+        compute_pdp: Whether to compute rank-based partial dependence plots (default: True)
+        pdp_n_grid_points: Number of grid points for PDP computation (default: 20)
+        pdp_show_std: Whether to show standard deviation bands in PDP plots (default: True)
+        
+    Returns:
+        Dictionary mapping config names to result dictionaries
     """
     return run_all_partition_analyses(
         raw_benchmark_data=raw_benchmark_data,
@@ -624,6 +640,9 @@ def run_learning_to_rank_analysis(
         k_values=k_values,
         xgb_params=xgb_params,
         tuner_encoding_method=tuner_encoding_method,
+        compute_pdp=compute_pdp,
+        pdp_n_grid_points=pdp_n_grid_points,
+        pdp_show_std=pdp_show_std,
     )
 
 
@@ -685,7 +704,10 @@ def run_and_analyze_main_benchmark(
 
     # Run learning-to-rank analysis
     logger.info("Running learning-to-rank analysis on benchmark results")
-    from hpobench.report.learning_to_rank.pipeline import run_all_partition_analyses
+    from hpobench.report.learning_to_rank.pipeline import (
+        run_all_partition_analyses,
+        run_all_downsampling_analyses,
+    )
     
     results_dir = Path(cache_path) / "ltr_results" / run_start_str
     ltr_results = run_all_partition_analyses(
@@ -697,6 +719,11 @@ def run_and_analyze_main_benchmark(
         k_values=[1, 3],
         xgb_params=None,
         output_dir=results_dir,
+        compute_pdp=True,  # Compute rank-based partial dependence plots
+        pdp_n_grid_points=20,
+        pdp_show_std=True,
+        compute_downsampling=True,  # Compute downsampling curves for scaling analysis
+        downsampling_sample_sizes=None,  # Automatic logarithmic sequence
     )
     
     # Save detailed results per partition

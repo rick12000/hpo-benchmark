@@ -89,33 +89,14 @@ class BenchmarkDataSchema(BaseModel):
         norm_iter_unit: Name for normalized iteration columns.
     """
 
-    # Core columns
+    # Core columns used across the codebase
     rep_col: str = "repetition"
-    perf_col: str = "performance"
-    tuner_col: str = "tuner"
-    bench_col: str = "benchmark_identifier"
-    data_col: str = "dataset"
-    sampler_col: str = "sampler"
-    confidence_level_col: str = "confidence_level"
-    estimator_architecture_col: str = "estimator_architecture"
-    sampler_n_quantiles_col: str = "sampler_n_quantiles"
-    sampler_adapter_col: str = "sampler_adapter"
-    tuner_searcher_tuning_framework_col: str = "tuner_searcher_tuning_framework"
-    n_pre_conformal_trials_col: str = "n_pre_conformal_trials"
-    n_random_warm_starts_col: str = "n_random_warm_starts"
-    warm_start_strategy_col: str = "warm_start_strategy"
-
-    runtime_unit: str = "runtime"
-    iter_unit: str = "iteration"
-    norm_runtime_unit: str = f"normalized_{runtime_unit}"
-    norm_iter_unit: str = f"normalized_{iter_unit}"
     performance_col: str = "performance"
+    tuner_col: str = "tuner"
+    data_col: str = "dataset"
+    n_random_warm_starts_col: str = "n_random_warm_starts"
     ranking_group_col: str = "ranking_group"
     label_col: str = "label"
-    predicted_score_col: str = "predicted_score"
-    
-    # Nested schema for surrogate metafeatures
-    surrogate_metafeatures: SurrogateMetafeaturesSchema = SurrogateMetafeaturesSchema()
 
     def to_list(self) -> List[str]:
         """Convert all schema field values to a list.
@@ -126,3 +107,31 @@ class BenchmarkDataSchema(BaseModel):
         field_values: Dict[str, Any]
         field_values = self.model_dump()
         return list(field_values.values())
+
+
+class Aliases(BaseModel):
+    """Human-readable aliases for various benchmark components.
+
+    Args:
+        sampler_aliases: Short names for conformal prediction samplers.
+        architecture_aliases: Short names for quantile estimator architectures.
+        benchmark_aliases: Display names for benchmark suites.
+    """
+
+    sampler_aliases: Dict[str, str] = {
+        "ThompsonSampler": "TS",
+        "ExpectedImprovementSampler": "EI",
+        "LowerBoundSampler": "LBS",
+        "PessimisticLowerBoundSampler": "PLBS",
+    }
+    architecture_aliases: Dict[str, str] = {
+        "qknn": "QKNN",
+        "qgp": "QGP",
+        "ql": "QL",
+        "qrf": "QRF",
+        "qgbm": "QGBM",
+        "qens5": "QE",
+    }
+    benchmark_aliases: Dict[str, str] = {
+        "synthetic_tabular": "Synthetic-Tabular",
+    }
