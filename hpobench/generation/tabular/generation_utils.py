@@ -20,7 +20,7 @@ from hpobench.generation.tabular.metadata_manager import (
     BenchmarkMetadata,
 )
 from hpobench.config.constants import SyntheticGenerationParameters
-from hpobench.config.config_types import IntRange, FloatRange, CategoricalRange
+from hpobench.config.types import IntRange, FloatRange, CategoricalRange
 
 logger = logging.getLogger(__name__)
 

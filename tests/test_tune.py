@@ -15,7 +15,7 @@ from confopt.selection.acquisition import (
     LowerBoundSampler,
     ThompsonSampler,
 )
-from hpobench.config.config_types import (
+from hpobench.config.types import (
     ConfOptModel,
     SkOptModel,
     OptunaModel,

@@ -699,7 +699,7 @@ class SCMDataGenerator:
         Returns:
             Modified dataset matching search space constraints
         """
-        from hpobench.config.config_types import IntRange, FloatRange, CategoricalRange
+        from hpobench.config.types import IntRange, FloatRange, CategoricalRange
         
         n_hp = len(self.search_space)
         X = dataset.X

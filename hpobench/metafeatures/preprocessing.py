@@ -10,7 +10,7 @@ from typing import Dict, List, Tuple, Union, Optional
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 import logging
 
-from hpobench.config.config_types import IntRange, FloatRange, CategoricalRange
+from hpobench.config.types import IntRange, FloatRange, CategoricalRange
 
 logger = logging.getLogger(__name__)
 

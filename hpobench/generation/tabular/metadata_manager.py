@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Union, Optional
 
-from hpobench.config.config_types import IntRange, FloatRange, CategoricalRange
+from hpobench.config.types import IntRange, FloatRange, CategoricalRange
 from hpobench.generation.tabular.search_spaces import SearchSpaceGenerator
 
 logger = logging.getLogger(__name__)

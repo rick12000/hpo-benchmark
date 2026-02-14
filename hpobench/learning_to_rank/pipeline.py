@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 from hpobench.config.schema import BenchmarkDataSchema, SurrogateMetafeaturesSchema
 from hpobench.config.constants import SyntheticGenerationParameters
-from hpobench.learning_to_rank.models import (
+from hpobench.learning_to_rank.model import (
     LTRConfig, LTRResults, LTRModel, NaiveRanker,
     split_data, evaluate_ltr, evaluate_naive,
 )

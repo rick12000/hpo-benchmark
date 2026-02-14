@@ -1,5 +1,5 @@
 from pathlib import Path
-from hpobench.config.tuner_configurations import (
+from hpobench.config.tuners import (
     EXTERNAL_TUNING_CONFIGURATIONS,
     LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS,
 )

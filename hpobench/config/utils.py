@@ -1,5 +1,5 @@
 from typing import Union, Optional, List, Any
-from hpobench.config.config_types import ConfOptModel
+from hpobench.config.types import ConfOptModel
 
 try:
     from confopt.selection.acquisition import (
@@ -17,8 +17,8 @@ except ImportError:
     raise ImportError(
         "confopt is a core dependency of this repository, but it is not automatically installed via pyproject.toml, please refer to the README.md for instructions on how to install this separately"
     )
-from hpobench.config.config_types import TunerConfig
-from hpobench.config.config_types import (
+from hpobench.config.types import TunerConfig
+from hpobench.config.types import (
     OptunaModel,
     SMACModel,
     CustomGPModel,

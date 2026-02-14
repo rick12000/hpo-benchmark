@@ -2,14 +2,14 @@ from hpobench.orchestration.prepare import (
     setup_yahpo_instance_configs,
     setup_blackbox_configs,
 )
-from hpobench.config.config_types import (
+from hpobench.config.types import (
     ExperimentConfig,
 )
-from hpobench.config.benchmark_data import (
+from hpobench.config.generator_metadata import (
     BLACK_BOX_SEARCH_SPACE,
 )
-from hpobench.config.config_types import ConfOptModel
-from hpobench.config.tuner_configurations import cv_conformal_searcher, TunerConfig
+from hpobench.config.types import ConfOptModel
+from hpobench.config.tuners import cv_conformal_searcher, TunerConfig
 from hpobench.config.utils import create_searcher_config_id
 
 DEV_TUNING_CONFIGURATIONS = [

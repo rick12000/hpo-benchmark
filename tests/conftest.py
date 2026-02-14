@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 import pandas as pd
 from hpobench.generation.generate import BlackBoxGenerator
-from hpobench.config.config_types import FloatRange
+from hpobench.config.types import FloatRange
 
 
 @pytest.fixture

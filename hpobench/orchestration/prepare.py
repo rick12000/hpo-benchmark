@@ -3,21 +3,22 @@ import json
 import os
 import random
 import copy
-from hpobench.config.config_types import TunerConfig
+from hpobench.config.types import TunerConfig
 from hpobench.generation.generate import (
     BlackBoxGenerator,
     YahpoGenerator,
-    SyntheticTabularGenerator,
+    SyntheticGenerator,
 )
-from hpobench.config.config_types import (
+from hpobench.config.types import (
     ExperimentConfig,
     IntRange,
     FloatRange,
     CategoricalRange,
 )
-from hpobench.config.benchmark_data import (
+from hpobench.config.generator_metadata import (
     BLACK_BOX_SEARCH_SPACE,
-    YAHPO_SUBSETS)
+    YAHPO_SUBSETS,
+)
 from hpobench.config.constants import SyntheticGenerationParameters
 from yahpo_gym import BenchmarkSet
 import ConfigSpace as CS
@@ -224,7 +225,7 @@ def setup_blackbox_configs(
     return experiment_configs
 
 
-def setup_synthetic_tabular_configs(
+def setup_synthetic_configs(
     datasets: list[str],
     tuning_configurations: list[TunerConfig],
 ) -> list[ExperimentConfig]:
@@ -271,7 +272,7 @@ def setup_synthetic_tabular_configs(
         experiment_configs.append(
             ExperimentConfig(
                 search_space=search_space,
-                objective_function=SyntheticTabularGenerator(
+                objective_function=SyntheticGenerator(
                     generator="synthetic_tabular",
                     dataset=dataset,
                     random_state=42,

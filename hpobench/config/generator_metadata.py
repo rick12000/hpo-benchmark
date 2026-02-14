@@ -1,5 +1,5 @@
 from pathlib import Path
-from hpobench.config.config_types import (
+from hpobench.config.types import (
     FloatRange,
     CategoricalRange,
     IntRange,

@@ -10,7 +10,7 @@ import numpy as np
 from typing import Dict, Union
 import logging
 
-from hpobench.config.config_types import IntRange, FloatRange, CategoricalRange
+from hpobench.config.types import IntRange, FloatRange, CategoricalRange
 from hpobench.config.constants import SyntheticGenerationParameters
 
 logger = logging.getLogger(__name__)

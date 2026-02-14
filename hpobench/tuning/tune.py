@@ -3,8 +3,8 @@ import optuna
 import logging
 import warnings
 from datetime import datetime, timedelta
-from hpobench.config.config_types import TunerConfig
-from hpobench.config.config_types import IntRange, FloatRange, CategoricalRange
+from hpobench.config.types import TunerConfig
+from hpobench.config.types import IntRange, FloatRange, CategoricalRange
 from typing import Union, Optional, Any, Dict
 
 logger = logging.getLogger(__name__)
@@ -34,7 +34,7 @@ from hpobench.tuning.optuna_gp_integration import (
     StrippedGPSampler,
     ExpandedAcquisitionFunction,
 )
-from hpobench.config.config_types import (
+from hpobench.config.types import (
     ConfOptModel,
     SkOptModel,
     OptunaModel,

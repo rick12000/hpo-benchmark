@@ -1,4 +1,4 @@
-from hpobench.config.config_types import IntRange, CategoricalRange, FloatRange
+from hpobench.config.types import IntRange, CategoricalRange, FloatRange
 import random
 from typing import Optional, Union, TYPE_CHECKING
 import pandas as pd

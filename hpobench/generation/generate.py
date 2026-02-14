@@ -8,7 +8,7 @@ from abc import ABC, abstractmethod
 
 from yahpo_gym import BenchmarkSet
 
-from hpobench.generation.black_box_functions import (
+from hpobench.generation.black_box import (
     rastrigin,
     ackley,
     griewank,
@@ -363,7 +363,7 @@ class YahpoGenerator(ObjectiveMetricGenerator):
         return [self._extract_runtime_metric(result) for result in batch_results]
 
 
-class SyntheticTabularGenerator(ObjectiveMetricGenerator):
+class SyntheticGenerator(ObjectiveMetricGenerator):
     """Generator for synthetic surrogate data.
     
     The SCM-generated synthetic data represents precomputed surrogate performance landscapes
@@ -378,10 +378,9 @@ class SyntheticTabularGenerator(ObjectiveMetricGenerator):
         dataset: str,
         random_state: int = 42,
     ):
-        synthetic_generation = SyntheticGenerationParameters()
         self.generator = generator
         self.dataset = dataset
-        self.storage_dir = Path(synthetic_generation.storage_dir)
+        self.storage_dir = Path(SyntheticGenerationParameters().storage_dir)
         self.random_state = random_state
         
         # Surrogate data (X = configs, y = performances)
@@ -396,52 +395,17 @@ class SyntheticTabularGenerator(ObjectiveMetricGenerator):
         The SCM generator creates synthetic data where:
         - Features (X) = hyperparameter configurations
         - Targets (y) = performance values
-        
-        Also loads the search space from metadata if available.
         """
-        if self._initialized:
-            return
-
-        try:
+        if not self._initialized:
             storage = DatasetStorage(str(self.storage_dir))
             dataset_id = int(self.dataset)
             
-            # Load dataset using existing method
-            # X represents hyperparameter configs, y represents performances
             self.surrogate_features, self.surrogate_targets, self.dataset_metadata = (
                 storage.load_dataset(dataset_id)
             )
             
-            # Extract search space from metadata if available
-            self.search_space_dict = self.dataset_metadata.get('search_space')
-            self.benchmark_id = self.dataset_metadata.get('benchmark_id')
-            
-            logger.info(
-                f"Loaded surrogate dataset {dataset_id} with "
-                f"{len(self.surrogate_features)} configurations "
-                f"(benchmark {self.benchmark_id})"
-            )
-            
-            if self.search_space_dict:
-                logger.debug(
-                    f"Dataset has search space with "
-                    f"{len(self.search_space_dict)} hyperparameters"
-                )
-        except Exception as e:
-            logger.error(f"Failed to load dataset {self.dataset}: {e}", exc_info=True)
-            raise
-
-        self._initialized = True
-    
-    def get_search_space(self) -> Optional[Dict]:
-        """Get the search space for this dataset.
+            self._initialized = True
         
-        Returns:
-            Dictionary representation of the search space, or None if not available
-        """
-        self.initialize()
-        return self.search_space_dict
-    
     def predict(self, configuration: dict[str, Union[str, int, float, bool]]) -> float:
         """Predict performance by looking up in surrogate data.
         

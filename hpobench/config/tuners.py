@@ -17,7 +17,7 @@ from hpobench.config.utils import (
     get_external_tuning_configurations,
     build_architecture_variation_configurations,
 )
-from hpobench.config.config_types import (
+from hpobench.config.types import (
     TunerConfig,
     ConfOptModel,
 )

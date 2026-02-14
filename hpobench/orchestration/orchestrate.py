@@ -17,11 +17,11 @@ except ImportError:
         "confopt is a core dependency of this repository, but it is not automatically installed via pyproject.toml, please refer to the README.md for instructions on how to install this separately"
     )
 
-from hpobench.config.config_types import ExperimentConfig, TunerConfig, IntRange, FloatRange, CategoricalRange
+from hpobench.config.types import ExperimentConfig, TunerConfig, IntRange, FloatRange, CategoricalRange
 from hpobench.utils import generate_hyperparameter_combinations, add_runtime
 from hpobench.orchestration.prepare import (
     setup_yahpo_instance_configs,
-    setup_synthetic_tabular_configs,
+    setup_synthetic_configs,
 )
 from hpobench.config.schema import BenchmarkDataSchema, Aliases
 from hpobench.config.constants import SyntheticGenerationParameters
@@ -111,7 +111,7 @@ def load_experiment_configs(
         else:
             selected_datasets = all_datasets
 
-        configs = setup_synthetic_tabular_configs(
+        configs = setup_synthetic_configs(
             datasets=selected_datasets,
             tuning_configurations=tuning_configurations,
         )
@@ -179,7 +179,7 @@ def _generate_gp_warm_starts(
     Returns:
         List of (configuration, performance) tuples from GP searches only.
     """
-    from hpobench.config.config_types import CustomGPModel
+    from hpobench.config.types import CustomGPModel
     from hpobench.tuning.tune import tune as tune_function
     
     # Generate initial random warm-starts for the GP
