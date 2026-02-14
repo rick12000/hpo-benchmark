@@ -19,7 +19,7 @@ except ImportError:
 
 from hpobench.config.config_types import ExperimentConfig, TunerConfig, IntRange, FloatRange, CategoricalRange
 from hpobench.utils import generate_hyperparameter_combinations, add_runtime
-from hpobench.report.orchestration.prepare import (
+from hpobench.orchestration.prepare import (
     setup_yahpo_instance_configs,
     setup_synthetic_tabular_configs,
 )
@@ -27,7 +27,7 @@ from hpobench.config.schema import BenchmarkDataSchema, Aliases
 from hpobench.config.constants import SyntheticGenerationParameters
 from hpobench.generation.tabular.storage import DatasetStorage
 from hpobench.tuning.tune import tune
-from hpobench.report.learning_to_rank.pipeline import run_all_partition_analyses
+from hpobench.learning_to_rank.pipeline import run_all_partition_analyses
 
 logger = logging.getLogger(__name__)
 os.environ["SYNETUNE_FOLDER"] = "cache/syne-tune"
@@ -409,7 +409,7 @@ def run_main_benchmark(
                     f"using {strategy.value} strategy."
                 )
 
-                from hpobench.report.metafeatures.calculator import calculate_surrogate_metafeatures
+                from hpobench.metafeatures.calculator import calculate_surrogate_metafeatures
                 from hpobench.config.schema import SurrogateMetafeaturesSchema
 
                 for tuner in experiment_config.tuner_configurations:
@@ -704,7 +704,7 @@ def run_and_analyze_main_benchmark(
 
     # Run learning-to-rank analysis
     logger.info("Running learning-to-rank analysis on benchmark results")
-    from hpobench.report.learning_to_rank.pipeline import (
+    from hpobench.learning_to_rank.pipeline import (
         run_all_partition_analyses,
         run_all_downsampling_analyses,
     )

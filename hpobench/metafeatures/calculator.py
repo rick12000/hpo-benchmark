@@ -24,7 +24,7 @@ from sklearn.cluster import KMeans
 import statsmodels.api as sm
 from sklearn.feature_selection import mutual_info_regression
 from hpobench.config.schema import SurrogateMetafeaturesSchema
-from hpobench.report.metafeatures.preprocessing import preprocess_for_metafeatures
+from hpobench.metafeatures.preprocessing import preprocess_for_metafeatures
 from hpobench.config.config_types import IntRange, FloatRange, CategoricalRange
 
 logger = logging.getLogger(__name__)

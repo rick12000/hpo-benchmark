@@ -15,7 +15,7 @@ from pathlib import Path
 import pandas as pd
 
 from hpobench.config.schema import BenchmarkDataSchema
-from hpobench.report.learning_to_rank.pipeline import run_all_partition_analyses
+from hpobench.learning_to_rank.pipeline import run_all_partition_analyses
 
 logging.basicConfig(
     level=logging.INFO,

@@ -1,4 +1,4 @@
-from hpobench.report.orchestration.prepare import (
+from hpobench.orchestration.prepare import (
     setup_yahpo_instance_configs,
     setup_blackbox_configs,
 )

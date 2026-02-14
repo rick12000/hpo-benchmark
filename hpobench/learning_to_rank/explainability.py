@@ -47,7 +47,7 @@ where:
 ### Usage Example
 
 ```python
-from hpobench.report.learning_to_rank.explainability import (
+from hpobench.learning_to_rank.explainability import (
     run_partial_dependence_analysis
 )
 
@@ -892,7 +892,7 @@ def run_partial_dependence_analysis(
         Dictionary mapping partition names to PartialDependenceResults
         
     Example:
-        >>> from hpobench.report.learning_to_rank.pipeline import run_all_analyses
+        >>> from hpobench.learning_to_rank.pipeline import run_all_analyses
         >>> 
         >>> # Run LTR analysis
         >>> ltr_results = run_all_analyses(raw_data, schema, config)

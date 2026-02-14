@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 from hpobench.config.schema import BenchmarkDataSchema, SurrogateMetafeaturesSchema
 from hpobench.config.constants import SyntheticGenerationParameters
-from hpobench.report.learning_to_rank.models import (
+from hpobench.learning_to_rank.models import (
     LTRConfig, LTRResults, LTRModel, NaiveRanker,
     split_data, evaluate_ltr, evaluate_naive,
 )
@@ -243,7 +243,7 @@ def run_all_analyses(
             # Compute PDP for this partition if requested
             if compute_pdp and output_dir:
                 try:
-                    from hpobench.report.learning_to_rank.explainability import (
+                    from hpobench.learning_to_rank.explainability import (
                         compute_partial_dependence,
                         plot_partial_dependence,
                     )

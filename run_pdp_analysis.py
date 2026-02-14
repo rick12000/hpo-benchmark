@@ -16,8 +16,8 @@ This aligns with the ShaRP framework's focus on rank-based explanations.
 import pandas as pd
 import logging
 from pathlib import Path
-from hpobench.report.learning_to_rank.pipeline import run_all_analyses, LTRConfig
-from hpobench.report.learning_to_rank.explainability import (
+from hpobench.learning_to_rank.pipeline import run_all_analyses, LTRConfig
+from hpobench.learning_to_rank.explainability import (
     run_partial_dependence_analysis,
     compute_partial_dependence,
     plot_partial_dependence,

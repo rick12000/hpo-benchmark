@@ -13,7 +13,7 @@ import pandas as pd
 import logging
 import json
 from pathlib import Path
-from hpobench.report.orchestration.orchestrate import run_learning_to_rank_analysis
+from hpobench.orchestration.orchestrate import run_learning_to_rank_analysis
 from hpobench.config.schema import BenchmarkDataSchema
 from hpobench.utils import setup_environment
 
