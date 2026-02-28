@@ -10,25 +10,6 @@ from typing import Union, Optional, Any, Dict
 logger = logging.getLogger(__name__)
 
 
-def _calculate_search_space_size(
-    search_space: dict[str, Union[IntRange, FloatRange, CategoricalRange]],
-) -> int:
-    """Calculate approximate total combinations in a search space."""
-    if len(search_space) == 0:
-        return 0
-    
-    total_combos = 1
-    for param_range in search_space.values():
-        if isinstance(param_range, CategoricalRange):
-            total_combos *= len(param_range.choices)
-        elif isinstance(param_range, IntRange):
-            total_combos *= max(1, param_range.upper - param_range.lower + 1)
-        else:  # FloatRange
-            total_combos *= 10
-    
-    return total_combos
-
-
 from optuna.samplers import TPESampler, RandomSampler, CmaEsSampler, GPSampler
 from hpobench.tuning.optuna_gp_integration import (
     StrippedGPSampler,
@@ -406,6 +387,36 @@ def confopt_objective_function(
     return objective
 
 
+def _calculate_search_space_size(
+    search_space: dict[str, Union[IntRange, FloatRange, CategoricalRange]],
+) -> Optional[int]:
+    """Calculate total combinations for finite search spaces (categorical and integer only).
+    
+    Returns None if the search space contains float ranges (infinite combinations),
+    indicating the space size cannot be computed exhaustively.
+    
+    Args:
+        search_space: Dictionary mapping parameter names to their range specifications.
+        
+    Returns:
+        Total number of combinations if the search space is finite (only categorical/integer),
+        None if the search space is infinite (contains float ranges).
+    """
+    if not search_space:
+        return 0
+    
+    total_combos = 1
+    for param_range in search_space.values():
+        if isinstance(param_range, CategoricalRange):
+            total_combos *= len(param_range.choices)
+        elif isinstance(param_range, IntRange):
+            total_combos *= max(1, param_range.upper - param_range.lower + 1)
+        else:  # FloatRange - space is infinite
+            return None
+    
+    return total_combos
+
+
 def setup_confopt_params(
     raw_params: dict[str, Union[IntRange, FloatRange, CategoricalRange]],
 ) -> dict[str, Any]:
@@ -469,7 +480,7 @@ def confopt_tune(
     confopt_params = setup_confopt_params(raw_params)
     
     search_space_size = _calculate_search_space_size(raw_params)
-    n_candidates = min(N_CANDIDATES, max(100, search_space_size))
+    n_candidates = min(N_CANDIDATES, search_space_size) if search_space_size is not None else N_CANDIDATES
     
     conformal_tuner = ConformalTuner(
         objective_function=objective_fn,

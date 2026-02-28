@@ -1,16 +1,13 @@
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import List, Optional
 
 
 class SyntheticGenerationParameters(BaseModel):
     """Configuration for synthetic tabular dataset generation."""
-    
+
     storage_dir: str = "cache/tabular_datasets"
     benchmark_identifier: str = "Synthetic-Tabular"
-    n_benchmarks: int = 3
     n_datasets_per_benchmark: int = 5
-    min_hyperparameters: int = 3
-    max_hyperparameters: int = 15
 
 
 class ExperimentParameters(BaseModel):

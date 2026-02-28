@@ -1,152 +1,175 @@
+"""Orchestration of synthetic tabular dataset generation and persistence.
+
+Each ``TabularDatasetOrchestrator`` instance represents one *benchmark* — a
+named generation regime identified by ``benchmark_id``.  Calling :meth:`run`
+generates a batch of datasets under that benchmark and returns the metadata
+record for the caller to aggregate and persist.
+
+Folder layout on disk:
+
+    <storage_dir>/benchmark_<benchmark_id>/dataset_<dataset_id>/
+        data.csv
+        dataset.json
+"""
+
 import logging
-from typing import Optional, Dict, Tuple
+import random
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+
 import numpy as np
 import pandas as pd
 
-from hpobench.generation.tabular.generator import SCMDataGenerator, SyntheticDataset
+from hpobench.generation.tabular.generator import ANOVADataGenerator, SyntheticDataset
+from hpobench.generation.tabular.metadata_manager import BenchmarkMetadata, CentralMetadataManager
+from hpobench.generation.tabular.search_spaces import search_space_to_dict
+from hpobench.generation.tabular.storage import DatasetStorage
 
 logger = logging.getLogger(__name__)
 
 
 class TabularDatasetOrchestrator:
-    """Orchestrator for generating synthetic tabular datasets using SCM approach."""
-    
+    """Generate and persist a named benchmark of synthetic tabular datasets.
+
+    One orchestrator instance = one benchmark.  All datasets share the same
+    regime priors; individual dataset properties are sampled stochastically on
+    each :meth:`generate_dataset` call.
+
+    Parameters
+    ----------
+    benchmark_id:
+        Arbitrary string label for this generation regime.
+    storage_dir:
+        Root directory for all benchmarks.
+    n_samples_range:
+        (lo, hi) — dataset size drawn uniformly per dataset.
+    n_features_range:
+        (lo, hi) — feature count drawn from Beta(2, 5) within this range.
+    importance_concentration:
+        Dirichlet α for axis importance sampling.  Lower values produce
+        datasets where 1–2 axes dominate (sparse effective dimensionality).
+        0.3 = very sparse, 0.8 = moderate, 1.5 = near-uniform.
+    roughness:
+        Frequency scale for basis functions.  0.5 = smooth surfaces,
+        3.0 = rough, rapidly varying surfaces.
+    interaction_density:
+        Expected pairwise interaction terms as a fraction of d.
+        0.1 = few interactions, 0.5 = many.
+    noise_std:
+        Baseline observation noise standard deviation at the centre of the
+        search space.
+    boundary_noise_weight:
+        Degree of heteroskedasticity: 0 = homoskedastic, 1 = noise
+        concentrated near the search space boundary.
+    inject_optimum_prob:
+        Probability of injecting an explicit optimum basin per dataset.
+    train_ratio:
+        Fraction of samples in the training split.
+    base_seed:
+        Base RNG seed; dataset i uses base_seed + dataset_id.
+    """
+
     def __init__(
         self,
+        benchmark_id: str,
         storage_dir: str,
-        n_samples_range: Tuple[int, int] = (10, 512),
-        n_features_range: Tuple[int, int] = (1, 160),
-        n_classes_range: Tuple[int, int] = (2, 10),
+        n_samples_range: Tuple[int, int] = (500, 5000),
+        n_features_range: Tuple[int, int] = (3, 15),
+        importance_concentration: float = 0.8,
+        roughness: float = 1.5,
+        interaction_density: float = 0.33,
+        noise_std: float = 0.05,
+        boundary_noise_weight: float = 0.5,
+        inject_optimum_prob: float = 0.8,
+        train_ratio: float = 0.8,
         base_seed: int = 42,
     ):
-        """Initialize the orchestrator.
-        
-        Args:
-            storage_dir: Directory to store generated datasets
-            n_samples_range: Range for number of samples per dataset
-            n_features_range: Range for number of features per dataset
-            n_classes_range: Range for number of classes (classification)
-            base_seed: Base random seed for reproducibility
-        """
+        self.benchmark_id = benchmark_id
         self.storage_dir = storage_dir
-        self.n_samples_range = n_samples_range
-        self.n_features_range = n_features_range
-        self.n_classes_range = n_classes_range
         self.base_seed = base_seed
-        
-        logger.info(f"Orchestrator initialized with storage at: {storage_dir}")
-    
-    def generate_classification_dataset(self, seed: int) -> SyntheticDataset:
-        """Generate a single classification dataset."""
-        np.random.seed(seed)
-        gen = SCMDataGenerator(
-            n_samples_range=self.n_samples_range,
-            n_features_range=self.n_features_range,
-            n_classes_range=self.n_classes_range,
-            is_regression=False,
+        self._generator = ANOVADataGenerator(
+            n_samples_range=n_samples_range,
+            n_features_range=n_features_range,
+            importance_concentration=importance_concentration,
+            roughness=roughness,
+            interaction_density=interaction_density,
+            noise_std=noise_std,
+            boundary_noise_weight=boundary_noise_weight,
+            inject_optimum_prob=inject_optimum_prob,
+            train_ratio=train_ratio,
         )
-        return gen.generate()
-    
-    def generate_regression_dataset(self, seed: int) -> SyntheticDataset:
-        """Generate a single regression dataset."""
+        self._storage = DatasetStorage(storage_dir)
+
+    # ------------------------------------------------------------------
+    # Single-dataset
+    # ------------------------------------------------------------------
+
+    def generate_dataset(self, seed: int) -> SyntheticDataset:
+        """Return one freshly generated dataset (not persisted)."""
+        random.seed(seed)
         np.random.seed(seed)
-        gen = SCMDataGenerator(
-            n_samples_range=self.n_samples_range,
-            n_features_range=self.n_features_range,
-            n_classes_range=self.n_classes_range,
-            is_regression=True,
+        return self._generator.generate()
+
+    def generate_and_save_dataset(self, dataset_id: int, seed: Optional[int] = None) -> None:
+        """Generate one dataset and persist it under this benchmark."""
+        if seed is not None:
+            random.seed(seed)
+            np.random.seed(seed)
+
+        dataset = self._generator.generate()
+        features_df, targets_df, metadata = self._to_dataframes(dataset)
+        search_space_dict = search_space_to_dict(dataset.search_space) if dataset.search_space else None
+
+        self._storage.save_dataset(
+            dataset_id=dataset_id,
+            benchmark_id=self.benchmark_id,
+            features=features_df,
+            targets=targets_df,
+            metadata=metadata,
+            search_space=search_space_dict,
         )
-        return gen.generate()
-    
-    def generate_datasets(
-        self,
-        num_classification: int,
-        num_regression: int,
-        start_id: int = 1,
-    ) -> Dict[int, SyntheticDataset]:
-        """Generate both classification and regression datasets.
-        
-        Args:
-            num_classification: Number of classification datasets to generate
-            num_regression: Number of regression datasets to generate
-            start_id: Starting dataset ID
-            
-        Returns:
-            Dictionary mapping dataset IDs to SyntheticDataset objects
+        logger.info(f"[{self.benchmark_id}] Dataset {dataset_id} saved — shape {features_df.shape}")
+
+    # ------------------------------------------------------------------
+    # Batch
+    # ------------------------------------------------------------------
+
+    def run(self, n_datasets: int, start_id: int = 1) -> BenchmarkMetadata:
+        """Generate *n_datasets* datasets and return the benchmark metadata record.
+
+        The caller is responsible for aggregating records from multiple
+        orchestrators and writing the central index via
+        :class:`~hpobench.generation.tabular.metadata_manager.CentralMetadataManager`.
         """
-        datasets = {}
-        total = num_classification + num_regression
-        
-        logger.info(f"Starting generation of {num_classification} classification and {num_regression} regression datasets")
-        
-        # Generate classification datasets
-        for i in range(num_classification):
+        Path(self.storage_dir).mkdir(parents=True, exist_ok=True)
+        end_id = start_id + n_datasets - 1
+        logger.info(f"[{self.benchmark_id}] Generating {n_datasets} datasets (ids {start_id}–{end_id})")
+
+        dataset_ids: List[int] = []
+        for i in range(n_datasets):
             dataset_id = start_id + i
-            seed = self.base_seed + dataset_id
-            
-            try:
-                dataset = self.generate_classification_dataset(seed)
-                datasets[dataset_id] = dataset
-                logger.info(f"Generated classification dataset {dataset_id}/{start_id + total - 1} (shape: {dataset.X.shape})")
-            except Exception as e:
-                logger.error(f"Failed to generate classification dataset {dataset_id}: {e}")
-                raise
-        
-        # Generate regression datasets
-        for i in range(num_regression):
-            dataset_id = start_id + num_classification + i
-            seed = self.base_seed + dataset_id
-            
-            try:
-                dataset = self.generate_regression_dataset(seed)
-                datasets[dataset_id] = dataset
-                logger.info(f"Generated regression dataset {dataset_id}/{start_id + total - 1} (shape: {dataset.X.shape})")
-            except Exception as e:
-                logger.error(f"Failed to generate regression dataset {dataset_id}: {e}")
-                raise
-        
-        logger.info(f"Successfully generated {total} datasets")
-        return datasets
+            self.generate_and_save_dataset(dataset_id=dataset_id, seed=self.base_seed + dataset_id)
+            dataset_ids.append(dataset_id)
 
+        logger.info(f"[{self.benchmark_id}] Done — {n_datasets} datasets written")
+        return BenchmarkMetadata(benchmark_id=self.benchmark_id, dataset_ids=dataset_ids)
 
-def generate_tabular_dataset(
-    num_classification: int = 50,
-    num_regression: int = 50,
-    n_samples_range: Tuple[int, int] = (10, 512),
-    n_features_range: Tuple[int, int] = (1, 160),
-    n_classes_range: Tuple[int, int] = (2, 10),
-    base_seed: int = 42,
-) -> Tuple[Dict[int, SyntheticDataset], Dict[int, SyntheticDataset]]:
-    """Generate and return both classification and regression datasets.
-    
-    Args:
-        num_classification: Number of classification datasets
-        num_regression: Number of regression datasets
-        n_samples_range: Range for samples per dataset
-        n_features_range: Range for features per dataset
-        n_classes_range: Range for classes (classification)
-        base_seed: Base random seed
-        
-    Returns:
-        Tuple of (classification_datasets, regression_datasets) dictionaries
-    """
-    orchestrator = TabularDatasetOrchestrator(
-        storage_dir="",
-        n_samples_range=n_samples_range,
-        n_features_range=n_features_range,
-        n_classes_range=n_classes_range,
-        base_seed=base_seed,
-    )
-    
-    datasets = orchestrator.generate_datasets(num_classification, num_regression)
-    
-    classification_datasets = {
-        k: v for k, v in datasets.items()
-        if not v.is_regression
-    }
-    regression_datasets = {
-        k: v for k, v in datasets.items()
-        if v.is_regression
-    }
-    
-    return classification_datasets, regression_datasets
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _to_dataframes(dataset: SyntheticDataset) -> Tuple[pd.DataFrame, pd.DataFrame, Dict]:
+        feature_cols = (
+            list(dataset.search_space.keys()) if dataset.search_space
+            else [f"hp_{i}" for i in range(dataset.X.shape[1])]
+        )
+        features_df = pd.DataFrame(dataset.X, columns=feature_cols)
+        targets_df = pd.DataFrame(dataset.y, columns=["target_0"])
+        metadata = {
+            "task_type": "regression",
+            "n_samples": int(dataset.X.shape[0]),
+            "n_features": int(dataset.X.shape[1]),
+            "train_size": int(dataset.train_size),
+        }
+        return features_df, targets_df, metadata

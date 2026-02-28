@@ -25,9 +25,8 @@ from hpobench.orchestration.prepare import (
 )
 from hpobench.config.schema import BenchmarkDataSchema, Aliases
 from hpobench.config.constants import SyntheticGenerationParameters
-from hpobench.generation.tabular.storage import DatasetStorage
 from hpobench.tuning.tune import tune
-from hpobench.learning_to_rank.pipeline import run_all_partition_analyses
+from hpobench.learning_to_rank import LTRPipeline, LTRConfig
 
 logger = logging.getLogger(__name__)
 os.environ["SYNETUNE_FOLDER"] = "cache/syne-tune"
@@ -610,40 +609,47 @@ def run_learning_to_rank_analysis(
     compute_pdp: bool = True,
     pdp_n_grid_points: int = 20,
     pdp_show_std: bool = True,
-) -> dict:
+    output_dir: Path | None = None,
+) -> LTRPipeline:
     """Run learning-to-rank analysis on all data partitions.
-    
+
     Args:
-        raw_benchmark_data: Raw benchmark data
-        schema: Column schema
-        train_size: Proportion of data for training
-        val_size: Proportion of data for validation
-        random_state: Random seed for reproducibility
-        k_values: Values of k for precision@k and NDCG@k metrics
-        xgb_params: XGBoost parameters (None uses defaults)
-        tuner_encoding_method: How to encode tuner algorithm identity.
-            - 'ordinal': Single numeric feature (default, efficient for XGBoost)
-            - 'one_hot': Binary features for each tuner (better for interpretability)
-        compute_pdp: Whether to compute rank-based partial dependence plots (default: True)
-        pdp_n_grid_points: Number of grid points for PDP computation (default: 20)
-        pdp_show_std: Whether to show standard deviation bands in PDP plots (default: True)
-        
+        raw_benchmark_data: Raw benchmark data.
+        schema: Column schema.
+        train_size: Proportion of data for training.
+        val_size: Proportion of data for validation.
+        random_state: Random seed for reproducibility.
+        k_values: Values of k for precision@k and NDCG@k metrics.
+        xgb_params: XGBoost parameters (None uses defaults).
+        tuner_encoding_method: How to encode algorithm identity
+            ('ordinal' or 'one_hot').
+        compute_pdp: Whether to compute rank-based PDPs.
+        pdp_n_grid_points: Grid points per feature for PDP computation.
+        pdp_show_std: Whether to show std-deviation bands in PDP plots.
+        output_dir: Directory to save results (None skips saving).
+
     Returns:
-        Dictionary mapping config names to result dictionaries
+        Fitted and evaluated :class:`~hpobench.learning_to_rank.LTRPipeline`.
     """
-    return run_all_partition_analyses(
-        raw_benchmark_data=raw_benchmark_data,
-        schema=schema,
+    config = LTRConfig(
         train_size=train_size,
         val_size=val_size,
         random_state=random_state,
-        k_values=k_values,
+        k_values=tuple(k_values),
         xgb_params=xgb_params,
-        tuner_encoding_method=tuner_encoding_method,
-        compute_pdp=compute_pdp,
-        pdp_n_grid_points=pdp_n_grid_points,
-        pdp_show_std=pdp_show_std,
     )
+    pipeline = LTRPipeline(
+        config=config,
+        schema=schema,
+        tuner_encoding_method=tuner_encoding_method,
+    ).fit(raw_benchmark_data).evaluate()
+
+    if output_dir:
+        pipeline.save(output_dir)
+        if compute_pdp:
+            pipeline.compute_pdp(output_dir / 'pdp_plots', pdp_n_grid_points, pdp_show_std)
+
+    return pipeline
 
 
 def run_and_analyze_main_benchmark(
@@ -704,62 +710,16 @@ def run_and_analyze_main_benchmark(
 
     # Run learning-to-rank analysis
     logger.info("Running learning-to-rank analysis on benchmark results")
-    from hpobench.learning_to_rank.pipeline import (
-        run_all_partition_analyses,
-        run_all_downsampling_analyses,
-    )
-    
     results_dir = Path(cache_path) / "ltr_results" / run_start_str
-    ltr_results = run_all_partition_analyses(
-        raw_benchmark_data=raw_benchmark_data,
-        schema=schema,
-        train_size=0.7,
-        val_size=0.15,
-        random_state=base_random_state,
-        k_values=[1, 3],
-        xgb_params=None,
-        output_dir=results_dir,
-        compute_pdp=True,  # Compute rank-based partial dependence plots
-        pdp_n_grid_points=20,
-        pdp_show_std=True,
-        compute_downsampling=True,  # Compute downsampling curves for scaling analysis
-        downsampling_sample_sizes=None,  # Automatic logarithmic sequence
-    )
-    
-    # Save detailed results per partition
-    _save_partition_results(ltr_results, results_dir)
-    
+
+    config = LTRConfig(train_size=0.7, val_size=0.15, random_state=base_random_state)
+    pipeline = LTRPipeline(config=config, schema=schema).fit(raw_benchmark_data).evaluate()
+    pipeline.save(results_dir)
+    pipeline.compute_pdp(results_dir / 'pdp_plots', n_grid_points=20, show_std=True)
+    pipeline.compute_downsampling(results_dir / 'downsampling')
+
     logger.info("Learning-to-rank analysis completed successfully")
     return raw_benchmark_data
 
 
-def _save_partition_results(ltr_results: dict[str, dict], results_dir: Path) -> None:
-    """Save LTR results for each partition."""
-    import json
-    
-    for config_name, result in ltr_results.items():
-        if not result:
-            continue
-        
-        partition_dir = results_dir / config_name
-        partition_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Save metrics
-        metrics = {
-            'config_name': config_name,
-            'partition': result['partition'],
-            'strategy': result['strategy'],
-            'n_train_rows': result['n_train_rows'],
-            'n_val_rows': result['n_val_rows'],
-            'n_test_rows': result['n_test_rows'],
-            'ltr_metrics': result['ltr_metrics'],
-            'naive_metrics': result['naive_metrics'],
-        }
-        
-        with open(partition_dir / "metrics.json", 'w') as f:
-            json.dump(metrics, f, indent=2)
-        
-        result['test_data'].to_csv(partition_dir / "test_data.csv", index=False)
-    
-    logger.info(f"Results saved to {results_dir}")
 
