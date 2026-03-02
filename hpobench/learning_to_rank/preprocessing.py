@@ -1,111 +1,137 @@
-"""
-Data preparation for learning-to-rank: feature engineering and train/val/test splits.
-
-Deliberately free of model logic – only transforms raw benchmark data into the
-format expected by LTR training and partitions it for train/val/test.
-"""
-
 import pandas as pd
 from sklearn.model_selection import GroupShuffleSplit
 from sklearn.preprocessing import LabelEncoder
-from typing import Literal
 
 from hpobench.config.schema import BenchmarkDataSchema, SurrogateMetafeaturesSchema
-from hpobench.config.constants import SyntheticGenerationParameters
-from hpobench.learning_to_rank.model import LTRConfig
+from hpobench.config.types import LTRConfig, Partition, SplitStrategy, TunerEncoding
 
-SYNTHETIC_BENCHMARK: str = SyntheticGenerationParameters().benchmark_identifier
-BENCHMARK_ID_COL: str = 'benchmark_identifier'
+
+
+def _filter_partition(
+    raw_data: pd.DataFrame,
+    partition: Partition,
+    synthetic_benchmark_id: str,
+    benchmark_id_col: str = 'benchmark_identifier',
+) -> pd.DataFrame:
+    if partition == 'synthetic':
+        data = raw_data[raw_data[benchmark_id_col] == synthetic_benchmark_id].copy()
+    elif partition == 'real':
+        data = raw_data[raw_data[benchmark_id_col] != synthetic_benchmark_id].copy()
+    elif partition == 'all':
+        data = raw_data.copy()
+    else:
+        raise ValueError(f"Unknown partition '{partition}'. Must be 'synthetic', 'real', or 'all'.")
+    if data.empty:
+        raise ValueError(f"No data available for partition '{partition}'")
+    return data
+
+
+def _compute_labels(data: pd.DataFrame, schema: BenchmarkDataSchema) -> pd.DataFrame:
+    group_cols = [schema.data_col, schema.rep_col, schema.n_random_warm_starts_col]
+    data = data.copy()
+    data[schema.label_col] = (
+        data.groupby(group_cols, group_keys=False)[schema.performance_col]
+        .rank(method='average', ascending=True)
+    )
+    return data
+
+
+def _select_features(
+    data: pd.DataFrame,
+    metafeatures_schema: SurrogateMetafeaturesSchema,
+) -> tuple[pd.DataFrame, list[str]]:
+    known = set(metafeatures_schema.to_list())
+    feature_cols = [c for c in data.columns if c in known]
+    return data, feature_cols
+
+
+def _organize_columns(
+    data: pd.DataFrame,
+    schema: BenchmarkDataSchema,
+    feature_cols: list[str],
+    benchmark_id_col: str = 'benchmark_identifier',
+) -> pd.DataFrame:
+    base_cols = [
+        schema.data_col, schema.rep_col, schema.n_random_warm_starts_col,
+        schema.tuner_col, schema.label_col, benchmark_id_col,
+    ]
+    base_cols = [c for c in base_cols if c in data.columns]
+    return data[base_cols + [c for c in feature_cols if c not in base_cols]].copy()
+
+
+def _encode_tuner(
+    data: pd.DataFrame,
+    feature_cols: list[str],
+    schema: BenchmarkDataSchema,
+    method: TunerEncoding,
+) -> tuple[pd.DataFrame, list[str]]:
+    data = data.copy()
+    if method == 'ordinal':
+        data['tuner_encoded'] = LabelEncoder().fit_transform(data[schema.tuner_col])
+        return data, feature_cols + ['tuner_encoded']
+    elif method == 'one_hot':
+        dummies = pd.get_dummies(data[schema.tuner_col], prefix='tuner', drop_first=False)
+        data = pd.concat([data, dummies], axis=1)
+        return data, feature_cols + list(dummies.columns)
+    raise ValueError(f"Unknown tuner_encoding_method '{method}'. Must be 'ordinal' or 'one_hot'.")
+
+
+def _add_grouping_columns(
+    data: pd.DataFrame,
+    feature_cols: list[str],
+    schema: BenchmarkDataSchema,
+) -> tuple[pd.DataFrame, list[str]]:
+    data = data.copy()
+    ws_col = schema.n_random_warm_starts_col
+    if ws_col in data.columns and ws_col not in feature_cols:
+        feature_cols = feature_cols + [ws_col]
+    data[schema.ranking_group_col] = (
+        data[schema.data_col].astype(str) + '_'
+        + data[schema.rep_col].astype(str) + '_'
+        + data[ws_col].astype(str)
+    )
+    data['split_group'] = (
+        data[schema.data_col].astype(str) + '_'
+        + data[ws_col].astype(str)
+    )
+    return data, feature_cols
 
 
 def prepare_data(
     raw_data: pd.DataFrame,
+    partition: Partition,
     schema: BenchmarkDataSchema,
-    partition: Literal['all', 'synthetic', 'real'] = 'all',
-    tuner_encoding_method: Literal['ordinal', 'one_hot'] = 'ordinal',
+    metafeatures_schema: SurrogateMetafeaturesSchema,
+    synthetic_benchmark_id: str,
+    tuner_encoding_method: TunerEncoding = 'ordinal',
 ) -> tuple[pd.DataFrame, list[str]]:
-    """Prepare raw benchmark data for learning-to-rank.
+    """Prepare raw benchmark data for learning-to-rank training.
 
-    Steps:
-    1. Filter to the requested partition.
-    2. Compute within-group performance ranks as LTR labels.
-    3. Encode algorithm identity as a feature.
-    4. Add grouping columns used by :func:`split_data`.
-
-    Args:
-        raw_data: Raw benchmark experiment data.
-        schema: Column name schema.
-        partition: Data subset – ``'all'``, ``'synthetic'``, or ``'real'``.
-        tuner_encoding_method:
-            ``'ordinal'`` – single integer label.
-            ``'one_hot'`` – binary indicator per tuner.
+    Applies the full preprocessing pipeline in order:
+    partition filtering → label computation → feature selection →
+    column organisation → tuner encoding → grouping columns.
 
     Returns:
         ``(prepared_df, feature_cols)``
 
     Raises:
-        ValueError: Empty partition or unknown *tuner_encoding_method*.
+        ValueError: If the requested partition yields no data.
     """
-    if partition == 'synthetic':
-        data = raw_data[raw_data[BENCHMARK_ID_COL] == SYNTHETIC_BENCHMARK].copy()
-    elif partition == 'real':
-        data = raw_data[raw_data[BENCHMARK_ID_COL] != SYNTHETIC_BENCHMARK].copy()
-    else:
-        data = raw_data.copy()
-
-    if data.empty:
-        raise ValueError(f"No data available for partition '{partition}'")
-
-    group_cols = [schema.data_col, schema.rep_col, schema.n_random_warm_starts_col]
-    data[schema.label_col] = (
-        data.groupby(group_cols, group_keys=False)[schema.performance_col]
-        .rank(method='average', ascending=True)
-    )
-
-    known_metafeatures = set(SurrogateMetafeaturesSchema().to_list())
-    feature_cols = [c for c in data.columns if c in known_metafeatures]
-
-    base_cols = [
-        schema.data_col, schema.rep_col, schema.n_random_warm_starts_col,
-        schema.tuner_col, schema.label_col, BENCHMARK_ID_COL,
-    ]
-    base_cols = [c for c in base_cols if c in data.columns]
-    result = data[base_cols + [c for c in feature_cols if c not in base_cols]].copy()
-
-    if tuner_encoding_method == 'ordinal':
-        result['tuner_encoded'] = LabelEncoder().fit_transform(result[schema.tuner_col])
-        feature_cols = feature_cols + ['tuner_encoded']
-    elif tuner_encoding_method == 'one_hot':
-        dummies = pd.get_dummies(result[schema.tuner_col], prefix='tuner', drop_first=False)
-        result = pd.concat([result, dummies], axis=1)
-        feature_cols = feature_cols + list(dummies.columns)
-    else:
-        raise ValueError(
-            f"Unknown tuner_encoding_method '{tuner_encoding_method}'. "
-            "Must be 'ordinal' or 'one_hot'."
-        )
-
-    ws_col = schema.n_random_warm_starts_col
-    if ws_col in result.columns and ws_col not in feature_cols:
-        feature_cols.append(ws_col)
-
-    result[schema.ranking_group_col] = (
-        result[schema.data_col].astype(str) + '_'
-        + result[schema.rep_col].astype(str) + '_'
-        + result[ws_col].astype(str)
-    )
-    result['split_group'] = (
-        result[schema.data_col].astype(str) + '_'
-        + result[ws_col].astype(str)
-    )
-
-    return result, feature_cols
+    data = _filter_partition(raw_data, partition, synthetic_benchmark_id)
+    data = _compute_labels(data, schema)
+    data, feature_cols = _select_features(data, metafeatures_schema)
+    data = _organize_columns(data, schema, feature_cols)
+    data, feature_cols = _encode_tuner(data, feature_cols, schema, tuner_encoding_method)
+    data, feature_cols = _add_grouping_columns(data, feature_cols, schema)
+    return data, feature_cols
 
 
 def split_data(
     data: pd.DataFrame,
-    strategy: Literal['random', 'synthetic_train_real_test'],
+    strategy: SplitStrategy,
     config: LTRConfig,
+    synthetic_benchmark_id: str,
+    benchmark_id_col: str = 'benchmark_identifier',
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Split prepared data into train / validation / test sets.
 
@@ -119,6 +145,8 @@ def split_data(
             ``'synthetic_train_real_test'`` – train/val on synthetic rows,
             test on real rows.
         config: Provides ``train_size``, ``val_size``, and ``random_state``.
+        synthetic_benchmark_id: Identifier value for synthetic benchmark rows.
+        benchmark_id_col: Column name holding the benchmark identifier.
 
     Returns:
         ``(train_data, val_data, test_data)``
@@ -130,7 +158,7 @@ def split_data(
     val_prop = config.val_size / (config.train_size + config.val_size)
 
     if strategy == 'synthetic_train_real_test':
-        is_synthetic = data[BENCHMARK_ID_COL] == SYNTHETIC_BENCHMARK
+        is_synthetic = data[benchmark_id_col] == synthetic_benchmark_id
         synthetic, real = data[is_synthetic], data[~is_synthetic]
         if synthetic.empty:
             raise ValueError("No synthetic data available for training")
@@ -147,3 +175,4 @@ def split_data(
     inner = GroupShuffleSplit(n_splits=1, test_size=val_prop, random_state=config.random_state)
     train_idx, val_idx = next(inner.split(train_val, groups=train_val['split_group']))
     return train_val.iloc[train_idx], train_val.iloc[val_idx], test_data
+

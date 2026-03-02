@@ -17,7 +17,7 @@ except ImportError:
         "confopt is a core dependency of this repository, but it is not automatically installed via pyproject.toml, please refer to the README.md for instructions on how to install this separately"
     )
 
-from hpobench.config.types import ExperimentConfig, TunerConfig, IntRange, FloatRange, CategoricalRange
+from hpobench.config.types import ExperimentConfig, TunerConfig, IntRange, FloatRange, CategoricalRange, AnalysisConfig, TunerEncoding, LTRConfig
 from hpobench.utils import generate_hyperparameter_combinations, add_runtime
 from hpobench.orchestration.prepare import (
     setup_yahpo_instance_configs,
@@ -26,7 +26,7 @@ from hpobench.orchestration.prepare import (
 from hpobench.config.schema import BenchmarkDataSchema, Aliases
 from hpobench.config.constants import SyntheticGenerationParameters
 from hpobench.tuning.tune import tune
-from hpobench.learning_to_rank import LTRPipeline, LTRConfig
+from hpobench.learning_to_rank.analysis import LTRAnalysis
 
 logger = logging.getLogger(__name__)
 os.environ["SYNETUNE_FOLDER"] = "cache/syne-tune"
@@ -605,13 +605,15 @@ def run_learning_to_rank_analysis(
     random_state: int = 42,
     k_values: list[int] = [1, 3],
     xgb_params: dict | None = None,
-    tuner_encoding_method: Literal['ordinal', 'one_hot'] = 'ordinal',
+    tuner_encoding_method: TunerEncoding = 'ordinal',
     compute_pdp: bool = True,
     pdp_n_grid_points: int = 20,
     pdp_show_std: bool = True,
+    compute_downsampling: bool = False,
+    downsampling_sample_sizes: list[int] | None = None,
     output_dir: Path | None = None,
-) -> LTRPipeline:
-    """Run learning-to-rank analysis on all data partitions.
+) -> dict[str, LTRAnalysis]:
+    """Run learning-to-rank analysis: fit, evaluate, compute PDPs, downsampling, and save.
 
     Args:
         raw_benchmark_data: Raw benchmark data.
@@ -621,15 +623,16 @@ def run_learning_to_rank_analysis(
         random_state: Random seed for reproducibility.
         k_values: Values of k for precision@k and NDCG@k metrics.
         xgb_params: XGBoost parameters (None uses defaults).
-        tuner_encoding_method: How to encode algorithm identity
-            ('ordinal' or 'one_hot').
+        tuner_encoding_method: How to encode algorithm identity ('ordinal' or 'one_hot').
         compute_pdp: Whether to compute rank-based PDPs.
         pdp_n_grid_points: Grid points per feature for PDP computation.
         pdp_show_std: Whether to show std-deviation bands in PDP plots.
+        compute_downsampling: Whether to compute downsampling curves.
+        downsampling_sample_sizes: Sample sizes for downsampling (None uses default).
         output_dir: Directory to save results (None skips saving).
 
     Returns:
-        Fitted and evaluated :class:`~hpobench.learning_to_rank.LTRPipeline`.
+        Dictionary of fitted LTRAnalysis objects keyed by config name.
     """
     config = LTRConfig(
         train_size=train_size,
@@ -638,18 +641,66 @@ def run_learning_to_rank_analysis(
         k_values=tuple(k_values),
         xgb_params=xgb_params,
     )
-    pipeline = LTRPipeline(
-        config=config,
-        schema=schema,
-        tuner_encoding_method=tuner_encoding_method,
-    ).fit(raw_benchmark_data).evaluate()
-
+    
+    analysis_configs = [
+        AnalysisConfig(name='all_random',                    partition='all',       strategy='random'),
+        AnalysisConfig(name='all_synthetic_train_real_test', partition='all',       strategy='synthetic_train_real_test'),
+        AnalysisConfig(name='synthetic_random',              partition='synthetic', strategy='random'),
+        AnalysisConfig(name='real_random',                   partition='real',      strategy='random'),
+    ]
+    
+    output_dir = Path(output_dir) if output_dir else None
     if output_dir:
-        pipeline.save(output_dir)
-        if compute_pdp:
-            pipeline.compute_pdp(output_dir / 'pdp_plots', pdp_n_grid_points, pdp_show_std)
-
-    return pipeline
+        output_dir.mkdir(parents=True, exist_ok=True)
+    
+    analyses = {}
+    
+    for ac in analysis_configs:
+        analysis = LTRAnalysis(
+            config=config,
+            schema=schema,
+            partition=ac.partition,
+            strategy=ac.strategy,
+            tuner_encoding_method=tuner_encoding_method,
+            name=ac.name,
+        )
+        
+        try:
+            analysis.fit(raw_benchmark_data)
+            analyses[ac.name] = analysis
+        except ValueError as exc:
+            logger.warning(f"Skipping '{ac.name}': {exc}")
+            continue
+        
+        analysis.evaluate()
+        
+        if output_dir:
+            if compute_pdp:
+                try:
+                    analysis.compute_pdp(
+                        output_dir=output_dir / ac.name,
+                        n_grid_points=pdp_n_grid_points,
+                        show_std=pdp_show_std,
+                    )
+                except Exception as exc:
+                    logger.warning(f"compute_pdp failed for '{ac.name}': {exc}")
+            
+            if compute_downsampling:
+                try:
+                    analysis.compute_downsampling(
+                        sample_sizes=downsampling_sample_sizes,
+                        output_dir=output_dir / ac.name,
+                    )
+                except Exception as exc:
+                    logger.warning(f"compute_downsampling failed for '{ac.name}': {exc}")
+            
+            analysis.save(output_dir / ac.name)
+    
+    if output_dir:
+        summary_df = pd.DataFrame([a.summary() for a in analyses.values()])
+        summary_df.to_csv(output_dir / 'summary.csv', index=False)
+    
+    return analyses
 
 
 def run_and_analyze_main_benchmark(
@@ -708,15 +759,21 @@ def run_and_analyze_main_benchmark(
         run_start_str=run_start_str,
     )
 
-    # Run learning-to-rank analysis
     logger.info("Running learning-to-rank analysis on benchmark results")
     results_dir = Path(cache_path) / "ltr_results" / run_start_str
 
-    config = LTRConfig(train_size=0.7, val_size=0.15, random_state=base_random_state)
-    pipeline = LTRPipeline(config=config, schema=schema).fit(raw_benchmark_data).evaluate()
-    pipeline.save(results_dir)
-    pipeline.compute_pdp(results_dir / 'pdp_plots', n_grid_points=20, show_std=True)
-    pipeline.compute_downsampling(results_dir / 'downsampling')
+    run_learning_to_rank_analysis(
+        raw_benchmark_data=raw_benchmark_data,
+        schema=schema,
+        train_size=0.7,
+        val_size=0.15,
+        random_state=base_random_state,
+        compute_pdp=True,
+        pdp_n_grid_points=20,
+        pdp_show_std=True,
+        compute_downsampling=True,
+        output_dir=results_dir,
+    )
 
     logger.info("Learning-to-rank analysis completed successfully")
     return raw_benchmark_data

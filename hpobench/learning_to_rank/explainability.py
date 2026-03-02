@@ -1,73 +1,18 @@
-"""
-Explainability tools for learning-to-rank models.
-
-Two complementary approaches:
-
-1. **ShaRP-based SHAP values** – rank-based feature attributions measuring how
-   features affect ranking *positions* rather than raw scores (requires
-   ``pip install xai-sharp``).
-
-2. **Rank-based Partial Dependence Plots (PDPs)** – per-tuner curves showing
-   how each feature affects that tuner's average rank across ranking groups.
-
-For a tuner *t* and feature *j*:
-
-    RankPDP_j^t(x_j) = (1/|G|) * Σ_{g ∈ G} rank_t(x_j, g)
-
-Typical usage via :class:`~hpobench.learning_to_rank.analysis.LTRAnalysis`::
-
-    analysis = LTRAnalysis(...).fit(raw_data).evaluate()
-    pdp_results  = analysis.compute_pdp(output_dir=Path('output/pdp'))
-    shap_results = analysis.compute_shap(output_dir=Path('output/shap'))
-"""
-
 import logging
 import numpy as np
 import pandas as pd
 import xgboost as xgb
 import matplotlib.pyplot as plt
-from dataclasses import dataclass
 from pathlib import Path
 
+from hpobench.config.types import (
+    SharpResults,
+    PartialDependenceResult,
+    PartialDependenceResults,
+    DownsamplingResults,
+)
+
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Result types
-# ---------------------------------------------------------------------------
-
-@dataclass
-class SharpResults:
-    """Results from a ShaRP explainability analysis."""
-    shap_values: np.ndarray
-    feature_names: list[str]
-    feature_matrix: np.ndarray
-    base_value: float
-
-
-@dataclass
-class PartialDependenceResult:
-    """PDP results for a single (feature, tuner) pair."""
-    feature_name: str
-    tuner_name: str
-    x_values: np.ndarray
-    rank_values: np.ndarray
-    rank_std: np.ndarray
-    n_groups: int
-
-
-@dataclass
-class PartialDependenceResults:
-    """Complete PDP results for all (feature, tuner) pairs in one partition."""
-    results: dict[tuple[str, str], PartialDependenceResult]
-    feature_names: list[str]
-    tuner_names: list[str]
-    partition_name: str
-
-
-# ---------------------------------------------------------------------------
-# SHAP / ShaRP
-# ---------------------------------------------------------------------------
 
 def compute_shap_values(
     model: xgb.Booster,
@@ -203,14 +148,6 @@ def run_shap_analysis(
 ) -> dict:
     """Compute SHAP values, build summary, and optionally write plots and CSV.
 
-    Args:
-        model: Trained XGBoost booster.
-        data: Data to explain.
-        feature_cols: Feature column names.
-        output_dir: Directory for outputs (skipped if ``None``).
-        top_k: Features shown in plots.
-        sample_size: ShaRP perturbation sample size.
-
     Returns:
         ``{'shap_results': SharpResults, 'summary': pd.DataFrame}``
     """
@@ -226,10 +163,6 @@ def run_shap_analysis(
 
     return {'shap_results': shap_results, 'summary': summary}
 
-
-# ---------------------------------------------------------------------------
-# Rank-based Partial Dependence
-# ---------------------------------------------------------------------------
 
 def _feature_grid(
     values: pd.Series,
@@ -257,11 +190,7 @@ def _ranks_by_group(
     ranking_group_col: str,
     tuner_col: str,
 ) -> dict[str, list[float]]:
-    """Map each tuner to a flat list of its ranks across all ranking groups.
-
-    Returns:
-        ``{tuner_name: [rank, …]}`` where ranks are 1-indexed (1 = best).
-    """
+    """Map each tuner to a flat list of its ranks across all ranking groups."""
     data = data.copy()
     data['_score'] = scores
     tuner_ranks: dict[str, list[float]] = {}
@@ -289,19 +218,6 @@ def compute_partial_dependence(
     For each feature, the feature value is swept across a grid while all
     other features are held at their observed values. Ranks are computed
     within each ranking group and averaged across groups per tuner.
-
-    Args:
-        model: Trained XGBoost booster.
-        data: Test data containing features, ranking groups, and tuner column.
-        feature_cols: Features to analyse.
-        ranking_group_col: Column identifying ranking groups.
-        tuner_col: Column identifying algorithm identity.
-        partition_name: Label stored in the returned results.
-        n_grid_points: Grid resolution for continuous features.
-        quantile_range: Feature range (as quantiles) for continuous grids.
-
-    Returns:
-        :class:`PartialDependenceResults` for all (feature, tuner) pairs.
     """
     tuners = sorted(data[tuner_col].unique())
     all_results: dict[tuple[str, str], PartialDependenceResult] = {}
@@ -353,15 +269,7 @@ def plot_partial_dependence(
     show_std: bool = True,
     n_cols: int = 3,
 ) -> None:
-    """Save per-tuner PDP grid plots to *output_dir*.
-
-    Args:
-        pdp_results: Output of :func:`compute_partial_dependence`.
-        output_dir: Directory for PNG files.
-        tuner_name: Plot only this tuner (``None`` → all tuners).
-        show_std: Whether to overlay standard-deviation bands.
-        n_cols: Subplot grid columns.
-    """
+    """Save per-tuner PDP grid plots to *output_dir*."""
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     tuners = [tuner_name] if tuner_name else pdp_results.tuner_names
@@ -405,3 +313,42 @@ def plot_partial_dependence(
         fig.savefig(path, dpi=300, bbox_inches='tight')
         plt.close(fig)
         logger.debug(f"Saved PDP plot: {path}")
+
+
+def plot_downsampling_curve(
+    results: DownsamplingResults,
+    output_path: Path,
+    partition_name: str = '',
+) -> None:
+    """4-panel plot of precision@k and NDCG@k vs. training sample size."""
+    sample_sizes = results.sample_sizes
+    metric_keys = [k for k in results.metrics if k.startswith('precision@') or k.startswith('ndcg@')]
+
+    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+    axes = axes.flatten()
+
+    for ax, metric in zip(axes, metric_keys[:4]):
+        values = results.metrics[metric]
+        ax.plot(sample_sizes, values, 'o-', linewidth=2, markersize=6, color='#1f77b4')
+        ax.set_xlabel('Training sample size (groups)', fontsize=11)
+        ax.set_ylabel(metric.replace('@', ' @ ').title(), fontsize=11)
+        ax.set_title(metric.replace('@', ' @ ').upper(), fontsize=12, fontweight='bold')
+        ax.grid(alpha=0.3)
+        if max(sample_sizes) / min(sample_sizes) > 10:
+            ax.set_xscale('log')
+        final = values[-1]
+        ax.axhline(final, color='red', linestyle='--', alpha=0.5, linewidth=1.5,
+                   label=f'Full data: {final:.3f}')
+        ax.legend(fontsize=9)
+
+    for ax in axes[len(metric_keys):]:
+        ax.set_visible(False)
+
+    title = f'LTR Scaling Analysis\nPartition: {partition_name}' if partition_name else 'LTR Scaling Analysis'
+    fig.suptitle(title, fontsize=14, fontweight='bold')
+    fig.tight_layout()
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close(fig)
+    logger.info(f"Saved downsampling plot: {output_path}")

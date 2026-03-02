@@ -1,5 +1,6 @@
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict
 from typing import Union, Literal, Optional
+import numpy as np
 
 try:
     from confopt.selection.acquisition import (
@@ -159,9 +160,87 @@ class ConfOptModel(BaseModel):
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
-
     backend: Literal["confopt"]
     searcher: QuantileConformalSearcher
+
+
+Partition = Literal['all', 'synthetic', 'real']
+SplitStrategy = Literal['random', 'synthetic_train_real_test']
+TunerEncoding = Literal['ordinal', 'one_hot']
+
+
+class LTRConfig(BaseModel):
+    """Configuration for learning-to-rank experiments."""
+
+    model_config = ConfigDict()
+
+    train_size: float = 0.7
+    val_size: float = 0.15
+    random_state: int = 42
+    k_values: tuple[int, ...] = (1, 3)
+    xgb_params: dict = {
+        "objective": "rank:ndcg",
+        "learning_rate": 0.1,
+        "max_depth": 6,
+        "subsample": 0.8,
+        "colsample_bytree": 0.8,
+        "verbosity": 0,
+        "seed": 42,
+    }
+
+
+class AnalysisConfig(BaseModel):
+    """Declarative specification for one LTR analysis run."""
+
+    name: str
+    partition: Partition
+    strategy: SplitStrategy
+
+
+class SharpResults(BaseModel):
+    """Results from a ShaRP explainability analysis."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    shap_values: np.ndarray
+    feature_names: list[str]
+    feature_matrix: np.ndarray
+    base_value: float
+
+
+class PartialDependenceResult(BaseModel):
+    """PDP results for a single (feature, tuner) pair."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    feature_name: str
+    tuner_name: str
+    x_values: np.ndarray
+    rank_values: np.ndarray
+    rank_std: np.ndarray
+    n_groups: int
+
+
+class PartialDependenceResults(BaseModel):
+    """Complete PDP results for all (feature, tuner) pairs in one partition."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    results: dict[tuple[str, str], PartialDependenceResult]
+    feature_names: list[str]
+    tuner_names: list[str]
+    partition_name: str
+
+
+class DownsamplingResults(BaseModel):
+    """Downsampling analysis results showing performance at different training set sizes."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    sample_sizes: list[int]
+    n_train_groups: list[int]
+    n_val_groups: list[int]
+    metrics: dict[str, list[float]]
 
 
 class TunerConfig(BaseModel):
