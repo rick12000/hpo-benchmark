@@ -8,6 +8,7 @@ Includes:
 - Performance landscape statistics (mean, std, range, distribution shape)
 - Information-theoretic metrics (mutual information)
 - Conditional performance characteristics (local skewness, heteroscedasticity)
+- Preprocessing utilities (one-hot encoding and normalization)
 """
 
 import numpy as np
@@ -16,18 +17,144 @@ from typing import Dict, Optional, List, Union
 import logging
 import warnings
 from scipy import stats
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.neighbors import NearestNeighbors
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import Matern, ConstantKernel as C
 from sklearn.cluster import KMeans
-import statsmodels.api as sm
 from sklearn.feature_selection import mutual_info_regression
+import statsmodels.api as sm
 from hpobench.config.schema import SurrogateMetafeaturesSchema
-from hpobench.metafeatures.preprocessing import preprocess_for_metafeatures
 from hpobench.config.types import IntRange, FloatRange, CategoricalRange
 
 logger = logging.getLogger(__name__)
+
+
+def preprocess_for_metafeatures(
+    configs: List[Dict[str, Union[int, float, str]]],
+    search_space: Optional[Dict[str, Union[IntRange, FloatRange, CategoricalRange]]] = None,
+) -> np.ndarray:
+    """Preprocess hyperparameter configurations for metafeature calculation.
+    
+    Applies the following transformations:
+    1. One-hot encode categorical features
+    2. Identify binary features (including one-hot encoded)
+    3. Normalize all non-binary features using StandardScaler
+    
+    Args:
+        configs: List of hyperparameter configuration dictionaries
+        search_space: Optional search space to identify categorical features
+        
+    Returns:
+        Preprocessed numpy array with one-hot encoded and normalized features
+    """
+    if len(configs) == 0:
+        raise ValueError("Cannot preprocess empty configuration list")
+    
+    # Convert to DataFrame
+    configs_df = pd.DataFrame(configs)
+    original_feature_names = configs_df.columns.tolist()
+    
+    # Identify categorical features
+    categorical_features = []
+    if search_space is not None:
+        # Use search space to identify categoricals
+        for hp_name, hp_range in search_space.items():
+            if isinstance(hp_range, CategoricalRange):
+                if hp_name in configs_df.columns:
+                    categorical_features.append(hp_name)
+    else:
+        # Infer categoricals from data
+        for col in configs_df.columns:
+            # Check if column is non-numeric or has few unique values
+            try:
+                pd.to_numeric(configs_df[col])
+            except (ValueError, TypeError):
+                categorical_features.append(col)
+                continue
+            
+            # If numeric but has few unique values, might be categorical
+            if configs_df[col].nunique() <= 10:
+                categorical_features.append(col)
+    
+    # Separate categorical and numeric features
+    numeric_features = [col for col in configs_df.columns if col not in categorical_features]
+    
+    # Step 1: One-hot encode categorical features
+    if len(categorical_features) > 0:
+        # Prepare categorical data
+        cat_data = configs_df[categorical_features].copy()
+        
+        # Convert to string to handle mixed types
+        for col in categorical_features:
+            cat_data[col] = cat_data[col].astype(str)
+        
+        # One-hot encode
+        encoder = OneHotEncoder(sparse_output=False, handle_unknown='ignore')
+        encoded_cat = encoder.fit_transform(cat_data)
+        
+        # Get feature names after encoding
+        encoded_feature_names = []
+        for i, col in enumerate(categorical_features):
+            categories = encoder.categories_[i]
+            for cat in categories:
+                encoded_feature_names.append(f"{col}_{cat}")
+        
+        # Create DataFrame with encoded features
+        encoded_df = pd.DataFrame(
+            encoded_cat,
+            columns=encoded_feature_names,
+            index=configs_df.index
+        )
+    else:
+        encoded_df = pd.DataFrame(index=configs_df.index)
+    
+    # Step 2: Combine numeric and encoded features
+    if len(numeric_features) > 0:
+        numeric_df = configs_df[numeric_features].copy()
+        
+        # Convert to numeric, handling any errors
+        for col in numeric_features:
+            numeric_df[col] = pd.to_numeric(numeric_df[col], errors='coerce')
+        
+        # Fill any NaN values with 0
+        numeric_df = numeric_df.fillna(0)
+        
+        combined_df = pd.concat([numeric_df, encoded_df], axis=1)
+    else:
+        combined_df = encoded_df
+    
+    # Step 3: Identify binary features (don't normalize these)
+    binary_features = []
+    for col in combined_df.columns:
+        unique_vals = combined_df[col].dropna().unique()
+        if len(unique_vals) <= 2:
+            # Check if values are 0/1 or similar binary
+            if set(unique_vals).issubset({0, 1, 0.0, 1.0}):
+                binary_features.append(col)
+    
+    logger.debug(f"Identified {len(binary_features)} binary features")
+    
+    # Step 4: Normalize non-binary features
+    features_to_normalize = [col for col in combined_df.columns if col not in binary_features]
+    
+    if len(features_to_normalize) > 0:
+        scaler = StandardScaler()
+        normalized_data = scaler.fit_transform(combined_df[features_to_normalize])
+        
+        # Replace normalized features
+        for i, col in enumerate(features_to_normalize):
+            combined_df[col] = normalized_data[:, i]
+    
+    # Convert to numpy array
+    preprocessed_array = combined_df.values
+    
+    logger.debug(
+        f"Preprocessing complete: {len(original_feature_names)} original features → "
+        f"{preprocessed_array.shape[1]} preprocessed features"
+    )
+    
+    return preprocessed_array
 
 
 def classify_column_type(series: pd.Series) -> str:
@@ -360,9 +487,7 @@ def calculate_surrogate_metafeatures(
     
     # Apply preprocessing: one-hot encode categoricals and normalize non-binary features
     try:
-        X_preprocessed, preprocess_metadata = preprocess_for_metafeatures(
-            configs, search_space
-        )
+        X_preprocessed = preprocess_for_metafeatures(configs, search_space)
     except Exception as e:
         logger.warning(f"Preprocessing failed: {e}. Using raw features.")
         # Fall back to simple numeric conversion

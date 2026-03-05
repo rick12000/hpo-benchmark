@@ -408,7 +408,7 @@ def run_main_benchmark(
                     f"using {strategy.value} strategy."
                 )
 
-                from hpobench.metafeatures.calculator import calculate_surrogate_metafeatures
+                from hpobench.orchestration.meta_features import calculate_surrogate_metafeatures
                 from hpobench.config.schema import SurrogateMetafeaturesSchema
 
                 for tuner in experiment_config.tuner_configurations:
@@ -600,17 +600,11 @@ def run_main_benchmark(
 def run_learning_to_rank_analysis(
     raw_benchmark_data: pd.DataFrame,
     schema: BenchmarkDataSchema,
-    train_size: float = 0.7,
-    val_size: float = 0.15,
-    random_state: int = 42,
-    k_values: list[int] = [1, 3],
-    xgb_params: dict | None = None,
+    downsampling_sample_sizes: list[int],
     tuner_encoding_method: TunerEncoding = 'ordinal',
     compute_pdp: bool = True,
     pdp_n_grid_points: int = 20,
     pdp_show_std: bool = True,
-    compute_downsampling: bool = False,
-    downsampling_sample_sizes: list[int] | None = None,
     output_dir: Path | None = None,
 ) -> dict[str, LTRAnalysis]:
     """Run learning-to-rank analysis: fit, evaluate, compute PDPs, downsampling, and save.
@@ -618,29 +612,16 @@ def run_learning_to_rank_analysis(
     Args:
         raw_benchmark_data: Raw benchmark data.
         schema: Column schema.
-        train_size: Proportion of data for training.
-        val_size: Proportion of data for validation.
-        random_state: Random seed for reproducibility.
-        k_values: Values of k for precision@k and NDCG@k metrics.
-        xgb_params: XGBoost parameters (None uses defaults).
+        downsampling_sample_sizes: Sample sizes for downsampling.
         tuner_encoding_method: How to encode algorithm identity ('ordinal' or 'one_hot').
         compute_pdp: Whether to compute rank-based PDPs.
         pdp_n_grid_points: Grid points per feature for PDP computation.
         pdp_show_std: Whether to show std-deviation bands in PDP plots.
-        compute_downsampling: Whether to compute downsampling curves.
-        downsampling_sample_sizes: Sample sizes for downsampling (None uses default).
         output_dir: Directory to save results (None skips saving).
 
     Returns:
         Dictionary of fitted LTRAnalysis objects keyed by config name.
     """
-    config = LTRConfig(
-        train_size=train_size,
-        val_size=val_size,
-        random_state=random_state,
-        k_values=tuple(k_values),
-        xgb_params=xgb_params,
-    )
     
     analysis_configs = [
         AnalysisConfig(name='all_random',                    partition='all',       strategy='random'),
@@ -657,12 +638,11 @@ def run_learning_to_rank_analysis(
     
     for ac in analysis_configs:
         analysis = LTRAnalysis(
-            config=config,
             schema=schema,
             partition=ac.partition,
             strategy=ac.strategy,
             tuner_encoding_method=tuner_encoding_method,
-            name=ac.name,
+            analysis_identifier=ac.name,
         )
         
         try:
@@ -685,14 +665,13 @@ def run_learning_to_rank_analysis(
                 except Exception as exc:
                     logger.warning(f"compute_pdp failed for '{ac.name}': {exc}")
             
-            if compute_downsampling:
-                try:
-                    analysis.compute_downsampling(
-                        sample_sizes=downsampling_sample_sizes,
-                        output_dir=output_dir / ac.name,
-                    )
-                except Exception as exc:
-                    logger.warning(f"compute_downsampling failed for '{ac.name}': {exc}")
+            try:
+                analysis.compute_downsampling(
+                    sample_sizes=downsampling_sample_sizes,
+                    output_dir=output_dir / ac.name,
+                )
+            except Exception as exc:
+                logger.warning(f"compute_downsampling failed for '{ac.name}': {exc}")
             
             analysis.save(output_dir / ac.name)
     
@@ -762,16 +741,18 @@ def run_and_analyze_main_benchmark(
     logger.info("Running learning-to-rank analysis on benchmark results")
     results_dir = Path(cache_path) / "ltr_results" / run_start_str
 
+    # Compute default logarithmically-spaced sample sizes based on data
+    n_groups = raw_benchmark_data[schema.ranking_group_col].nunique()
+    raw = np.geomspace(10, n_groups, num=12).astype(int)
+    downsampling_sample_sizes = sorted(set(raw.tolist()) | {n_groups})
+
     run_learning_to_rank_analysis(
         raw_benchmark_data=raw_benchmark_data,
         schema=schema,
-        train_size=0.7,
-        val_size=0.15,
-        random_state=base_random_state,
+        downsampling_sample_sizes=downsampling_sample_sizes,
         compute_pdp=True,
         pdp_n_grid_points=20,
         pdp_show_std=True,
-        compute_downsampling=True,
         output_dir=results_dir,
     )
 

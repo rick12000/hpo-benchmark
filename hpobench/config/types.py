@@ -178,6 +178,7 @@ class LTRConfig(BaseModel):
     val_size: float = 0.15
     random_state: int = 42
     k_values: tuple[int, ...] = (1, 3)
+    num_boost_rounds: int = 500
     xgb_params: dict = {
         "objective": "rank:ndcg",
         "learning_rate": 0.1,
