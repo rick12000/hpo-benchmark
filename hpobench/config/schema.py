@@ -61,6 +61,7 @@ class SurrogateMetafeaturesSchema(BaseModel):
         return list(self.model_dump().values())
 
 
+
 class BenchmarkDataSchema(BaseModel):
     """Schema defining column names for benchmark experiment data.
 
@@ -95,6 +96,7 @@ class BenchmarkDataSchema(BaseModel):
     tuner_col: str = "tuner"
     data_col: str = "dataset"
     n_random_warm_starts_col: str = "n_random_warm_starts"
+    warm_start_strategy_col: str = "warm_start_strategy"
     ranking_group_col: str = "ranking_group"
     label_col: str = "label"
 

@@ -27,7 +27,7 @@ def _filter_partition(
 
 
 def _compute_labels(data: pd.DataFrame, schema: BenchmarkDataSchema) -> pd.DataFrame:
-    group_cols = [schema.data_col, schema.rep_col, schema.n_random_warm_starts_col]
+    group_cols = [schema.data_col, schema.warm_start_strategy_col, schema.n_random_warm_starts_col, schema.rep_col]
     data = data.copy()
     data[schema.label_col] = (
         data.groupby(group_cols, group_keys=False)[schema.performance_col]
@@ -52,8 +52,8 @@ def _organize_columns(
     benchmark_id_col: str = 'benchmark_identifier',
 ) -> pd.DataFrame:
     base_cols = [
-        schema.data_col, schema.rep_col, schema.n_random_warm_starts_col,
-        schema.tuner_col, schema.label_col, benchmark_id_col,
+        schema.data_col, schema.warm_start_strategy_col, schema.n_random_warm_starts_col,
+        schema.rep_col, schema.tuner_col, schema.label_col, benchmark_id_col,
     ]
     base_cols = [c for c in base_cols if c in data.columns]
     return data[base_cols + [c for c in feature_cols if c not in base_cols]].copy()
@@ -83,15 +83,18 @@ def _add_grouping_columns(
 ) -> tuple[pd.DataFrame, list[str]]:
     data = data.copy()
     ws_col = schema.n_random_warm_starts_col
+    strat_col = schema.warm_start_strategy_col
     if ws_col in data.columns and ws_col not in feature_cols:
         feature_cols = feature_cols + [ws_col]
     data[schema.ranking_group_col] = (
         data[schema.data_col].astype(str) + '_'
-        + data[schema.rep_col].astype(str) + '_'
-        + data[ws_col].astype(str)
+        + data[strat_col].astype(str) + '_'
+        + data[ws_col].astype(str) + '_'
+        + data[schema.rep_col].astype(str)
     )
     data['split_group'] = (
         data[schema.data_col].astype(str) + '_'
+        + data[strat_col].astype(str) + '_'
         + data[ws_col].astype(str)
     )
     return data, feature_cols

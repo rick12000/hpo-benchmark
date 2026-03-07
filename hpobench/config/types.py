@@ -167,6 +167,7 @@ class ConfOptModel(BaseModel):
 Partition = Literal['all', 'synthetic', 'real']
 SplitStrategy = Literal['random', 'synthetic_train_real_test']
 TunerEncoding = Literal['ordinal', 'one_hot']
+WarmStartStrategy = Literal['random', 'gp_thompson_sampling', 'gp_expected_improvement']
 
 
 class LTRConfig(BaseModel):
