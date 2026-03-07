@@ -88,34 +88,36 @@ def calculate_conditional_asymmetry(X: np.ndarray, y: np.ndarray) -> float:
     """Estimate local skewness of ``y`` conditioned on position in ``X``.
 
     For each point, finds its k-nearest neighbours and computes a log quantile
-    skew ratio (Q95-Q50)/(Q50-Q05). Falls back to global skewness when
-    n < 100, as local neighbourhoods are unreliable at that scale.
+    skew ratio (Q_hi - Q50) / (Q50 - Q_lo). Quantile tails and neighbourhood
+    size adapt to sample size: n >= 100 uses Q95/Q05 with k = n//10 (capped at
+    100); n in [30, 100) uses Q90/Q10 with k = max(3, n//10). Falls back to
+    global skewness below 30 samples. ``X`` is assumed pre-standardised.
 
     Args:
-        X: Feature matrix of shape (n_samples, n_features).
+        X: Feature matrix of shape (n_samples, n_features), pre-standardised.
         y: Target values of shape (n_samples,).
 
     Returns:
         Median absolute log-skew ratio across all points, or global skewness
-        when n < 100. Returns 0.0 if inputs are empty.
+        for n < 30. Returns 0.0 if inputs are empty.
     """
-    if len(X) == 0 or len(y) == 0:
-        return 0.0
+    n = X.shape[0]
 
-    if X.shape[0] < 100:
-        skew_val = stats.skew(y)
-        return float(skew_val) if np.isfinite(skew_val) else 0.0
+    if n < 30:
+        q_hi, q_lo = 0.90, 0.10
+        n_neighbors = max(3, n // 10)
+    else:
+        q_hi, q_lo = 0.95, 0.05
+        n_neighbors = min(100, n // 10)
 
-    X_scaled = StandardScaler().fit_transform(X)
-    n_neighbors = min(100, len(X) // 10)
-    nbrs = NearestNeighbors(n_neighbors=n_neighbors, algorithm="ball_tree").fit(X_scaled)
+    nbrs = NearestNeighbors(n_neighbors=n_neighbors, algorithm="ball_tree").fit(X)
 
     skew_ratios = []
-    for i in range(len(X_scaled)):
-        _, indices = nbrs.kneighbors([X_scaled[i]])
+    for i in range(n):
+        _, indices = nbrs.kneighbors([X[i]])
         local_y = y[indices[0]]
-        q95, q50, q05 = np.quantile(local_y, [0.95, 0.5, 0.05])
-        numerator, denominator = q95 - q50, q50 - q05
+        q_high, q50, q_low = np.quantile(local_y, [q_hi, 0.5, q_lo])
+        numerator, denominator = q_high - q50, q50 - q_low
         if numerator > 0 and denominator > 0:
             skew_ratios.append(np.log(numerator / denominator))
 
@@ -142,9 +144,6 @@ def calculate_heteroscedasticity_score(
     Returns:
         Adjusted R² in [0, 1], or 0.0 if inputs are empty.
     """
-    if len(X) == 0 or len(y) == 0:
-        return 0.0
-
     n_inducing = min(max_samples, len(X))
 
     if len(X) > n_inducing:
@@ -210,18 +209,12 @@ def calculate_mutual_information(X: np.ndarray, y: np.ndarray) -> Dict[str, floa
         ``avg_mi_with_target``. All values are 0.0 if ``X`` is empty or
         all MI scores are non-finite.
     """
-    default: Dict[str, float] = {
-        'max_mi_with_target': 0.0, 'min_mi_with_target': 0.0, 'avg_mi_with_target': 0.0,
-    }
-    if X.shape[0] == 0 or X.shape[1] == 0:
-        return default
 
     mi_scores = np.array(
         [v for v in mutual_info_regression(X, y, random_state=42) if np.isfinite(v)],
         dtype=float,
     )
-    if len(mi_scores) == 0:
-        return default
+
     return {
         'max_mi_with_target': float(np.max(mi_scores)),
         'min_mi_with_target': float(np.min(mi_scores)),
@@ -240,11 +233,6 @@ def calculate_feature_correlation(X: np.ndarray) -> Dict[str, float]:
         ``avg_mi_between_features``. All values are 0.0 for single-feature inputs
         or when no finite MI scores are obtained.
     """
-    default: Dict[str, float] = {
-        'max_mi_between_features': 0.0, 'min_mi_between_features': 0.0, 'avg_mi_between_features': 0.0,
-    }
-    if X.shape[1] <= 1:
-        return default
 
     mi_scores = []
     for i in range(X.shape[1]):
@@ -252,8 +240,7 @@ def calculate_feature_correlation(X: np.ndarray) -> Dict[str, float]:
             v = mutual_info_regression(X[:, [j]], X[:, i], random_state=42)[0]
             if np.isfinite(v):
                 mi_scores.append(float(v))
-    if not mi_scores:
-        return default
+
     mi_arr = np.array(mi_scores)
     return {
         'max_mi_between_features': float(np.max(mi_arr)),
@@ -286,8 +273,6 @@ def calculate_landscape_separability(
         Separability ratio >= 0, or ``np.nan`` if either group has fewer than
         5 members or within-group distance is zero.
     """
-    if X.shape[0] == 0 or X.shape[1] == 0 or len(y) == 0:
-        return np.nan
 
     n = len(y)
     group_size = int(np.floor(n * percentile / 100.0))
