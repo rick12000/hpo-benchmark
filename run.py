@@ -1,4 +1,7 @@
 from pathlib import Path
+
+import numpy as np
+
 from hpobench.config.tuners import (
     EXTERNAL_TUNING_CONFIGURATIONS,
     LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS,
@@ -60,6 +63,11 @@ def main():
         logger.error("Cannot proceed without synthetic datasets. Exiting.")
         return
     
+    results_dir = Path(CACHE_PATH) / experiment_params.ltr_output_dir / run_start_str
+    
+    raw_downsampling_sizes = np.geomspace(10, 100, num=experiment_params.n_downsampling_sizes).astype(int)
+    downsampling_percentages = sorted(set((raw_downsampling_sizes / 100.0).tolist()) | {1.0})
+    
     run_and_analyze_main_benchmark(
         benchmarks=["lcbench", "synthetic_tabular"],
         tuning_configurations=LIMITED_ARCHITECTURE_VARIATION_CONFIGURATIONS
@@ -68,6 +76,9 @@ def main():
         schema=schema,
         cache_path=CACHE_PATH,
         run_start_str=run_start_str,
+        experiment_params=experiment_params,
+        results_dir=results_dir,
+        downsampling_percentages=downsampling_percentages,
         max_n_instances_per_benchmark=experiment_params.max_n_instances,
         n_repetitions=experiment_params.n_repetitions_per_tuner_config,
         datasets_per_benchmark=[None, synthetic_tabular_ids],

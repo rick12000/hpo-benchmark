@@ -10,7 +10,7 @@ class SurrogateMetafeaturesSchema(BaseModel):
     optimization landscape that tuners operate on.
     
     Surrogate metafeatures capture:
-    - Size of the surrogate dataset (number of config-performance pairs)
+    - Size of the surrogate dataset (number of config-performance pairs, and dimensions after preprocessing)
     - Performance landscape statistics (mean, std, range, distribution shape)
     - Relationships between hyperparameters and performance
     - Conditional performance characteristics and heteroscedasticity
@@ -19,6 +19,8 @@ class SurrogateMetafeaturesSchema(BaseModel):
     
     # Size metafeatures
     n_hyperparameters: str = "n_hyperparameters"
+    total_rows: str = "total_rows"
+    total_columns: str = "total_columns"
     
     # Hyperparameter type statistics
     n_integer_hyperparameters: str = "n_integer_hyperparameters"
@@ -64,51 +66,59 @@ class SurrogateMetafeaturesSchema(BaseModel):
 
 class BenchmarkDataSchema(BaseModel):
     """Schema defining column names for benchmark experiment data.
-
-    Args:
-        cumulative_coverage_error_col: Column for cumulative coverage error metrics.
-        rolling_coverage_error_col: Column for rolling window coverage error.
-        rep_col: Column for experiment repetition number.
-        perf_col: Column for performance metric values.
-        tuner_col: Column for tuner configuration identifier.
-        bench_col: Column for benchmark suite name.
-        data_col: Column for dataset identifier.
-        sampler_col: Column for conformal sampler type.
-        confidence_level_col: Column for confidence level values.
-        estimator_architecture_col: Column for quantile estimator architecture.
-        sampler_n_quantiles_col: Column for number of quantiles used.
-        sampler_adapter_col: Column for adaptive conformal method.
-        tuner_searcher_tuning_framework_col: Column for searcher tuning framework.
-        n_pre_conformal_trials_col: Column for pre-conformal trial count.
-        data_size_col: Column for dataset size.
-        tuning_iterations_col: Column for tuning iteration count.
-        estimator_error_col: Column for quantile estimator error.
-        breach_col: Column for coverage breach status.
-        runtime_unit: Base name for runtime columns.
-        iter_unit: Base name for iteration columns.
-        norm_runtime_unit: Name for normalized runtime columns.
-        norm_iter_unit: Name for normalized iteration columns.
+    
+    Defines taxonomy of columns:
+    - Input: Raw columns that must exist in raw data
+    - Grouping: Columns that define experiment groups for ranking
+    - Labels: Computed ranking labels
+    - Engineered: Columns derived from input for pipeline operations
+    - Metadata: Identification columns for filtering/tracking
     """
 
-    # Core columns used across the codebase
+    # ===== INPUT COLUMNS (must exist in raw data) =====
     rep_col: str = "repetition"
     performance_col: str = "performance"
     tuner_col: str = "tuner"
     data_col: str = "dataset"
     n_random_warm_starts_col: str = "n_random_warm_starts"
     warm_start_strategy_col: str = "warm_start_strategy"
-    ranking_group_col: str = "ranking_group"
+    
+    # ===== LABEL COLUMNS (computed by preprocessing) =====
     label_col: str = "label"
+    
+    # ===== ENGINEERED COLUMNS (derived by preprocessing) =====
+    ranking_group_col: str = "ranking_group"
+    split_group_col: str = "split_group"
+    
+    # ===== METADATA COLUMNS (filtering/identification) =====
+    benchmark_identifier_col: str = "benchmark_identifier"
+    
+    # ===== COLUMN LISTS (for pipeline operations) =====
+    rank_group_cols: List[str] = []
+    split_group_cols: List[str] = []
+    
+    def __init__(self, **data):
+        super().__init__(**data)
+        # Set column lists based on individual column names
+        self.rank_group_cols = [
+            self.data_col,
+            self.warm_start_strategy_col,
+            self.n_random_warm_starts_col,
+            self.rep_col,
+        ]
+        self.split_group_cols = [
+            self.data_col,
+            self.warm_start_strategy_col,
+            self.n_random_warm_starts_col,
+        ]
 
     def to_list(self) -> List[str]:
         """Convert all schema field values to a list.
 
         Returns:
-            List of all column names and units defined in the schema.
+            List of all column names defined in the schema.
         """
-        field_values: Dict[str, Any]
-        field_values = self.model_dump()
-        return list(field_values.values())
+        return list(self.model_dump().values())
 
 
 class Aliases(BaseModel):

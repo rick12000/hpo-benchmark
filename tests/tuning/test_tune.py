@@ -6,8 +6,6 @@ from hpobench.tuning.tune import (
     skopt_tune,
     smac_tune,
     gp_opt_tune,
-    calculate_breach_status,
-    calculate_winkler_components,
 )
 from hpobench.tuning.syne_tune_integration import syne_tune_cqr_tune
 from confopt.selection.acquisition import (
@@ -26,55 +24,6 @@ from hpobench.config.types import (
 
 N_TRIALS = 40
 RANDOM_STATE = 1234
-
-
-@pytest.mark.parametrize(
-    "lower_bound,upper_bound,realization,expected",
-    [
-        (0.0, 1.0, 0.5, 0),  # inside interval
-        (0.0, 1.0, -0.1, 1),  # below lower
-        (0.0, 1.0, 1.1, 1),  # above upper
-        (1.0, 0.0, 0.5, 1),  # upper < lower, inside
-        (1.0, 0.0, -1.0, 1),  # upper < lower, below
-        (1.0, 0.0, 2.0, 1),  # upper < lower, above
-    ],
-)
-def test_calculate_breach_status(lower_bound, upper_bound, realization, expected):
-    assert calculate_breach_status(lower_bound, upper_bound, realization) == expected
-
-
-@pytest.mark.parametrize(
-    "lower_bound,upper_bound,realization,alpha,expected_width",
-    [
-        (0.0, 1.0, 0.5, 0.1, 1.0),  # normal interval
-        (1.0, 0.0, 0.5, 0.1, 0.0),  # upper < lower, width forced to zero
-        (2.0, 2.0, 2.0, 0.1, 0.0),  # zero width
-    ],
-)
-def test_calculate_winkler_components_width(
-    lower_bound, upper_bound, realization, alpha, expected_width
-):
-    winkler_score, width, miscoverage_penalty = calculate_winkler_components(
-        lower_bound, upper_bound, realization, alpha
-    )
-    assert width == expected_width
-
-
-@pytest.mark.parametrize(
-    "lower_bound,upper_bound,realization,alpha,expected_penalty",
-    [
-        (0.0, 1.0, -1.0, 0.1, 20.0),  # below lower
-        (0.0, 1.0, 2.0, 0.1, 20.0),  # above upper
-        (0.0, 1.0, 0.5, 0.1, 0.0),  # inside interval
-    ],
-)
-def test_calculate_winkler_components_penalty(
-    lower_bound, upper_bound, realization, alpha, expected_penalty
-):
-    _, _, miscoverage_penalty = calculate_winkler_components(
-        lower_bound, upper_bound, realization, alpha
-    )
-    assert miscoverage_penalty == expected_penalty
 
 
 @pytest.mark.slow
@@ -177,12 +126,6 @@ def test_confopt_tune_reproducibility(
             result2.iloc[i]["performance"]
         )
         assert result1.iloc[i]["configurations"] == result2.iloc[i]["configurations"]
-        breach_status_1 = result1.iloc[i]["breach_status"]
-        breach_status_2 = result2.iloc[i]["breach_status"]
-        # Handle cases where both breach statuses are NaN, as np.nan == np.nan is False
-        assert (pd.isna(breach_status_1) and pd.isna(breach_status_2)) or (
-            breach_status_1 == breach_status_2
-        )
 
 
 @pytest.mark.slow
@@ -216,33 +159,6 @@ def test_skopt_tune_reproducibility(
                 == result2.iloc[i]["configurations"][key]
             )
 
-
-@pytest.mark.slow
-def test_confopt_generates_breach_intervals(
-    small_param_space, performance_generator, warm_start_configs
-):
-    sampler = QuantileConformalSearcher(
-        quantile_estimator_architecture="qknn",
-        sampler=LowerBoundSampler(interval_width=0.9),
-    )
-
-    result = confopt_tune(
-        raw_params=small_param_space,
-        performance_generator=performance_generator,
-        tuner_model=ConfOptModel(backend="confopt", searcher=sampler),
-        warm_start_configs=warm_start_configs,
-        random_state=RANDOM_STATE,
-        n_trials=100,
-    )
-
-    assert "breach_status" in result.columns
-    # breach_status is int or None, not bool
-    assert (
-        result["breach_status"].dtype in [int, float]
-        or pd.isna(result["breach_status"]).any()
-    )
-    non_na_breach = result["breach_status"].dropna()
-    assert len(non_na_breach) > 0
 
 
 def _verify_tune_core_functionality(result_df, n_trials, warm_start_configs):

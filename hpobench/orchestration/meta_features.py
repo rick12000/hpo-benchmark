@@ -325,7 +325,8 @@ def calculate_surrogate_metafeatures(
     Preprocesses configs (OHE + standardisation), then computes:
     hyperparameter type counts, performance distribution statistics,
     mutual information with target, pairwise feature MI, conditional skewness,
-    heteroscedasticity, and landscape separability.
+    heteroscedasticity, landscape separability, and dataset dimensions
+    (total rows and columns).
 
     Args:
         configs: Hyperparameter configuration dicts, one per trial.
@@ -368,6 +369,8 @@ def calculate_surrogate_metafeatures(
         'n_float_hyperparameters': type_counts['float'],
         'n_binary_categorical_hyperparameters': type_counts['binary_categorical'],
         'n_multicategory_hyperparameters': type_counts['multicategory'],
+        schema.total_rows: float(X_preprocessed.shape[0]),
+        schema.total_columns: float(X_preprocessed.shape[1]),
         schema.performance_mean: float(np.mean(performances)),
         schema.performance_std: float(np.std(performances)),
         schema.performance_min: float(np.min(performances)),

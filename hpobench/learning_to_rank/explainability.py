@@ -11,6 +11,7 @@ from hpobench.config.types import (
     PartialDependenceResults,
     DownsamplingResults,
 )
+from sharp import ShaRP
 
 logger = logging.getLogger(__name__)
 
@@ -33,10 +34,6 @@ def compute_shap_values(
     Raises:
         ImportError: If ``xai-sharp`` is not installed.
     """
-    try:
-        from sharp import ShaRP
-    except ImportError:
-        raise ImportError("ShaRP required: pip install xai-sharp")
 
     X = data[feature_cols].values
 

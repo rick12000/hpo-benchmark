@@ -466,6 +466,9 @@ def run_main_benchmark(
 def run_learning_to_rank_analysis(
     raw_benchmark_data: pd.DataFrame,
     schema: BenchmarkDataSchema,
+    metafeatures_schema: SurrogateMetafeaturesSchema,
+    synthetic_benchmark_id: str,
+    ltr_config: LTRConfig,
     downsampling_sample_sizes: list[int],
     tuner_encoding_method: TunerEncoding = "ordinal",
     compute_pdp: bool = True,
@@ -483,6 +486,9 @@ def run_learning_to_rank_analysis(
     Args:
         raw_benchmark_data: Benchmark trial results produced by ``run_main_benchmark``.
         schema: Column schema describing the benchmark data layout.
+        metafeatures_schema: Schema for surrogate metafeatures.
+        synthetic_benchmark_id: Identifier for synthetic benchmark data.
+        ltr_config: Configuration for LTR training and evaluation.
         downsampling_sample_sizes: Training group counts at which to evaluate robustness.
         tuner_encoding_method: Algorithm identity encoding — ``"ordinal"`` or ``"one_hot"``.
         compute_pdp: Whether to compute rank-based partial dependence plots.
@@ -491,13 +497,13 @@ def run_learning_to_rank_analysis(
         output_dir: Root directory for saving analysis artefacts.
 
     Returns:
-        Dictionary mapping analysis config name to its fitted ``LTRAnalysis`` object.
+        Dictionary mapping analysis identifier to its fitted ``LTRAnalysis`` object.
     """
     analysis_configs = [
-        AnalysisConfig(name="all_random",                    partition="all",       strategy="random"),
-        AnalysisConfig(name="all_synthetic_train_real_test", partition="all",       strategy="synthetic_train_real_test"),
-        AnalysisConfig(name="synthetic_random",              partition="synthetic", strategy="random"),
-        AnalysisConfig(name="real_random",                   partition="real",      strategy="random"),
+        AnalysisConfig(partition="all",       strategy="random"),
+        AnalysisConfig(partition="all",       strategy="synthetic_train_real_test"),
+        AnalysisConfig(partition="synthetic", strategy="random"),
+        AnalysisConfig(partition="real",      strategy="random"),
     ]
 
     output_dir = Path(output_dir)
@@ -508,29 +514,32 @@ def run_learning_to_rank_analysis(
     for ac in analysis_configs:
         analysis = LTRAnalysis(
             schema=schema,
+            metafeatures_schema=metafeatures_schema,
+            synthetic_benchmark_id=synthetic_benchmark_id,
+            ltr_config=ltr_config,
             partition=ac.partition,
             strategy=ac.strategy,
             tuner_encoding_method=tuner_encoding_method,
-            analysis_identifier=ac.name,
         )
 
-        analysis.fit(raw_benchmark_data)
-        analyses[ac.name] = analysis
-        analysis.evaluate()
+        analysis.fit(raw_benchmark_data, k_values=ltr_config.k_values)
+        analysis_id = analysis.analysis_identifier
+        analyses[analysis_id] = analysis
+        analysis.evaluate(k_values=ltr_config.k_values)
 
         if compute_pdp:
             analysis.compute_pdp(
-                output_dir=output_dir / ac.name,
+                output_dir=output_dir / analysis_id,
                 n_grid_points=pdp_n_grid_points,
                 show_std=pdp_show_std,
             )
 
         analysis.compute_downsampling(
             sample_sizes=downsampling_sample_sizes,
-            output_dir=output_dir / ac.name,
+            output_dir=output_dir / analysis_id,
         )
 
-        analysis.save(output_dir / ac.name)
+        analysis.save(output_dir / analysis_id)
 
     summary_df = pd.DataFrame([a.summary() for a in analyses.values()])
     summary_df.to_csv(output_dir / "summary.csv", index=False)
@@ -549,6 +558,7 @@ def run_and_analyze_main_benchmark(
             "rbv2_aknn-L",
             "rbv2_aknn-H",
             "rbv2_aknn-A",
+            "synthetic_tabular",
         ]
     ],
     tuning_configurations: list[TunerConfig],
@@ -556,15 +566,18 @@ def run_and_analyze_main_benchmark(
     schema: BenchmarkDataSchema,
     cache_path: str,
     run_start_str: str,
+    experiment_params: ExperimentParameters,
+    results_dir: Path,
+    downsampling_percentages: list[float],
     max_n_instances_per_benchmark: int = 10,
     n_repetitions: int = 10,
     datasets_per_benchmark: Optional[list[list[str]]] = None,
-) -> pd.DataFrame:
+) -> None:
     """Run the full benchmark pipeline: data generation, HPO trials, and LTR analysis.
 
     Each dataset receives exactly one optimisation trial after its warm-start
-    configurations. Downsampling sizes are spaced geometrically from 10 to the
-    total number of ranking groups and always include the full group count.
+    configurations. Downsampling study evaluates robustness across percentages of
+    the full ranking group set.
 
     Args:
         benchmarks: Benchmark names to include in the run.
@@ -573,12 +586,12 @@ def run_and_analyze_main_benchmark(
         schema: Column schema for result organisation and LTR training.
         cache_path: Root directory for all output data and analysis artefacts.
         run_start_str: Unique run identifier used to namespace output paths.
+        experiment_params: Experiment parameters including LTR settings.
+        results_dir: Output directory for LTR analysis results.
+        downsampling_percentages: Percentages of ranking groups for downsampling study (e.g., [0.1, 0.5, 1.0]).
         max_n_instances_per_benchmark: Maximum dataset instances per benchmark.
         n_repetitions: Independent repetitions per tuner-dataset combination.
         datasets_per_benchmark: Optional per-benchmark dataset identifier lists.
-
-    Returns:
-        DataFrame of all trial results with performance metrics and full metadata.
     """
     experiment_configs = load_experiment_configs(
         benchmarks=benchmarks,
@@ -595,17 +608,23 @@ def run_and_analyze_main_benchmark(
         run_start_str=run_start_str,
     )
 
+    n_groups = raw_benchmark_data.groupby(schema.rank_group_cols).ngroups
+    downsampling_sample_sizes = sorted(set(
+        int(n_groups * pct) for pct in downsampling_percentages if 0 < pct <= 1.0
+    ) | {n_groups})
+
     logger.info("Running learning-to-rank analysis on benchmark results")
-    experiment_params = ExperimentParameters()
-    results_dir = Path(cache_path) / experiment_params.ltr_output_dir / run_start_str
 
-    n_groups = raw_benchmark_data[schema.ranking_group_col].nunique()
-    raw = np.geomspace(10, n_groups, num=experiment_params.n_downsampling_sizes).astype(int)
-    downsampling_sample_sizes = sorted(set(raw.tolist()) | {n_groups})
-
+    ltr_config = LTRConfig()
+    metafeatures_schema = SurrogateMetafeaturesSchema()
+    synthetic_params = SyntheticGenerationParameters()
+    
     run_learning_to_rank_analysis(
         raw_benchmark_data=raw_benchmark_data,
         schema=schema,
+        metafeatures_schema=metafeatures_schema,
+        synthetic_benchmark_id=synthetic_params.benchmark_identifier,
+        ltr_config=ltr_config,
         downsampling_sample_sizes=downsampling_sample_sizes,
         tuner_encoding_method=experiment_params.tuner_encoding_method,
         compute_pdp=experiment_params.compute_pdp,
@@ -613,5 +632,3 @@ def run_and_analyze_main_benchmark(
         pdp_show_std=experiment_params.pdp_show_std,
         output_dir=results_dir,
     )
-
-    return raw_benchmark_data

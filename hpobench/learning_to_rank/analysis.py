@@ -5,9 +5,10 @@ import pandas as pd
 from pathlib import Path
 
 from hpobench.config.schema import BenchmarkDataSchema, SurrogateMetafeaturesSchema
-from hpobench.config.constants import SyntheticGenerationParameters
 from hpobench.config.types import (
     LTRConfig,
+    LTRTuningConfig,
+    LTRHyperparameters,
     Partition,
     SplitStrategy,
     TunerEncoding,
@@ -34,7 +35,9 @@ def _evaluate_rankings(
     test_data: pd.DataFrame,
     predicted_scores: np.ndarray,
     k_values: tuple[int, ...],
-    schema: BenchmarkDataSchema,
+    ranking_group_col: str,
+    label_col: str,
+    tuner_col: str,
     ascending_scores: bool = False,
 ) -> dict[str, float]:
     """Compute precision@k and NDCG@k across all ranking groups."""
@@ -46,25 +49,27 @@ def _evaluate_rankings(
     precision_lists = {k: [] for k in k_values}
     ndcg_lists = {k: [] for k in k_values}
 
-    for _, group in test_data.groupby(schema.ranking_group_col):
-        true_sorted = group.sort_values(schema.label_col, ascending=False)
+    for _, group in test_data.groupby(ranking_group_col):
+        true_sorted = group.sort_values(label_col, ascending=False)
         pred_sorted = group.sort_values('_pred_score', ascending=ascending_scores)
 
-        true_ranking = true_sorted[schema.tuner_col].tolist()
-        pred_ranking = pred_sorted[schema.tuner_col].tolist()
+        true_ranking = true_sorted[tuner_col].tolist()
+        pred_ranking = pred_sorted[tuner_col].tolist()
 
         true_relevance = np.arange(len(true_sorted), 0, -1)
-        relevance_map = dict(zip(true_sorted[schema.tuner_col], true_relevance))
+        relevance_map = dict(zip(true_sorted[tuner_col], true_relevance))
         pred_relevance = np.array([relevance_map[t] for t in pred_ranking])
 
         for k in k_values:
             precision_lists[k].append(_precision_at_k(pred_ranking, true_ranking, k))
             ndcg_lists[k].append(ndcg_score([true_relevance], [pred_relevance], k=k))
 
-    return {
-        **{f'precision@{k}': float(np.mean(precision_lists[k])) for k in k_values},
-        **{f'ndcg@{k}': float(np.mean(ndcg_lists[k])) for k in k_values},
-    }
+    results = {}
+    for k in k_values:
+        results[f'precision@{k}'] = float(np.mean(precision_lists[k]))
+        results[f'ndcg@{k}'] = float(np.mean(ndcg_lists[k]))
+    
+    return results
 
 
 
@@ -75,17 +80,21 @@ class LTRAnalysis:
     def __init__(
         self,
         schema: BenchmarkDataSchema,
+        metafeatures_schema: SurrogateMetafeaturesSchema,
+        synthetic_benchmark_id: str,
+        ltr_config: LTRConfig,
         partition: Partition = 'all',
         strategy: SplitStrategy = 'random',
         tuner_encoding_method: TunerEncoding = 'ordinal',
-        analysis_identifier: str = '',
     ) -> None:
-        self.config = LTRConfig()
+        self.config = ltr_config
         self.schema = schema
+        self.metafeatures_schema = metafeatures_schema
+        self.synthetic_benchmark_id = synthetic_benchmark_id
         self.partition = partition
         self.strategy = strategy
         self.tuner_encoding_method = tuner_encoding_method
-        self.analysis_identifier = analysis_identifier
+        self.analysis_identifier = f"{partition}_{strategy}_{tuner_encoding_method}"
 
         self.train_data: pd.DataFrame | None = None
         self.val_data: pd.DataFrame | None = None
@@ -95,12 +104,10 @@ class LTRAnalysis:
         self.naive_ranker: NaiveRanker | None = None
         self.ltr_metrics: dict[str, float] = {}
         self.naive_metrics: dict[str, float] = {}
+        self.best_hyperparameters: LTRHyperparameters | None = None
 
-    def fit(self, raw_data: pd.DataFrame) -> "LTRAnalysis":
-        synthetic_params = SyntheticGenerationParameters()
-        metafeatures_schema = SurrogateMetafeaturesSchema()
-
-        # Validate strategy eligibility
+    def _validate_strategy_eligibility(self, raw_data: pd.DataFrame) -> None:
+        """Validate that the strategy is compatible with the data and partition."""
         if self.strategy == 'synthetic_train_real_test':
             if self.partition != 'all':
                 raise ValueError(
@@ -108,8 +115,8 @@ class LTRAnalysis:
                     f"but got partition='{self.partition}' for config '{self.analysis_identifier}'"
                 )
             
-            has_synthetic = (raw_data['benchmark_identifier'] == synthetic_params.benchmark_identifier).any()
-            has_real = (raw_data['benchmark_identifier'] != synthetic_params.benchmark_identifier).any()
+            has_synthetic = (raw_data[self.schema.benchmark_identifier_col] == self.synthetic_benchmark_id).any()
+            has_real = (raw_data[self.schema.benchmark_identifier_col] != self.synthetic_benchmark_id).any()
             
             if not has_synthetic:
                 raise ValueError(
@@ -122,51 +129,236 @@ class LTRAnalysis:
                     f"but no real rows found in config '{self.analysis_identifier}'"
                 )
 
+    def _generate_hyperparameter_candidates(
+        self,
+        n_candidates: int,
+        tuning_config: LTRTuningConfig,
+    ) -> list[LTRHyperparameters]:
+        """Generate random hyperparameter configurations from the search space.
+        
+        Args:
+            n_candidates: Number of hyperparameter configurations to generate.
+            tuning_config: Tuning configuration containing search space.
+            
+        Returns:
+            List of hyperparameter configurations.
+        """
+        rng = np.random.RandomState(tuning_config.tuning_random_state)
+        search_space = tuning_config.search_space
+        
+        candidates = []
+        for _ in range(n_candidates):
+            hyperparams = LTRHyperparameters(
+                num_boost_rounds=int(rng.choice(search_space.num_boost_rounds)),
+                learning_rate=float(rng.choice(search_space.learning_rate)),
+                max_depth=int(rng.choice(search_space.max_depth)),
+                subsample=float(rng.choice(search_space.subsample)),
+                colsample_bytree=float(rng.choice(search_space.colsample_bytree)),
+                objective=tuning_config.default_hyperparameters.objective,
+                verbosity=tuning_config.default_hyperparameters.verbosity,
+                seed=tuning_config.default_hyperparameters.seed,
+            )
+            candidates.append(hyperparams)
+        
+        return candidates
+
+    def _train_ltr_model(
+        self,
+        train_data: pd.DataFrame,
+        hyperparameters: LTRHyperparameters,
+    ) -> LTRModel:
+        """Train an LTR model with given hyperparameters.
+        
+        Args:
+            train_data: Training data.
+            hyperparameters: Model hyperparameters.
+            
+        Returns:
+            Trained LTR model.
+        """
+        model = LTRModel(
+            num_boost_rounds=hyperparameters.num_boost_rounds,
+            objective=hyperparameters.objective,
+            learning_rate=hyperparameters.learning_rate,
+            max_depth=hyperparameters.max_depth,
+            subsample=hyperparameters.subsample,
+            colsample_bytree=hyperparameters.colsample_bytree,
+            verbosity=hyperparameters.verbosity,
+            seed=hyperparameters.seed,
+        )
+        model.fit(
+            train_data,
+            group_col=self.schema.ranking_group_col,
+            label_col=self.schema.label_col,
+            feature_cols=self.feature_cols,
+        )
+        return model
+
+    def _evaluate_single_metric(
+        self,
+        model: LTRModel,
+        val_data: pd.DataFrame,
+        metric_name: str,
+        k_values: tuple[int, ...],
+    ) -> float:
+        """Evaluate a single metric for hyperparameter tuning.
+        
+        Args:
+            model: Trained LTR model.
+            val_data: Validation data.
+            metric_name: Name of the metric (e.g., 'precision@1').
+            k_values: K values for evaluation.
+            
+        Returns:
+            Metric value.
+        """
+        metrics = _evaluate_rankings(
+            val_data,
+            model.predict(val_data),
+            k_values,
+            self.schema.ranking_group_col,
+            self.schema.label_col,
+            self.schema.tuner_col,
+            ascending_scores=False,
+        )
+        return metrics[metric_name]
+
+    def _tune_hyperparameters(
+        self,
+        tuning_config: LTRTuningConfig,
+        k_values: tuple[int, ...],
+    ) -> LTRHyperparameters:
+        """Tune LTR model hyperparameters using random search.
+        
+        Args:
+            tuning_config: Configuration for hyperparameter tuning.
+            k_values: K values for evaluation metrics.
+            
+        Returns:
+            Best hyperparameters found.
+        """
+        if self.train_data is None or self.val_data is None:
+            raise RuntimeError("train_data and val_data must be set before tuning")
+
+        logger.info(
+            f"[{self.analysis_identifier}] Starting hyperparameter tuning with "
+            f"{tuning_config.n_tuning_trials} trials, optimizing {tuning_config.tuning_metric}"
+        )
+
+        candidates = self._generate_hyperparameter_candidates(
+            n_candidates=tuning_config.n_tuning_trials,
+            tuning_config=tuning_config,
+        )
+
+        best_score = -np.inf
+        best_hyperparams = tuning_config.default_hyperparameters
+
+        for idx, hyperparams in enumerate(candidates, 1):
+            model = self._train_ltr_model(self.train_data, hyperparams)
+            score = self._evaluate_single_metric(
+                model,
+                self.val_data,
+                tuning_config.tuning_metric,
+                k_values,
+            )
+            
+            logger.info(
+                f"[{self.analysis_identifier}] Trial {idx}/{tuning_config.n_tuning_trials}: "
+                f"{tuning_config.tuning_metric}={score:.4f}"
+            )
+            
+            if score > best_score:
+                best_score = score
+                best_hyperparams = hyperparams
+
+        logger.info(
+            f"[{self.analysis_identifier}] Best {tuning_config.tuning_metric}: {best_score:.4f}"
+        )
+
+        return best_hyperparams
+
+    def fit(self, raw_data: pd.DataFrame, k_values: tuple[int, ...]) -> None:
+        """Fit LTR and naive models with optional hyperparameter tuning.
+        
+        Args:
+            raw_data: Raw benchmark data.
+            k_values: K values for evaluation metrics.
+        """
+        self._validate_strategy_eligibility(raw_data)
+
         data, feature_cols = prepare_data(
             raw_data=raw_data,
             partition=self.partition,
             schema=self.schema,
-            metafeatures_schema=metafeatures_schema,
-            synthetic_benchmark_id=synthetic_params.benchmark_identifier,
+            metafeatures_schema=self.metafeatures_schema,
+            synthetic_benchmark_id=self.synthetic_benchmark_id,
             tuner_encoding_method=self.tuner_encoding_method,
         )
+        self.feature_cols = feature_cols
+        
         self.train_data, self.val_data, self.test_data = split_data(
             data=data,
             strategy=self.strategy,
-            config=self.config,
-            synthetic_benchmark_id=synthetic_params.benchmark_identifier,
+            train_size=self.config.train_size,
+            val_size=self.config.val_size,
+            random_state=self.config.random_state,
+            synthetic_benchmark_id=self.synthetic_benchmark_id,
+            schema=self.schema,
         )
-        self.feature_cols = feature_cols
 
-        self.ltr_model = LTRModel(self.config.xgb_params, self.config.num_boost_rounds).fit(
-            self.train_data, self.schema, self.feature_cols,
-        )
-        self.naive_ranker = NaiveRanker().fit(
-            self.train_data, self.schema, self.feature_cols,
+        tuning_config = self.config.tuning
+        
+        if tuning_config.n_tuning_trials > 1:
+            self.best_hyperparameters = self._tune_hyperparameters(tuning_config, k_values)
+            train_val_data = pd.concat([self.train_data, self.val_data], ignore_index=True)
+            self.ltr_model = self._train_ltr_model(train_val_data, self.best_hyperparameters)
+        else:
+            self.best_hyperparameters = tuning_config.default_hyperparameters
+            train_val_data = pd.concat([self.train_data, self.val_data], ignore_index=True)
+            self.ltr_model = self._train_ltr_model(train_val_data, self.best_hyperparameters)
+
+        self.naive_ranker = NaiveRanker()
+        train_val_data = pd.concat([self.train_data, self.val_data], ignore_index=True)
+        self.naive_ranker.fit(
+            train_val_data,
+            tuner_col=self.schema.tuner_col,
+            label_col=self.schema.label_col,
         )
 
         logger.info(
             f"[{self.analysis_identifier}] fit – train={len(self.train_data)}, "
             f"val={len(self.val_data)}, test={len(self.test_data)}"
         )
-        return self
 
-    def evaluate(self) -> "LTRAnalysis":
+    def evaluate(self, k_values: tuple[int, ...]) -> None:
+        """Evaluate LTR and naive models on test data.
+        
+        Args:
+            k_values: K values for evaluation metrics.
+        """
         if self.ltr_model is None or self.naive_ranker is None or self.test_data is None:
             raise RuntimeError(f"LTRAnalysis '{self.analysis_identifier}': call fit() before evaluate().")
 
-        self.ltr_metrics = _evaluate_rankings(
-            self.test_data, self.ltr_model.predict(self.test_data),
-            self.config.k_values, self.schema, ascending_scores=False,
-        )
-        self.naive_metrics = _evaluate_rankings(
-            self.test_data, self.naive_ranker.predict(self.test_data),
-            self.config.k_values, self.schema, ascending_scores=True,
-        )
-        p1 = self.ltr_metrics['precision@1']
-        delta = p1 - self.naive_metrics['precision@1']
-        logger.info(f"[{self.analysis_identifier}] evaluate – P@1={p1:.3f} ({delta:+.3f} vs naive)")
-        return self
+        model_configs = {
+            'ltr': {'model': self.ltr_model, 'ascending_scores': False},
+            'naive': {'model': self.naive_ranker, 'ascending_scores': True},
+        }
+        
+        for model_type, config in model_configs.items():
+            metrics = _evaluate_rankings(
+                self.test_data,
+                config['model'].predict(self.test_data),
+                k_values,
+                self.schema.ranking_group_col,
+                self.schema.label_col,
+                self.schema.tuner_col,
+                ascending_scores=config['ascending_scores'],
+            )
+            if model_type == 'ltr':
+                self.ltr_metrics = metrics
+            elif model_type == 'naive':
+                self.naive_metrics = metrics
+
 
     def compute_pdp(
         self,
@@ -213,8 +405,20 @@ class LTRAnalysis:
         sample_sizes: list[int],
         output_dir: Path | None = None,
     ) -> DownsamplingResults:
+        """Compute downsampling curve using best hyperparameters.
+        
+        Args:
+            sample_sizes: List of sample sizes to evaluate.
+            output_dir: Optional output directory for saving results.
+            
+        Returns:
+            Downsampling results.
+        """
         if self.train_data is None or self.val_data is None or self.test_data is None or self.ltr_model is None:
             raise RuntimeError(f"LTRAnalysis '{self.analysis_identifier}': call fit() before compute_downsampling().")
+
+        if self.best_hyperparameters is None:
+            raise RuntimeError(f"LTRAnalysis '{self.analysis_identifier}': best_hyperparameters not set.")
 
         train_val = pd.concat([self.train_data, self.val_data], ignore_index=True)
         n_total = train_val[self.schema.ranking_group_col].nunique()
@@ -236,12 +440,16 @@ class LTRAnalysis:
             val_groups = rng.permutation(groups)[n_groups - n_val_groups:]
             sub_train = subset[~subset[self.schema.ranking_group_col].isin(val_groups)].copy()
 
-            model = LTRModel(self.config.xgb_params, self.config.num_boost_rounds).fit(
-                sub_train, self.schema, self.feature_cols,
-            )
+            model = self._train_ltr_model(sub_train, self.best_hyperparameters)
+            
             metrics = _evaluate_rankings(
-                self.test_data, model.predict(self.test_data),
-                self.config.k_values, self.schema, ascending_scores=False,
+                self.test_data,
+                model.predict(self.test_data),
+                self.config.k_values,
+                self.schema.ranking_group_col,
+                self.schema.label_col,
+                self.schema.tuner_col,
+                ascending_scores=False,
             )
             rows.append({'sample_sizes': n_groups, 'n_train_groups': n_groups - n_val_groups,
                          'n_val_groups': n_val_groups, **metrics})
@@ -277,7 +485,8 @@ class LTRAnalysis:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         self.test_data.to_csv(output_dir / 'test_data.csv', index=False)
-        payload: dict = {
+        
+        payload = {
             'n_train': len(self.train_data) if self.train_data is not None else 0,
             'n_val': len(self.val_data) if self.val_data is not None else 0,
             'n_test': len(self.test_data),
@@ -285,6 +494,7 @@ class LTRAnalysis:
         if self.ltr_metrics:
             payload['ltr_metrics'] = self.ltr_metrics
             payload['naive_metrics'] = self.naive_metrics
+        
         with open(output_dir / 'metrics.json', 'w') as fh:
             json.dump(payload, fh, indent=2)
 

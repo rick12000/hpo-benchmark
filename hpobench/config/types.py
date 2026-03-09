@@ -10,7 +10,7 @@ except ImportError:
     raise ImportError(
         "confopt is a core dependency of this repository, but it is not automatically installed via pyproject.toml, please refer to the README.md for instructions on how to install this separately"
     )
-from hpobench.generation.generate import ObjectiveMetricGenerator
+from hpobench.generation.base import ObjectiveMetricGenerator
 
 
 class FloatRange(BaseModel):
@@ -170,6 +170,45 @@ TunerEncoding = Literal['ordinal', 'one_hot']
 WarmStartStrategy = Literal['random', 'gp_thompson_sampling', 'gp_expected_improvement']
 
 
+class LTRHyperparameterSearchSpace(BaseModel):
+    """Search space for LTR model hyperparameter tuning."""
+
+    model_config = ConfigDict()
+
+    num_boost_rounds: list[int] = [100, 300, 500, 700]
+    learning_rate: list[float] = [0.01, 0.05, 0.1, 0.2]
+    max_depth: list[int] = [3, 4, 5, 6, 7, 8]
+    subsample: list[float] = [0.6, 0.7, 0.8, 0.9, 1.0]
+    colsample_bytree: list[float] = [0.6, 0.7, 0.8, 0.9, 1.0]
+
+
+class LTRHyperparameters(BaseModel):
+    """Hyperparameters for a single LTR model configuration."""
+
+    model_config = ConfigDict()
+
+    num_boost_rounds: int = 500
+    learning_rate: float = 0.1
+    max_depth: int = 6
+    subsample: float = 0.8
+    colsample_bytree: float = 0.8
+    objective: str = "rank:ndcg"
+    verbosity: int = 0
+    seed: int = 42
+
+
+class LTRTuningConfig(BaseModel):
+    """Configuration for LTR hyperparameter tuning."""
+
+    model_config = ConfigDict()
+
+    n_tuning_trials: int = 1
+    tuning_metric: str = "precision@1"
+    search_space: LTRHyperparameterSearchSpace = LTRHyperparameterSearchSpace()
+    default_hyperparameters: LTRHyperparameters = LTRHyperparameters()
+    tuning_random_state: int = 42
+
+
 class LTRConfig(BaseModel):
     """Configuration for learning-to-rank experiments."""
 
@@ -179,22 +218,12 @@ class LTRConfig(BaseModel):
     val_size: float = 0.15
     random_state: int = 42
     k_values: tuple[int, ...] = (1, 3)
-    num_boost_rounds: int = 500
-    xgb_params: dict = {
-        "objective": "rank:ndcg",
-        "learning_rate": 0.1,
-        "max_depth": 6,
-        "subsample": 0.8,
-        "colsample_bytree": 0.8,
-        "verbosity": 0,
-        "seed": 42,
-    }
+    tuning: LTRTuningConfig = LTRTuningConfig()
 
 
 class AnalysisConfig(BaseModel):
     """Declarative specification for one LTR analysis run."""
 
-    name: str
     partition: Partition
     strategy: SplitStrategy
 
