@@ -38,28 +38,28 @@ def _add_engineered_columns(
     data: pd.DataFrame,
     rank_group_cols: list[str],
     split_group_cols: list[str],
-    ranking_group_col: str,
-    split_group_col: str,
+    ranking_group_id_col: str,
+    split_group_id_col: str,
 ) -> list[str]:
     """Create concatenated identifier columns for ranking and data splitting.
     
     Creates two engineered columns by concatenating source columns:
-    - ranking_group_col: All rank_group_cols (includes repetition)
-    - split_group_col: Only split_group_cols (excludes repetition)
+    - ranking_group_id_col: All rank_group_cols concatenated
+    - split_group_id_col: All split_group_cols concatenated
     
     Args:
         data: Benchmark data (modified in place).
-        rank_group_cols: Columns for ranking groups (includes rep).
-        split_group_cols: Columns for split groups (excludes rep).
-        ranking_group_col: Name for ranking group identifier column.
-        split_group_col: Name for split group identifier column.
+        rank_group_cols: Columns for ranking groups.
+        split_group_cols: Columns for split groups.
+        ranking_group_id_col: Name for ranking group identifier column.
+        split_group_id_col: Name for split group identifier column.
     
     Returns:
         List of newly created column names.
     """
-    data[ranking_group_col] = data[rank_group_cols].astype(str).agg('_'.join, axis=1)
-    data[split_group_col] = data[split_group_cols].astype(str).agg('_'.join, axis=1)
-    return [ranking_group_col, split_group_col]
+    data[ranking_group_id_col] = data[rank_group_cols].astype(str).agg('_'.join, axis=1)
+    data[split_group_id_col] = data[split_group_cols].astype(str).agg('_'.join, axis=1)
+    return [ranking_group_id_col, split_group_id_col]
 
 
 def _encode_tuner(
@@ -141,8 +141,8 @@ def prepare_data(
         data=data,
         rank_group_cols=schema.rank_group_cols,
         split_group_cols=schema.split_group_cols,
-        ranking_group_col=schema.ranking_group_col,
-        split_group_col=schema.split_group_col,
+        ranking_group_id_col=schema.ranking_group_id_col,
+        split_group_id_col=schema.split_group_id_col,
     )
     
     encoded_cols = _encode_tuner(
@@ -171,7 +171,7 @@ def split_data(
     """Split prepared data into train/validation/test sets with group integrity.
     
     Maintains group integrity during splitting to prevent data leakage. Groups are
-    defined by split_group_col (dataset × warm_start_strategy × n_warm_starts).
+    defined by split_group_id_col (dataset × warm_start_strategy × n_warm_starts).
     
     Args:
         data: Output from prepare_data().
@@ -196,7 +196,7 @@ def split_data(
         if synthetic.empty:
             raise ValueError("No synthetic data available for training")
         splitter = GroupShuffleSplit(n_splits=1, test_size=val_prop, random_state=random_state)
-        train_idx, val_idx = next(splitter.split(synthetic, groups=synthetic[schema.split_group_col]))
+        train_idx, val_idx = next(splitter.split(synthetic, groups=synthetic[schema.split_group_id_col]))
         return synthetic.iloc[train_idx], synthetic.iloc[val_idx], real
 
     elif strategy == 'random':
@@ -205,11 +205,11 @@ def split_data(
             train_size=train_size + val_size,
             random_state=random_state,
         )
-        train_val_idx, test_idx = next(outer.split(data, groups=data[schema.split_group_col]))
+        train_val_idx, test_idx = next(outer.split(data, groups=data[schema.split_group_id_col]))
         train_val, test_data = data.iloc[train_val_idx], data.iloc[test_idx]
 
         inner = GroupShuffleSplit(n_splits=1, test_size=val_prop, random_state=random_state)
-        train_idx, val_idx = next(inner.split(train_val, groups=train_val[schema.split_group_col]))
+        train_idx, val_idx = next(inner.split(train_val, groups=train_val[schema.split_group_id_col]))
         return train_val.iloc[train_idx], train_val.iloc[val_idx], test_data
     
     else:

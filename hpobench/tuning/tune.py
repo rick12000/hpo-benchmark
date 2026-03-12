@@ -74,7 +74,8 @@ from hpobench.tuning.gp_opt.acquisition_functions import (
     OptimisticThompsonSampling,
 )
 
-N_CANDIDATES = 2000
+# Maximum number of candidate configurations to evaluate during acquisition function optimization
+MAX_ACQUISITION_CANDIDATES = 2000
 
 
 def create_runtime_tracker() -> list[datetime]:
@@ -290,7 +291,7 @@ def optuna_tune(
 
     if searcher == "TPE":
         initialized_sampler = TPESampler(
-            seed=random_state, n_startup_trials=0, n_ei_candidates=N_CANDIDATES
+            seed=random_state, n_startup_trials=0, n_ei_candidates=MAX_ACQUISITION_CANDIDATES
         )
     elif searcher == "random":
         initialized_sampler = RandomSampler(seed=random_state)
@@ -307,7 +308,7 @@ def optuna_tune(
 
         initialized_sampler = StrippedGPSampler(
             acquisition_function=acq_func,
-            n_candidates=N_CANDIDATES,
+            n_candidates=MAX_ACQUISITION_CANDIDATES,
             seed=random_state,
             n_startup_trials=0,
             maximize=False,
@@ -476,17 +477,17 @@ def confopt_tune(
     """
     runtimes = create_runtime_tracker()
 
-    objective_fn = confopt_objective_function(performance_generator, runtimes)
+    objective_function = confopt_objective_function(performance_generator, runtimes)
     confopt_params = setup_confopt_params(raw_params)
     
     search_space_size = _calculate_search_space_size(raw_params)
-    n_candidates = min(N_CANDIDATES, search_space_size) if search_space_size is not None else N_CANDIDATES
+    num_acquisition_candidates = min(MAX_ACQUISITION_CANDIDATES, search_space_size) if search_space_size is not None else MAX_ACQUISITION_CANDIDATES
     
     conformal_tuner = ConformalTuner(
-        objective_function=objective_fn,
+        objective_function=objective_function,
         search_space=confopt_params,
         minimize=True,
-        n_candidates=n_candidates,
+        n_candidates=num_acquisition_candidates,
         warm_starts=warm_start_configs,
         dynamic_sampling=True,
     )
@@ -624,7 +625,7 @@ def skopt_tune(
     n_calls = (n_trials - len(warm_start_configs)) if warm_start_configs else n_trials
 
     runtimes = create_runtime_tracker()
-    objective_fn = partial(
+    objective_function = partial(
         skopt_objective,
         param_names=param_names,
         performance_generator=performance_generator,
@@ -636,7 +637,7 @@ def skopt_tune(
     # NOTE: n_initial_points is set to 0 because this benchmark repository uses warm-starting:
     if searcher == "GP":
         result = gp_minimize(
-            objective_fn,
+            objective_function,
             skopt_params,
             n_initial_points=0,
             n_calls=n_calls,
@@ -645,11 +646,11 @@ def skopt_tune(
             random_state=random_state,
             acq_func="EI",
             acq_optimizer="sampling",
-            n_points=N_CANDIDATES,
+            n_points=MAX_ACQUISITION_CANDIDATES,
         )
     elif searcher == "RF":
         result = forest_minimize(
-            objective_fn,
+            objective_function,
             skopt_params,
             n_initial_points=0,
             n_calls=n_calls,
@@ -657,11 +658,11 @@ def skopt_tune(
             y0=y0,
             random_state=random_state,
             acq_func="EI",
-            n_points=N_CANDIDATES,
+            n_points=MAX_ACQUISITION_CANDIDATES,
         )
     elif searcher == "GBRT":
         result = gbrt_minimize(
-            objective_fn,
+            objective_function,
             skopt_params,
             n_initial_points=0,
             n_calls=n_calls,
@@ -669,7 +670,7 @@ def skopt_tune(
             y0=y0,
             random_state=random_state,
             acq_func="EI",
-            n_points=N_CANDIDATES,
+            n_points=MAX_ACQUISITION_CANDIDATES,
         )
     else:
         raise ValueError(f"Unknown scikit-opt method: {searcher}")
@@ -1007,13 +1008,13 @@ def gp_opt_tune(
     # Create runtime tracker
     runtimes = create_runtime_tracker()
 
-    objective_fn = gp_opt_objective_function(performance_generator, runtimes)
+    objective_function = gp_opt_objective_function(performance_generator, runtimes)
     gp_opt_params = setup_gp_opt_params(raw_params)
     searcher = GPTuner(
-        objective_function=objective_fn,
+        objective_function=objective_function,
         search_space=gp_opt_params,
         minimize=True,
-        n_candidates=N_CANDIDATES,
+        n_candidates=MAX_ACQUISITION_CANDIDATES,
         warm_starts=warm_start_configs,
         dynamic_sampling=True,
     )

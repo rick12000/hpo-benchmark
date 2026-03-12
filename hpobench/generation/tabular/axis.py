@@ -73,15 +73,15 @@ class CategoricalAxis:
     categories: List[str]  # ordered list of string labels
 
     @property
-    def k(self) -> int:
+    def num_categories(self) -> int:
         return len(self.categories)
 
     def to_search_space_entry(self) -> CategoricalRange:
         return CategoricalRange(choices=self.categories)
 
     def sample_uniform(self, n: int) -> np.ndarray:
-        """Return integer codes in {0, …, k-1}."""
-        return np.random.randint(0, self.k, n).astype(np.float32)
+        """Return integer codes in {0, …, num_categories-1}."""
+        return np.random.randint(0, self.num_categories, n).astype(np.float32)
 
     def to_model_space(self, x: np.ndarray) -> np.ndarray:
         return x.astype(np.float64)

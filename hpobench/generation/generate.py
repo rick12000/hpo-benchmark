@@ -48,17 +48,17 @@ class BlackBoxGenerator(ObjectiveMetricGenerator):
             Function value.
         """
         if self.generator == "rastrigin":
-            return rastrigin(x=x)
+            return rastrigin(input_vector=x)
         elif self.generator == "ackley":
-            return ackley(x=x)
+            return ackley(input_vector=x)
         elif self.generator == "griewank":
-            return griewank(x=x)
+            return griewank(input_vector=x)
         elif self.generator == "weierstrass":
-            return weierstrass(x=x)
+            return weierstrass(input_vector=x)
         elif self.generator == "shekel":
-            return shekel(x=x)
+            return shekel(input_vector=x)
         elif self.generator == "hartmann6":
-            return hartmann6(x=x)
+            return hartmann6(input_vector=x)
         else:
             raise ValueError(f"Unknown generator: {self.generator}")
 
@@ -147,17 +147,19 @@ class YahpoGenerator(ObjectiveMetricGenerator):
         # Store maximum fidelity values (passed from setup functions)
         self.fidelity_space = fidelity_space
 
-    def _get_filtered_configuration(self, configuration: dict) -> dict:
-        """Filter the configuration to include only active and fidelity parameters.
+    def _filter_and_enhance_configuration(self, configuration: dict) -> dict:
+        """Filter configuration to active parameters and add fidelity/instance parameters.
 
         Uses ConfigSpace's built-in get_active_hyperparameters method for robust
-        conditional dependency handling.
+        conditional dependency handling. Adds fidelity parameters and instance
+        parameter required for benchmark evaluation.
 
         Args:
             configuration: Dictionary mapping parameter names to their values.
 
         Returns:
-            Filtered configuration dictionary including only active and fidelity parameters.
+            Filtered configuration dictionary with only active parameters plus
+            fidelity and instance parameters.
         """
         config_dict = configuration.copy()
 
@@ -180,7 +182,7 @@ class YahpoGenerator(ObjectiveMetricGenerator):
             )
 
             # Filter configuration to only include active parameters
-            filtered_configuration = {
+            filtered_config = {
                 k: v
                 for k, v in config_dict.items()
                 if k in active_hyperparameters or k == self.instance_name
@@ -189,7 +191,7 @@ class YahpoGenerator(ObjectiveMetricGenerator):
         except Exception as e:
             raise ValueError(f"ConfigSpace evaluation failed: {e}")
 
-        return filtered_configuration
+        return filtered_config
 
     def predict(self, configuration: dict[str, Union[str, int, float, bool]]) -> float:
         """Return the negative primary metric for the given configuration.
@@ -215,19 +217,22 @@ class YahpoGenerator(ObjectiveMetricGenerator):
         """
         filtered_configs = []
         for config in configurations:
-            filtered_config = self._get_filtered_configuration(config)
+            filtered_config = self._filter_and_enhance_configuration(config)
             filtered_configs.append(filtered_config)
 
         return self.generator.objective_function(filtered_configs, seed=1234)
 
     def _extract_performance_metric(self, result: dict) -> float:
-        """Extract performance metric from evaluation result.
+        """Extract and negate performance metric from evaluation result.
+        
+        Looks for standard performance metrics (accuracy, AUC) and returns 
+        the negated value for minimization-based HPO.
 
         Args:
             result: Single evaluation result dictionary.
 
         Returns:
-            Performance value (negated for minimization).
+            Negated performance value (for minimization).
         """
         if "val_accuracy" in result:
             return -result["val_accuracy"]
@@ -299,12 +304,12 @@ class YahpoGenerator(ObjectiveMetricGenerator):
 
 
 class SyntheticGenerator(ObjectiveMetricGenerator):
-    """Generator for synthetic surrogate data.
+    """Generator for synthetic ANOVA-based performance landscape data.
     
-    The SCM-generated synthetic data represents precomputed surrogate performance landscapes
+    Provides access to precomputed synthetic surrogate performance landscapes
     (hyperparameter configurations and their performances), similar to YAHPO/lcbench.
-    The features (X) represent hyperparameter configurations, and the targets (y) represent 
-    performance values. No model type is needed since the data is already precomputed.
+    The features represent hyperparameter configurations, and the targets represent 
+    performance values. No model is needed since the data is already precomputed.
     """
     
     def __init__(
@@ -318,73 +323,77 @@ class SyntheticGenerator(ObjectiveMetricGenerator):
         self.storage_dir = Path(SyntheticGenerationParameters().storage_dir)
         self.random_state = random_state
         
-        # Surrogate data (X = configs, y = performances)
-        self.surrogate_features = None  # Hyperparameter configurations
-        self.surrogate_targets = None  # Performance values
+        # Precomputed synthetic data: hyperparameter configs and their performance values
+        self.config_features = None  # Hyperparameter configurations
+        self.performance_targets = None  # Performance values
         self.dataset_metadata = None
         self._initialized = False
     
     def initialize(self) -> None:
-        """Load SCM-generated surrogate data.
+        """Load ANOVA-based synthetic surrogate data.
         
-        The SCM generator creates synthetic data where:
-        - Features (X) = hyperparameter configurations
-        - Targets (y) = performance values
+        Loads the precomputed synthetic dataset where:
+        - config_features = hyperparameter configurations
+        - performance_targets = performance values
         """
         if not self._initialized:
             storage = DatasetStorage(str(self.storage_dir))
             dataset_id = int(self.dataset)
             
-            self.surrogate_features, self.surrogate_targets, self.dataset_metadata = (
+            self.config_features, self.performance_targets, self.dataset_metadata = (
                 storage.load_dataset(dataset_id)
             )
             
             self._initialized = True
         
     def predict(self, configuration: dict[str, Union[str, int, float, bool]]) -> float:
-        """Predict performance by looking up in surrogate data.
+        """Predict performance by nearest-neighbor lookup in synthetic data.
         
-        The surrogate data (X, y) represents (configs, performances).
-        We find the nearest configuration and return its performance.
+        Finds the closest hyperparameter configuration in the precomputed 
+        synthetic dataset and returns its performance value.
         """
         self.initialize()
         
         # Convert configuration to feature vector
         config_vec = self._config_to_vector(configuration)
         
-        # Find nearest neighbor in surrogate data
-        X = self.surrogate_features.values
-        y = self.surrogate_targets.values.ravel()
+        # Find nearest neighbor in synthetic data
+        config_matrix = self.config_features.values
+        perf_vector = self.performance_targets.values.ravel()
         
-        # Calculate distances
-        distances = np.linalg.norm(X - config_vec, axis=1)
+        # Calculate distances to all configurations
+        distances = np.linalg.norm(config_matrix - config_vec, axis=1)
         nearest_idx = np.argmin(distances)
         
-        return float(y[nearest_idx])
+        return float(perf_vector[nearest_idx])
     
     def _config_to_vector(self, configuration: dict) -> np.ndarray:
-        """Convert configuration dict to feature vector matching surrogate data format."""
-        # Get feature names from surrogate data
-        feature_names = self.surrogate_features.columns.tolist()
+        """Convert configuration dict to feature vector for synthetic data lookup.
+        
+        Converts a hyperparameter configuration dictionary into a feature vector
+        aligned with the synthetic dataset's feature columns.
+        """
+        # Get feature names from synthetic dataset
+        feature_names = self.config_features.columns.tolist()
         
         # Create vector in same order as features
-        vec = []
+        feature_vector = []
         for feature_name in feature_names:
             if feature_name in configuration:
                 val = configuration[feature_name]
                 if isinstance(val, (int, float)):
-                    vec.append(float(val))
+                    feature_vector.append(float(val))
                 else:
-                    # For categorical, try to convert or use hash
+                    # For categorical values, use hash for numeric representation
                     try:
-                        vec.append(float(val))
-                    except:
-                        vec.append(float(hash(str(val)) % 1000))
+                        feature_vector.append(float(val))
+                    except (ValueError, TypeError):
+                        feature_vector.append(float(hash(str(val)) % 1000))
             else:
-                # Feature not in config, use 0
-                vec.append(0.0)
+                # Feature not in config, use 0 as default
+                feature_vector.append(0.0)
         
-        return np.array(vec).reshape(1, -1)
+        return np.array(feature_vector).reshape(1, -1)
     
     def predict_batch(self, configurations: list[dict]) -> list[float]:
         """Batch prediction using surrogate data lookup."""

@@ -14,15 +14,13 @@ from hpobench.generation.base import ObjectiveMetricGenerator
 
 
 class FloatRange(BaseModel):
-    """Configuration for floating-point parameter ranges in hyperparameter search spaces.
+    """Floating-point hyperparameter range.
 
     Args:
-        lower: Minimum value for the parameter range.
-        upper: Maximum value for the parameter range.
-        log: Whether to use log scale for sampling. Defaults to False.
+        lower: Minimum value.
+        upper: Maximum value.
+        log: Whether to sample on a log scale.
     """
-
-    model_config = ConfigDict()
 
     lower: float
     upper: float
@@ -30,15 +28,13 @@ class FloatRange(BaseModel):
 
 
 class IntRange(BaseModel):
-    """Configuration for integer parameter ranges in hyperparameter search spaces.
+    """Integer hyperparameter range.
 
     Args:
-        lower: Minimum value for the parameter range.
-        upper: Maximum value for the parameter range.
-        log: Whether to use log scale for sampling. Defaults to False.
+        lower: Minimum value.
+        upper: Maximum value.
+        log: Whether to sample on a log scale.
     """
-
-    model_config = ConfigDict()
 
     lower: int
     upper: int
@@ -46,13 +42,11 @@ class IntRange(BaseModel):
 
 
 class CategoricalRange(BaseModel):
-    """Configuration for categorical parameter choices in hyperparameter search spaces.
+    """Categorical hyperparameter choices.
 
     Args:
-        choices: List of possible categorical values (strings, integers, or booleans).
+        choices: Possible values.
     """
-
-    model_config = ConfigDict()
 
     choices: list[Union[str, int, bool]]
 
@@ -171,9 +165,7 @@ WarmStartStrategy = Literal['random', 'gp_thompson_sampling', 'gp_expected_impro
 
 
 class LTRHyperparameterSearchSpace(BaseModel):
-    """Search space for LTR model hyperparameter tuning."""
-
-    model_config = ConfigDict()
+    """Candidate grid values for LTR hyperparameter search."""
 
     num_boost_rounds: list[int] = [100, 300, 500, 700]
     learning_rate: list[float] = [0.01, 0.05, 0.1, 0.2]
@@ -183,9 +175,7 @@ class LTRHyperparameterSearchSpace(BaseModel):
 
 
 class LTRHyperparameters(BaseModel):
-    """Hyperparameters for a single LTR model configuration."""
-
-    model_config = ConfigDict()
+    """A single LTR model hyperparameter configuration."""
 
     num_boost_rounds: int = 500
     learning_rate: float = 0.1
@@ -198,9 +188,7 @@ class LTRHyperparameters(BaseModel):
 
 
 class LTRTuningConfig(BaseModel):
-    """Configuration for LTR hyperparameter tuning."""
-
-    model_config = ConfigDict()
+    """LTR hyperparameter tuning settings."""
 
     n_tuning_trials: int = 1
     tuning_metric: str = "precision@1"
@@ -210,9 +198,7 @@ class LTRTuningConfig(BaseModel):
 
 
 class LTRConfig(BaseModel):
-    """Configuration for learning-to-rank experiments."""
-
-    model_config = ConfigDict()
+    """Configuration for a learning-to-rank experiment."""
 
     train_size: float = 0.7
     val_size: float = 0.15
@@ -222,7 +208,7 @@ class LTRConfig(BaseModel):
 
 
 class AnalysisConfig(BaseModel):
-    """Declarative specification for one LTR analysis run."""
+    """One LTR analysis run: partition and split strategy."""
 
     partition: Partition
     strategy: SplitStrategy
@@ -236,35 +222,63 @@ class SharpResults(BaseModel):
     shap_values: np.ndarray
     feature_names: list[str]
     feature_matrix: np.ndarray
-    base_value: float
 
 
 class PartialDependenceResult(BaseModel):
-    """PDP results for a single (feature, tuner) pair."""
+    """PDP curve for a single (feature, tuner) pair.
+
+    Features are dataset-level meta-features, so the grid sweep moves all tuners
+    simultaneously within each ranking group — the only valid intervention given that
+    all tuners on a dataset share identical meta-feature values.
+
+    Uncertainty is a non-parametric bootstrap CI on the mean rank over ranking groups.
+    """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     feature_name: str
     tuner_name: str
     x_values: np.ndarray
-    rank_values: np.ndarray
-    rank_std: np.ndarray
+    rank_means: np.ndarray
+    rank_ci_lower: np.ndarray
+    rank_ci_upper: np.ndarray
     n_groups: int
 
 
 class PartialDependenceResults(BaseModel):
-    """Complete PDP results for all (feature, tuner) pairs in one partition."""
+    """All PDP curves for one partition, stored as a flat list."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    results: dict[tuple[str, str], PartialDependenceResult]
-    feature_names: list[str]
-    tuner_names: list[str]
+    results: list[PartialDependenceResult]
     partition_name: str
+
+    def get(self, feature: str, tuner: str) -> PartialDependenceResult:
+        """Look up the result for a specific (feature, tuner) pair."""
+        for r in self.results:
+            if r.feature_name == feature and r.tuner_name == tuner:
+                return r
+        raise KeyError(f"No PDP result for feature='{feature}', tuner='{tuner}'")
+
+    @property
+    def feature_names(self) -> list[str]:
+        seen = []
+        for r in self.results:
+            if r.feature_name not in seen:
+                seen.append(r.feature_name)
+        return seen
+
+    @property
+    def tuner_names(self) -> list[str]:
+        seen = []
+        for r in self.results:
+            if r.tuner_name not in seen:
+                seen.append(r.tuner_name)
+        return seen
 
 
 class DownsamplingResults(BaseModel):
-    """Downsampling analysis results showing performance at different training set sizes."""
+    """Downsampling analysis results: metric trajectories across training set size checkpoints."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 

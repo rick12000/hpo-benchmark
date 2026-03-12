@@ -56,8 +56,8 @@ def preprocess_for_metafeatures(
         encoded_cat = encoder.fit_transform(configs_df[categorical_features].astype(str))
         encoded_feature_names = [
             f"{col}_{cat}"
-            for i, col in enumerate(categorical_features)
-            for cat in encoder.categories_[i]
+            for categorical_idx, col in enumerate(categorical_features)
+            for cat in encoder.categories_[categorical_idx]
         ]
         encoded_df = pd.DataFrame(encoded_cat, columns=encoded_feature_names, index=configs_df.index)
 
@@ -84,134 +84,135 @@ def preprocess_for_metafeatures(
     return combined_df.values
 
 
-def calculate_conditional_asymmetry(X: np.ndarray, y: np.ndarray) -> float:
-    """Estimate local skewness of ``y`` conditioned on position in ``X``.
+def calculate_local_skewness_ratio(feature_matrix: np.ndarray, performance_values: np.ndarray) -> float:
+    """Estimate local skewness of ``performance_values`` conditioned on position in ``feature_matrix``.
 
     For each point, finds its k-nearest neighbours and computes a log quantile
-    skew ratio (Q_hi - Q50) / (Q50 - Q_lo). Quantile tails and neighbourhood
-    size adapt to sample size: n >= 100 uses Q95/Q05 with k = n//10 (capped at
-    100); n in [30, 100) uses Q90/Q10 with k = max(3, n//10). Falls back to
-    global skewness below 30 samples. ``X`` is assumed pre-standardised.
+    skew ratio (Q_high - Q_median) / (Q_median - Q_low). Quantile tails and 
+    neighbourhood size adapt to sample size: n >= 100 uses Q95/Q05 with k = n//10 
+    (capped at 100); n in [30, 100) uses Q90/Q10 with k = max(3, n//10). 
+    Falls back to global skewness below 30 samples. ``feature_matrix`` is assumed pre-standardised.
 
     Args:
-        X: Feature matrix of shape (n_samples, n_features), pre-standardised.
-        y: Target values of shape (n_samples,).
+        feature_matrix: Feature matrix of shape (n_samples, n_features), pre-standardised.
+        performance_values: Performance/target values of shape (n_samples,).
 
     Returns:
         Median absolute log-skew ratio across all points, or global skewness
         for n < 30. Returns 0.0 if inputs are empty.
     """
-    n = X.shape[0]
+    n_samples = feature_matrix.shape[0]
 
-    if n < 30:
-        q_hi, q_lo = 0.90, 0.10
-        n_neighbors = max(3, n // 10)
+    if n_samples < 30:
+        quantile_high, quantile_low = 0.90, 0.10
+        n_neighbors = max(3, n_samples // 10)
     else:
-        q_hi, q_lo = 0.95, 0.05
-        n_neighbors = min(100, n // 10)
+        quantile_high, quantile_low = 0.95, 0.05
+        n_neighbors = min(100, n_samples // 10)
 
-    nbrs = NearestNeighbors(n_neighbors=n_neighbors, algorithm="ball_tree").fit(X)
+    nbrs = NearestNeighbors(n_neighbors=n_neighbors, algorithm="ball_tree").fit(feature_matrix)
 
     skew_ratios = []
-    for i in range(n):
-        _, indices = nbrs.kneighbors([X[i]])
-        local_y = y[indices[0]]
-        q_high, q50, q_low = np.quantile(local_y, [q_hi, 0.5, q_lo])
-        numerator, denominator = q_high - q50, q50 - q_low
+    for sample_idx in range(n_samples):
+        _, neighbor_indices = nbrs.kneighbors([feature_matrix[sample_idx]])
+        neighbor_performance = performance_values[neighbor_indices[0]]
+        q_high, q_median, q_low = np.quantile(neighbor_performance, [quantile_high, 0.5, quantile_low])
+        numerator, denominator = q_high - q_median, q_median - q_low
         if numerator > 0 and denominator > 0:
             skew_ratios.append(np.log(numerator / denominator))
 
-    return float(np.median([abs(r) for r in skew_ratios])) if skew_ratios else 0.0
+    return float(np.median([abs(ratio) for ratio in skew_ratios])) if skew_ratios else 0.0
 
 
 def calculate_heteroscedasticity_score(
-    X: np.ndarray,
-    y: np.ndarray,
+    feature_matrix: np.ndarray,
+    performance_values: np.ndarray,
     max_samples: int = 200,
 ) -> float:
     """Estimate heteroscedasticity via a Breusch-Pagan test on GP residuals.
 
     Fits a Matern-5/2 GP on up to ``max_samples`` inducing points selected by
     k-means (one centroid-closest point per cluster). Standardised residuals
-    from the full dataset are then regressed on ``X`` via OLS; the adjusted
+    from the full dataset are then regressed on ``feature_matrix`` via OLS; the adjusted
     R² of that auxiliary regression is returned as the score.
 
     Args:
-        X: Feature matrix of shape (n_samples, n_features).
-        y: Target values of shape (n_samples,).
+        feature_matrix: Feature matrix of shape (n_samples, n_features).
+        performance_values: Performance/target values of shape (n_samples,).
         max_samples: Maximum number of inducing points for the GP fit.
 
     Returns:
         Adjusted R² in [0, 1], or 0.0 if inputs are empty.
     """
-    n_inducing = min(max_samples, len(X))
+    n_inducing = min(max_samples, len(feature_matrix))
 
-    if len(X) > n_inducing:
-        scaler_X = StandardScaler()
-        X_scaled_full = scaler_X.fit_transform(X)
+    if len(feature_matrix) > n_inducing:
+        feature_scaler = StandardScaler()
+        scaled_features_full = feature_scaler.fit_transform(feature_matrix)
         kmeans = KMeans(n_clusters=n_inducing, random_state=42, n_init=3)
-        cluster_labels = kmeans.fit_predict(X_scaled_full)
+        cluster_labels = kmeans.fit_predict(scaled_features_full)
 
         inducing_indices = []
-        for i in range(n_inducing):
-            cluster_mask = cluster_labels == i
+        for cluster_id in range(n_inducing):
+            cluster_mask = cluster_labels == cluster_id
             if np.any(cluster_mask):
-                cluster_X = X_scaled_full[cluster_mask]
-                distances = np.sum((cluster_X - kmeans.cluster_centers_[i]) ** 2, axis=1)
+                cluster_features = scaled_features_full[cluster_mask]
+                distances = np.sum((cluster_features - kmeans.cluster_centers_[cluster_id]) ** 2, axis=1)
                 inducing_indices.append(np.where(cluster_mask)[0][np.argmin(distances)])
 
-        X_inducing, y_inducing = X[inducing_indices], y[inducing_indices]
+        inducing_features, inducing_performance = feature_matrix[inducing_indices], performance_values[inducing_indices]
     else:
-        X_inducing, y_inducing = X, y
+        inducing_features, inducing_performance = feature_matrix, performance_values
 
-    scaler_X = StandardScaler()
-    scaler_y = StandardScaler()
-    X_scaled = scaler_X.fit_transform(X_inducing)
-    y_scaled = scaler_y.fit_transform(y_inducing.reshape(-1, 1)).ravel()
+    feature_scaler = StandardScaler()
+    performance_scaler = StandardScaler()
+    scaled_inducing_features = feature_scaler.fit_transform(inducing_features)
+    scaled_inducing_performance = performance_scaler.fit_transform(inducing_performance.reshape(-1, 1)).ravel()
 
     kernel = C(1.0, (1e-3, 1e3)) * Matern(
-        length_scale=np.ones(X.shape[1]), length_scale_bounds=(1e-2, 1e2), nu=2.5
+        length_scale=np.ones(feature_matrix.shape[1]), length_scale_bounds=(1e-2, 1e2), nu=2.5
     )
     gp = GaussianProcessRegressor(
         kernel=kernel, alpha=1e-10, normalize_y=False, n_restarts_optimizer=2, random_state=42
     )
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=Warning, message=".*length_scale.*close to.*bound.*")
-        gp.fit(X_scaled, y_scaled)
+        gp.fit(scaled_inducing_features, scaled_inducing_performance)
 
-    X_scaled_all = scaler_X.transform(X)
-    predictions, pred_std = gp.predict(X_scaled_all, return_std=True)
-    residuals = scaler_y.transform(y.reshape(-1, 1)).ravel() - predictions
+    scaled_all_features = feature_scaler.transform(feature_matrix)
+    predictions, pred_std = gp.predict(scaled_all_features, return_std=True)
+    residuals = performance_scaler.transform(performance_values.reshape(-1, 1)).ravel() - predictions
 
     # Standardise residuals by predictive std when available to account for
     # regions of high GP uncertainty inflating the heteroscedasticity score.
     squared_residuals = (residuals / (pred_std + 1e-10)) ** 2 if np.any(pred_std > 0) else residuals ** 2
 
-    Z = sm.add_constant(X_scaled_all)
-    aux_results = sm.OLS(squared_residuals, Z).fit()
+    augmented_design_matrix = sm.add_constant(scaled_all_features)
+    aux_results = sm.OLS(squared_residuals, augmented_design_matrix).fit()
 
-    n, k = len(squared_residuals), Z.shape[1] - 1
+    n_residuals = len(squared_residuals)
+    n_predictors = augmented_design_matrix.shape[1] - 1
     r_squared_adj = (
-        1 - (1 - aux_results.rsquared) * (n - 1) / (n - k - 1) if n > k + 1 else 0.0
+        1 - (1 - aux_results.rsquared) * (n_residuals - 1) / (n_residuals - n_predictors - 1) if n_residuals > n_predictors + 1 else 0.0
     )
     return max(0.0, min(1.0, float(r_squared_adj)))
 
 
-def calculate_mutual_information(X: np.ndarray, y: np.ndarray) -> Dict[str, float]:
-    """Compute max, min, and mean MI between each feature and the target.
+def calculate_mutual_information(feature_matrix: np.ndarray, performance_values: np.ndarray) -> Dict[str, float]:
+    """Compute max, min, and mean MI between each feature and the performance target.
 
     Args:
-        X: Feature matrix of shape (n_samples, n_features).
-        y: Target values of shape (n_samples,).
+        feature_matrix: Feature matrix of shape (n_samples, n_features).
+        performance_values: Performance/target values of shape (n_samples,).
 
     Returns:
         Dict with keys ``max_mi_with_target``, ``min_mi_with_target``,
-        ``avg_mi_with_target``. All values are 0.0 if ``X`` is empty or
+        ``avg_mi_with_target``. All values are 0.0 if ``feature_matrix`` is empty or
         all MI scores are non-finite.
     """
 
     mi_scores = np.array(
-        [v for v in mutual_info_regression(X, y, random_state=42) if np.isfinite(v)],
+        [mi_score for mi_score in mutual_info_regression(feature_matrix, performance_values, random_state=42) if np.isfinite(mi_score)],
         dtype=float,
     )
 
@@ -222,11 +223,11 @@ def calculate_mutual_information(X: np.ndarray, y: np.ndarray) -> Dict[str, floa
     }
 
 
-def calculate_feature_correlation(X: np.ndarray) -> Dict[str, float]:
+def calculate_feature_correlation(feature_matrix: np.ndarray) -> Dict[str, float]:
     """Compute max, min, and mean pairwise MI across all feature pairs.
 
     Args:
-        X: Feature matrix of shape (n_samples, n_features).
+        feature_matrix: Feature matrix of shape (n_samples, n_features).
 
     Returns:
         Dict with keys ``max_mi_between_features``, ``min_mi_between_features``,
@@ -235,23 +236,24 @@ def calculate_feature_correlation(X: np.ndarray) -> Dict[str, float]:
     """
 
     mi_scores = []
-    for i in range(X.shape[1]):
-        for j in range(i + 1, X.shape[1]):
-            v = mutual_info_regression(X[:, [j]], X[:, i], random_state=42)[0]
-            if np.isfinite(v):
-                mi_scores.append(float(v))
+    n_features = feature_matrix.shape[1]
+    for feature_idx_i in range(n_features):
+        for feature_idx_j in range(feature_idx_i + 1, n_features):
+            mi_score = mutual_info_regression(feature_matrix[:, [feature_idx_j]], feature_matrix[:, feature_idx_i], random_state=42)[0]
+            if np.isfinite(mi_score):
+                mi_scores.append(float(mi_score))
 
-    mi_arr = np.array(mi_scores)
+    mi_scores_array = np.array(mi_scores)
     return {
-        'max_mi_between_features': float(np.max(mi_arr)),
-        'min_mi_between_features': float(np.min(mi_arr)),
-        'avg_mi_between_features': float(np.mean(mi_arr)),
+        'max_mi_between_features': float(np.max(mi_scores_array)),
+        'min_mi_between_features': float(np.min(mi_scores_array)),
+        'avg_mi_between_features': float(np.mean(mi_scores_array)),
     }
 
 
 def calculate_landscape_separability(
-    X: np.ndarray,
-    y: np.ndarray,
+    feature_matrix: np.ndarray,
+    performance_values: np.ndarray,
     optimization_direction: Literal["minimize", "maximize"] = "minimize",
     percentile: float = 25.0,
 ) -> float:
@@ -263,10 +265,10 @@ def calculate_landscape_separability(
     values indicate a more structured (separable) landscape.
 
     Args:
-        X: Feature matrix of shape (n_samples, n_features).
-        y: Performance values of shape (n_samples,).
+        feature_matrix: Feature matrix of shape (n_samples, n_features).
+        performance_values: Performance values of shape (n_samples,).
         optimization_direction: Whether lower (``"minimize"``) or higher
-            (``"maximize"``) values of ``y`` are better.
+            (``"maximize"``) values of ``performance_values`` are better.
         percentile: Fraction of observations (%) assigned to each group.
 
     Returns:
@@ -274,30 +276,30 @@ def calculate_landscape_separability(
         5 members or within-group distance is zero.
     """
 
-    n = len(y)
-    group_size = int(np.floor(n * percentile / 100.0))
+    n_samples = len(performance_values)
+    group_size = int(np.floor(n_samples * percentile / 100.0))
 
     if group_size < 5:
         logger.debug(
             f"Insufficient group size for landscape separability: "
-            f"floor({n} × {percentile}%) = {group_size} (minimum required: 5)"
+            f"floor({n_samples} × {percentile}%) = {group_size} (minimum required: 5)"
         )
         return np.nan
 
-    sorted_indices = np.argsort(y)
+    sorted_indices = np.argsort(performance_values)
     if optimization_direction == "minimize":
         top_indices, bottom_indices = sorted_indices[:group_size], sorted_indices[-group_size:]
     else:
         top_indices, bottom_indices = sorted_indices[-group_size:], sorted_indices[:group_size]
 
-    X_scaled = StandardScaler().fit_transform(X)
-    X_top, X_bottom = X_scaled[top_indices], X_scaled[bottom_indices]
+    scaled_features = StandardScaler().fit_transform(feature_matrix)
+    top_features, bottom_features = scaled_features[top_indices], scaled_features[bottom_indices]
 
-    centroid_top, centroid_bottom = np.mean(X_top, axis=0), np.mean(X_bottom, axis=0)
+    centroid_top, centroid_bottom = np.mean(top_features, axis=0), np.mean(bottom_features, axis=0)
 
     avg_within_group_dist = (
-        float(np.mean(np.linalg.norm(X_top - centroid_top, axis=1)))
-        + float(np.mean(np.linalg.norm(X_bottom - centroid_bottom, axis=1)))
+        float(np.mean(np.linalg.norm(top_features - centroid_top, axis=1)))
+        + float(np.mean(np.linalg.norm(bottom_features - centroid_bottom, axis=1)))
     ) / 2.0
 
     if avg_within_group_dist == 0.0:
@@ -347,8 +349,8 @@ def calculate_surrogate_metafeatures(
         )
 
     configs_df = pd.DataFrame(configs)
-    performances = np.array(performances, dtype=float)
-    X_preprocessed = preprocess_for_metafeatures(configs, search_space)
+    performances_array = np.array(performances, dtype=float)
+    preprocessed_features = preprocess_for_metafeatures(configs, search_space)
 
     type_counts: Dict[str, int] = {'integer': 0, 'float': 0, 'binary_categorical': 0, 'multicategory': 0}
     for hp_range in search_space.values():
@@ -357,11 +359,11 @@ def calculate_surrogate_metafeatures(
         elif isinstance(hp_range, FloatRange):
             type_counts['float'] += 1
         elif isinstance(hp_range, CategoricalRange):
-            key = 'binary_categorical' if len(hp_range.choices) <= 2 else 'multicategory'
-            type_counts[key] += 1
+            hyperparameter_category = 'binary_categorical' if len(hp_range.choices) <= 2 else 'multicategory'
+            type_counts[hyperparameter_category] += 1
 
-    perf_skewness = float(stats.skew(performances))
-    perf_kurtosis = float(stats.kurtosis(performances))
+    performance_skewness = float(stats.skew(performances_array))
+    performance_kurtosis = float(stats.kurtosis(performances_array))
 
     metafeatures: Dict[str, float] = {
         schema.n_hyperparameters: len(configs_df.columns),
@@ -369,24 +371,24 @@ def calculate_surrogate_metafeatures(
         'n_float_hyperparameters': type_counts['float'],
         'n_binary_categorical_hyperparameters': type_counts['binary_categorical'],
         'n_multicategory_hyperparameters': type_counts['multicategory'],
-        schema.total_rows: float(X_preprocessed.shape[0]),
-        schema.total_columns: float(X_preprocessed.shape[1]),
-        schema.performance_mean: float(np.mean(performances)),
-        schema.performance_std: float(np.std(performances)),
-        schema.performance_min: float(np.min(performances)),
-        schema.performance_max: float(np.max(performances)),
-        schema.performance_range: float(np.max(performances) - np.min(performances)),
-        schema.performance_skewness: perf_skewness if np.isfinite(perf_skewness) else 0.0,
-        schema.performance_kurtosis: perf_kurtosis if np.isfinite(perf_kurtosis) else 0.0,
-        schema.best_performance: float(np.min(performances)),
-        'conditional_performance_skewness': calculate_conditional_asymmetry(X_preprocessed, performances),
-        'performance_heteroscedasticity': calculate_heteroscedasticity_score(X_preprocessed, performances),
+        schema.total_rows: float(preprocessed_features.shape[0]),
+        schema.total_columns: float(preprocessed_features.shape[1]),
+        schema.performance_mean: float(np.mean(performances_array)),
+        schema.performance_std: float(np.std(performances_array)),
+        schema.performance_min: float(np.min(performances_array)),
+        schema.performance_max: float(np.max(performances_array)),
+        schema.performance_range: float(np.max(performances_array) - np.min(performances_array)),
+        schema.performance_skewness: performance_skewness if np.isfinite(performance_skewness) else 0.0,
+        schema.performance_kurtosis: performance_kurtosis if np.isfinite(performance_kurtosis) else 0.0,
+        schema.best_performance: float(np.min(performances_array)),
+        'conditional_performance_skewness': calculate_local_skewness_ratio(preprocessed_features, performances_array),
+        'performance_heteroscedasticity': calculate_heteroscedasticity_score(preprocessed_features, performances_array),
         'landscape_separability': calculate_landscape_separability(
-            X_preprocessed, performances, optimization_direction
+            preprocessed_features, performances_array, optimization_direction
         ),
     }
 
-    metafeatures.update(calculate_mutual_information(X_preprocessed, performances))
-    metafeatures.update(calculate_feature_correlation(X_preprocessed))
+    metafeatures.update(calculate_mutual_information(preprocessed_features, performances_array))
+    metafeatures.update(calculate_feature_correlation(preprocessed_features))
 
     return metafeatures

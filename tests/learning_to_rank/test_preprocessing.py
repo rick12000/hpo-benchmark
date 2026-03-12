@@ -12,8 +12,8 @@ def test_prepare_data_ranks_tuners_correctly_within_groups(preprocessing_raw_dat
         synthetic_benchmark_id='synthetic_tabular',
     )
     
-    sample_group = prepared_data['ranking_group'].iloc[0]
-    group_data = prepared_data[prepared_data['ranking_group'] == sample_group]
+    sample_group = prepared_data['ranking_group_id'].iloc[0]
+    group_data = prepared_data[prepared_data['ranking_group_id'] == sample_group]
     
     tuner_x_label = group_data[group_data['tuner_encoded'] == 0]['label'].iloc[0]
     tuner_y_label = group_data[group_data['tuner_encoded'] == 1]['label'].iloc[0]
@@ -87,7 +87,7 @@ def test_split_data_maintains_exact_proportions(preprocessing_raw_data, benchmar
         synthetic_benchmark_id='synthetic_tabular',
     )
     
-    n_groups = prepared_data['split_group'].nunique()
+    n_groups = prepared_data['split_group_id'].nunique()
     
     train, val, test = split_data(
         data=prepared_data,
@@ -99,9 +99,9 @@ def test_split_data_maintains_exact_proportions(preprocessing_raw_data, benchmar
         schema=benchmark_data_schema,
     )
     
-    train_groups = train['split_group'].nunique()
-    val_groups = val['split_group'].nunique()
-    test_groups = test['split_group'].nunique()
+    train_groups = train['split_group_id'].nunique()
+    val_groups = val['split_group_id'].nunique()
+    test_groups = test['split_group_id'].nunique()
     
     assert train_groups + val_groups + test_groups == n_groups
     expected_test_groups = int(n_groups * 0.2)
@@ -127,16 +127,16 @@ def test_split_data_preserves_group_integrity(preprocessing_raw_data, benchmark_
         schema=benchmark_data_schema,
     )
     
-    train_groups = set(train['split_group'].unique())
-    val_groups = set(val['split_group'].unique())
-    test_groups = set(test['split_group'].unique())
+    train_groups = set(train['split_group_id'].unique())
+    val_groups = set(val['split_group_id'].unique())
+    test_groups = set(test['split_group_id'].unique())
     
     assert len(train_groups & val_groups) == 0
     assert len(train_groups & test_groups) == 0
     assert len(val_groups & test_groups) == 0
     
     for split_group in train_groups:
-        group_rows = prepared_data[prepared_data['split_group'] == split_group]
+        group_rows = prepared_data[prepared_data['split_group_id'] == split_group]
         assert all(group_rows.index.isin(train.index))
 
 
@@ -163,8 +163,8 @@ def test_split_data_synthetic_train_real_test_isolates_partitions(preprocessing_
     assert all(val['benchmark_identifier'] == 'synthetic_tabular')
     assert all(test['benchmark_identifier'] == 'lcbench')
     
-    synthetic_groups = prepared_data[prepared_data['benchmark_identifier'] == 'synthetic_tabular']['split_group'].nunique()
-    train_groups = train['split_group'].nunique()
-    val_groups = val['split_group'].nunique()
+    synthetic_groups = prepared_data[prepared_data['benchmark_identifier'] == 'synthetic_tabular']['split_group_id'].nunique()
+    train_groups = train['split_group_id'].nunique()
+    val_groups = val['split_group_id'].nunique()
     
     assert train_groups + val_groups == synthetic_groups

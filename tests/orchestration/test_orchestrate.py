@@ -48,7 +48,7 @@ def test_annotate_trial_result_non_confopt(
     trial_row, blackbox_experiment_config, non_confopt_tuner, aliases
 ):
     """Core metadata columns are populated; confopt-specific columns are empty strings."""
-    n_ws = 10
+    n_warm_start_configs = 10
     repetition = 2
 
     result = _annotate_trial_result(
@@ -56,7 +56,7 @@ def test_annotate_trial_result_non_confopt(
         experiment_config=blackbox_experiment_config,
         tuner=non_confopt_tuner,
         repetition=repetition,
-        n_ws=n_ws,
+        n_warm_start_configs=n_warm_start_configs,
         strategy="random",
         surrogate_metafeatures={"performance_mean": 0.75, "n_hyperparameters": 2},
         aliases=aliases,
@@ -65,7 +65,7 @@ def test_annotate_trial_result_non_confopt(
     assert result["benchmark_identifier"].iloc[0] == blackbox_experiment_config.benchmark_identifier
     assert result["dataset"].iloc[0] == blackbox_experiment_config.dataset_identifier
     assert result["tuner"].iloc[0] == non_confopt_tuner.tuner_identifier
-    assert result["n_random_warm_starts"].iloc[0] == n_ws
+    assert result["n_random_warm_starts"].iloc[0] == n_warm_start_configs
     assert result["warm_start_strategy"].iloc[0] == "random"
     assert result["repetition"].iloc[0] == repetition + 1
     assert result["performance_mean"].iloc[0] == 0.75
@@ -92,7 +92,7 @@ def test_annotate_trial_result_applies_benchmark_alias(
         experiment_config=experiment_config,
         tuner=non_confopt_tuner,
         repetition=0,
-        n_ws=5,
+        n_warm_start_configs=5,
         strategy="random",
         surrogate_metafeatures={},
         aliases=aliases,

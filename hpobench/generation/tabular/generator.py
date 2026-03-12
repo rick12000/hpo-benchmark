@@ -79,19 +79,19 @@ class SyntheticDataset:
 # Basis functions
 # ---------------------------------------------------------------------------
 
-def _rff_1d(x: np.ndarray, n_freqs: int, freq_scale: float) -> np.ndarray:
+def _random_fourier_features_1d(x: np.ndarray, n_freqs: int, freq_scale: float) -> np.ndarray:
     """Random Fourier features for a 1-D input.
 
     Returns a (len(x), 2*n_freqs) feature matrix whose row-mean is
     approximately zero (centred by construction when frequencies are
     symmetric around zero).
     """
-    omegas = np.random.randn(n_freqs) * freq_scale
+    frequencies = np.random.randn(n_freqs) * freq_scale
     phases = np.random.uniform(0, 2 * np.pi, n_freqs)
-    X = x[:, None]  # (n, 1)
+    x_col = x[:, None]  # (n, 1)
     feats = np.concatenate([
-        np.cos(X * omegas + phases),
-        np.sin(X * omegas + phases),
+        np.cos(x_col * frequencies + phases),
+        np.sin(x_col * frequencies + phases),
     ], axis=1)
     return feats  # (n, 2*n_freqs)
 
@@ -103,7 +103,7 @@ def _main_effect_continuous(x: np.ndarray, roughness: float) -> np.ndarray:
     faster-varying functions, lower values produce smoother ones.
     """
     n_freqs = random.randint(3, 8)
-    feats = _rff_1d(x, n_freqs, freq_scale=roughness)
+    feats = _random_fourier_features_1d(x, n_freqs, freq_scale=roughness)
     weights = np.random.randn(feats.shape[1])
     out = feats @ weights
     return (out - out.mean()).astype(np.float64)
@@ -118,9 +118,9 @@ def _main_effect_integer(x: np.ndarray) -> np.ndarray:
     return (out - out.mean()).astype(np.float64)
 
 
-def _main_effect_categorical(x: np.ndarray, k: int) -> np.ndarray:
+def _main_effect_categorical(x: np.ndarray, num_categories: int) -> np.ndarray:
     """Lookup table: each category maps to an independent scalar."""
-    table = np.random.randn(k)
+    table = np.random.randn(num_categories)
     out = table[x.astype(int)]
     return (out - out.mean()).astype(np.float64)
 
@@ -128,21 +128,21 @@ def _main_effect_categorical(x: np.ndarray, k: int) -> np.ndarray:
 def _interaction_continuous_2d(
     x1: np.ndarray, x2: np.ndarray, roughness: float
 ) -> np.ndarray:
-    """Centred 2-D interaction via tensor product of RFF maps."""
+    """Centred 2-D interaction via tensor product of Random Fourier Feature maps."""
     n_freqs = random.randint(2, 5)
-    f1 = _rff_1d(x1, n_freqs, roughness)   # (n, 2k)
-    f2 = _rff_1d(x2, n_freqs, roughness)   # (n, 2k)
+    f1 = _random_fourier_features_1d(x1, n_freqs, roughness)
+    f2 = _random_fourier_features_1d(x2, n_freqs, roughness)
     # Element-wise product of matching columns then reduce to scalar.
     prod = (f1 * f2).sum(axis=1)
     return (prod - prod.mean()).astype(np.float64)
 
 
 def _interaction_cat_continuous(
-    cat: np.ndarray, cont: np.ndarray, k: int, roughness: float
+    cat: np.ndarray, cont: np.ndarray, num_categories: int, roughness: float
 ) -> np.ndarray:
     """Per-category 1-D function: each category gets its own random curve."""
     out = np.zeros(len(cat), dtype=np.float64)
-    for c in range(k):
+    for c in range(num_categories):
         mask = cat.astype(int) == c
         if mask.sum() > 1:
             fn = _main_effect_continuous(cont[mask], roughness)
@@ -151,24 +151,24 @@ def _interaction_cat_continuous(
 
 
 def _interaction_2d(
-    ax1: Axis, x1: np.ndarray,
-    ax2: Axis, x2: np.ndarray,
+    first_axis: Axis, first_axis_values: np.ndarray,
+    second_axis: Axis, second_axis_values: np.ndarray,
     roughness: float,
 ) -> np.ndarray:
     """Dispatch to the correct 2-D interaction function."""
-    cat1 = isinstance(ax1, CategoricalAxis)
-    cat2 = isinstance(ax2, CategoricalAxis)
+    first_axis_is_categorical = isinstance(first_axis, CategoricalAxis)
+    second_axis_is_categorical = isinstance(second_axis, CategoricalAxis)
 
-    if not cat1 and not cat2:
-        return _interaction_continuous_2d(x1, x2, roughness)
-    if cat1 and not cat2:
-        return _interaction_cat_continuous(x1, x2, ax1.k, roughness)
-    if not cat1 and cat2:
-        return _interaction_cat_continuous(x2, x1, ax2.k, roughness)
-    # Both categorical: independent lookup table over (k1, k2) pairs.
-    k1, k2 = ax1.k, ax2.k
-    table = np.random.randn(k1, k2)
-    out = table[x1.astype(int), x2.astype(int)]
+    if not first_axis_is_categorical and not second_axis_is_categorical:
+        return _interaction_continuous_2d(first_axis_values, second_axis_values, roughness)
+    if first_axis_is_categorical and not second_axis_is_categorical:
+        return _interaction_cat_continuous(first_axis_values, second_axis_values, first_axis.num_categories, roughness)
+    if not first_axis_is_categorical and second_axis_is_categorical:
+        return _interaction_cat_continuous(second_axis_values, first_axis_values, second_axis.num_categories, roughness)
+    # Both categorical: independent lookup table over (first_axis_categories, second_axis_categories) pairs.
+    first_axis_num_categories, second_axis_num_categories = first_axis.num_categories, second_axis.num_categories
+    interaction_table = np.random.randn(first_axis_num_categories, second_axis_num_categories)
+    out = interaction_table[first_axis_values.astype(int), second_axis_values.astype(int)]
     return (out - out.mean()).astype(np.float64)
 
 
@@ -185,11 +185,11 @@ def _three_way_interaction(
     maps = []
     for ax, x in zip(ax_triple, x_triple):
         if isinstance(ax, CategoricalAxis):
-            table = np.random.randn(ax.k)
+            table = np.random.randn(ax.num_categories)
             m = table[x.astype(int)]
         else:
             n_freqs = random.randint(2, 4)
-            feats = _rff_1d(x, n_freqs, roughness)
+            feats = _random_fourier_features_1d(x, n_freqs, roughness)
             w = np.random.randn(feats.shape[1])
             m = feats @ w
         m = m - m.mean()
@@ -385,7 +385,7 @@ class ANOVADataGenerator:
         for i, ax in enumerate(axes):
             x = X_model[:, i]
             if isinstance(ax, CategoricalAxis):
-                component = _main_effect_categorical(x, ax.k)
+                component = _main_effect_categorical(x, ax.num_categories)
             elif isinstance(ax, IntegerAxis):
                 component = _main_effect_integer(x)
             else:
@@ -482,7 +482,7 @@ class ANOVADataGenerator:
             elif isinstance(ax, IntegerAxis):
                 col = np.floor(ax.lower + u * (ax.upper - ax.lower + 1)).clip(ax.lower, ax.upper)
             else:
-                col = np.floor(u * ax.k).clip(0, ax.k - 1)
+                col = np.floor(u * ax.num_categories).clip(0, ax.num_categories - 1)
             cols.append(col.astype(np.float32))
 
         return np.stack(cols, axis=1)

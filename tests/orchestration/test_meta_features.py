@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 from hpobench.orchestration.meta_features import (
     preprocess_for_metafeatures,
-    calculate_conditional_asymmetry,
+    calculate_local_skewness_ratio,
     calculate_mutual_information,
     calculate_feature_correlation,
     calculate_landscape_separability,
@@ -63,10 +63,10 @@ def test_preprocess_raises_on_empty_configs():
 
 
 # ---------------------------------------------------------------------------
-# calculate_conditional_asymmetry
+# calculate_local_skewness_ratio
 # ---------------------------------------------------------------------------
 
-def test_conditional_asymmetry_detects_local_skew():
+def test_local_skewness_ratio_detects_local_skew():
     """kNN-based local skewness should be higher when y is locally asymmetric in X-space.
 
     Locally symmetric: y is drawn iid regardless of x position.
@@ -80,24 +80,24 @@ def test_conditional_asymmetry_detects_local_skew():
 
     # Locally symmetric: y drawn independently of X position
     y_sym = rng.standard_normal(n)
-    score_sym = calculate_conditional_asymmetry(X, y_sym)
+    score_sym = calculate_local_skewness_ratio(X, y_sym)
 
     # Locally asymmetric: y strongly right-skewed within each local neighborhood.
     # We use X as a sorting key so that nearby points in X-space share skewed y.
     order = np.argsort(X[:, 0])
     y_asym = np.empty(n)
     y_asym[order] = rng.exponential(scale=3.0, size=n)
-    score_asym = calculate_conditional_asymmetry(X, y_asym)
+    score_asym = calculate_local_skewness_ratio(X, y_asym)
 
     assert score_asym > score_sym
     assert score_sym >= 0.0
 
 
-def test_conditional_asymmetry_constant_y_returns_zero():
+def test_local_skewness_ratio_constant_y_returns_zero():
     # numerator = denominator = 0 for all neighborhoods → no valid log ratios → 0.0
     X = np.tile(np.arange(20, dtype=float).reshape(-1, 1), (1, 2))
     y = np.ones(20)
-    assert calculate_conditional_asymmetry(X, y) == 0.0
+    assert calculate_local_skewness_ratio(X, y) == 0.0
 
 
 # ---------------------------------------------------------------------------

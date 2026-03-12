@@ -1,5 +1,4 @@
-from pydantic import BaseModel
-from typing import Any, Dict, List
+from pydantic import BaseModel, model_validator
 
 
 class SurrogateMetafeaturesSchema(BaseModel):
@@ -58,8 +57,8 @@ class SurrogateMetafeaturesSchema(BaseModel):
     min_mi_between_features: str = "min_mi_between_features"
     avg_mi_between_features: str = "avg_mi_between_features"
     
-    def to_list(self) -> List[str]:
-        """Get all surrogate metafeature column names as a list."""
+    def to_list(self) -> list[str]:
+        """All surrogate metafeature column names as a list."""
         return list(self.model_dump().values())
 
 
@@ -87,56 +86,36 @@ class BenchmarkDataSchema(BaseModel):
     label_col: str = "label"
     
     # ===== ENGINEERED COLUMNS (derived by preprocessing) =====
-    ranking_group_col: str = "ranking_group"
-    split_group_col: str = "split_group"
+    ranking_group_id_col: str = "ranking_group_id"
+    split_group_id_col: str = "split_group_id"
     
     # ===== METADATA COLUMNS (filtering/identification) =====
     benchmark_identifier_col: str = "benchmark_identifier"
     
-    # ===== COLUMN LISTS (for pipeline operations) =====
-    rank_group_cols: List[str] = []
-    split_group_cols: List[str] = []
-    
-    def __init__(self, **data):
-        super().__init__(**data)
-        # Set column lists based on individual column names
-        self.rank_group_cols = [
-            self.data_col,
-            self.warm_start_strategy_col,
-            self.n_random_warm_starts_col,
-            self.rep_col,
-        ]
-        self.split_group_cols = [
-            self.data_col,
-            self.warm_start_strategy_col,
-            self.n_random_warm_starts_col,
-        ]
+    rank_group_cols: list[str] = []
+    split_group_cols: list[str] = []
 
-    def to_list(self) -> List[str]:
-        """Convert all schema field values to a list.
+    @model_validator(mode='after')
+    def _set_group_cols(self) -> 'BenchmarkDataSchema':
+        self.rank_group_cols = [self.data_col, self.warm_start_strategy_col, self.n_random_warm_starts_col, self.rep_col]
+        self.split_group_cols = [self.data_col, self.warm_start_strategy_col, self.n_random_warm_starts_col]
+        return self
 
-        Returns:
-            List of all column names defined in the schema.
-        """
-        return list(self.model_dump().values())
+    def to_list(self) -> list[str]:
+        """All scalar column name values as a list."""
+        return [v for v in self.model_dump().values() if isinstance(v, str)]
 
 
 class Aliases(BaseModel):
-    """Human-readable aliases for various benchmark components.
+    """Human-readable aliases for benchmark components."""
 
-    Args:
-        sampler_aliases: Short names for conformal prediction samplers.
-        architecture_aliases: Short names for quantile estimator architectures.
-        benchmark_aliases: Display names for benchmark suites.
-    """
-
-    sampler_aliases: Dict[str, str] = {
+    sampler_aliases: dict[str, str] = {
         "ThompsonSampler": "TS",
         "ExpectedImprovementSampler": "EI",
         "LowerBoundSampler": "LBS",
         "PessimisticLowerBoundSampler": "PLBS",
     }
-    architecture_aliases: Dict[str, str] = {
+    architecture_aliases: dict[str, str] = {
         "qknn": "QKNN",
         "qgp": "QGP",
         "ql": "QL",
@@ -144,6 +123,6 @@ class Aliases(BaseModel):
         "qgbm": "QGBM",
         "qens5": "QE",
     }
-    benchmark_aliases: Dict[str, str] = {
+    benchmark_aliases: dict[str, str] = {
         "synthetic_tabular": "Synthetic-Tabular",
     }

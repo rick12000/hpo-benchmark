@@ -188,7 +188,7 @@ def _annotate_trial_result(
     experiment_config: ExperimentConfig,
     tuner: TunerConfig,
     repetition: int,
-    n_ws: int,
+    n_warm_start_configs: int,
     strategy: WarmStartStrategy,
     surrogate_metafeatures: dict,
     aliases: Aliases,
@@ -200,7 +200,7 @@ def _annotate_trial_result(
         experiment_config: Config containing benchmark/dataset identifiers.
         tuner: Tuner configuration providing algorithm metadata.
         repetition: Zero-indexed repetition number (stored as 1-indexed).
-        n_ws: Number of warm start configurations used.
+        n_warm_start_configs: Number of warm start configurations used.
         strategy: Warm start generation strategy applied.
         surrogate_metafeatures: Metafeature dict to merge into the row.
         aliases: Alias mappings for benchmark, architecture, and sampler names.
@@ -219,22 +219,27 @@ def _annotate_trial_result(
     trial_row["tuner"] = tuner.tuner_identifier
     trial_row["repetition"] = repetition + 1
     trial_row["searcher_tuning_framework"] = tuner.searcher_tuning_framework
-    trial_row["n_random_warm_starts"] = n_ws
+    trial_row["n_random_warm_starts"] = n_warm_start_configs
     trial_row["warm_start_strategy"] = strategy
 
     for key, value in surrogate_metafeatures.items():
         trial_row[key] = value
 
     if tuner.tuner.backend == "confopt":
-        sampler_name = tuner.tuner.searcher.sampler.__class__.__name__
-        confidence_level = str(tuner.tuner.searcher.sampler.interval_width) if hasattr(tuner.tuner.searcher.sampler, "interval_width") else ""
-        estimator_architecture = tuner.tuner.searcher.quantile_estimator_architecture
-        n_pre_conformal_trials = tuner.tuner.searcher.n_pre_conformal_trials if hasattr(tuner.tuner.searcher, "n_pre_conformal_trials") else ""
-        sampler_n_quantiles = tuner.tuner.searcher.sampler.n_quantiles if hasattr(tuner.tuner.searcher.sampler, "n_quantiles") else ""
+        # Extract confopt-specific attributes with intermediate variables for clarity
+        confopt_tuner = tuner.tuner
+        confopt_searcher = confopt_tuner.searcher
+        confopt_sampler = confopt_searcher.sampler
+        
+        sampler_name = confopt_sampler.__class__.__name__
+        confidence_level = str(confopt_sampler.interval_width) if hasattr(confopt_sampler, "interval_width") else ""
+        estimator_architecture = confopt_searcher.quantile_estimator_architecture
+        n_pre_conformal_trials = confopt_searcher.n_pre_conformal_trials if hasattr(confopt_searcher, "n_pre_conformal_trials") else ""
+        sampler_n_quantiles = confopt_sampler.n_quantiles if hasattr(confopt_sampler, "n_quantiles") else ""
         sampler_adapter = (
-            "None" if tuner.tuner.searcher.sampler.adapter is None
-            else str(tuner.tuner.searcher.sampler.adapter)
-        ) if hasattr(tuner.tuner.searcher.sampler, "adapter") else ""
+            "None" if confopt_sampler.adapter is None
+            else str(confopt_sampler.adapter)
+        ) if hasattr(confopt_sampler, "adapter") else ""
         tuner_searcher_tuning_framework = "None" if tuner.searcher_tuning_framework is None else str(tuner.searcher_tuning_framework)
     else:
         sampler_name = confidence_level = estimator_architecture = ""
@@ -244,7 +249,8 @@ def _annotate_trial_result(
     aliased_estimator_architecture = aliases.architecture_aliases.get(estimator_architecture) or estimator_architecture
     aliased_sampler_name = aliases.sampler_aliases.get(sampler_name) or sampler_name
     if tuner.tuner.backend == "confopt" and sampler_name == "ThompsonSampler":
-        if tuner.tuner.searcher.sampler.enable_optimistic_sampling:
+        confopt_sampler = tuner.tuner.searcher.sampler
+        if confopt_sampler.enable_optimistic_sampling:
             aliased_sampler_name = "OBS"
 
     trial_row["estimator_architecture"] = aliased_estimator_architecture
@@ -360,10 +366,10 @@ def run_main_benchmark(
 
         experiment_config.objective_function.initialize()
 
-        for ws_idx, n_ws in enumerate(n_warm_starts, 1):
+        for ws_idx, n_warm_start_configs in enumerate(n_warm_starts, 1):
             logger.info(
                 f"Warm start loop [{ws_idx}/{len(n_warm_starts)}] - "
-                f"Generating {n_ws} warm start configurations for dataset: {dataset_name}"
+                f"Generating {n_warm_start_configs} warm start configurations for dataset: {dataset_name}"
             )
 
             for strategy in warm_start_strategies:
@@ -373,7 +379,7 @@ def run_main_benchmark(
                 for repetition in range(n_repetitions):
                     warm_start_configs = generate_warm_starts_with_strategy(
                         search_space=experiment_config.search_space,
-                        n_configs=n_ws,
+                        n_configs=n_warm_start_configs,
                         random_state=base_random_state + repetition,
                         objective_function=experiment_config.objective_function,
                         strategy=strategy,
@@ -410,16 +416,16 @@ def run_main_benchmark(
                         historical_performance = tune(
                             performance_generator=experiment_config.objective_function,
                             tuner_config=tuner,
-                            n_trials=n_ws + 1,
+                            n_trials=n_warm_start_configs + 1,
                             timeout=None,
                             params=experiment_config.search_space,
                             warm_start_configs=warm_start_configs_per_repetition[repetition],
                             random_state=base_random_state + repetition,
                         )
 
-                        if len(historical_performance) != n_ws + 1:
+                        if len(historical_performance) != n_warm_start_configs + 1:
                             raise ValueError(
-                                f"Expected {n_ws + 1} total trials but got {len(historical_performance)}"
+                                f"Expected {n_warm_start_configs + 1} total trials but got {len(historical_performance)}"
                             )
 
                         historical_performance = add_runtime(
@@ -435,7 +441,7 @@ def run_main_benchmark(
                             experiment_config=experiment_config,
                             tuner=tuner,
                             repetition=repetition,
-                            n_ws=n_ws,
+                            n_warm_start_configs=n_warm_start_configs,
                             strategy=strategy,
                             surrogate_metafeatures=surrogate_metafeatures,
                             aliases=aliases,
@@ -461,6 +467,33 @@ def run_main_benchmark(
     raw_benchmark_data.to_csv(final_filename, index=False)
     logger.info(f"Final raw benchmark data saved to {final_filename} ({len(raw_benchmark_data)} rows).")
     return raw_benchmark_data
+
+
+def _create_analysis_summary(analysis: LTRAnalysis) -> dict:
+    """Create a summary row for an LTR analysis.
+    
+    Args:
+        analysis: Fitted and evaluated LTRAnalysis instance.
+        
+    Returns:
+        Dictionary containing summary metrics.
+    """
+    if not analysis.ltr_metrics:
+        raise RuntimeError(f"LTRAnalysis '{analysis.analysis_identifier}': call evaluate() before summary.")
+
+    row = {
+        'config': analysis.analysis_identifier,
+        'partition': analysis.partition,
+        'strategy': analysis.strategy,
+        'n_train': len(analysis.train_data) if analysis.train_data is not None else 0,
+        'n_val': len(analysis.val_data) if analysis.val_data is not None else 0,
+        'n_test': len(analysis.test_data) if analysis.test_data is not None else 0,
+    }
+    for metric_name, metric_value in analysis.ltr_metrics.items():
+        row[f'{metric_name}_ltr'] = metric_value
+    for metric_name, metric_value in analysis.naive_metrics.items():
+        row[f'{metric_name}_naive'] = metric_value
+    return row
 
 
 def run_learning_to_rank_analysis(
@@ -525,23 +558,25 @@ def run_learning_to_rank_analysis(
         analysis.fit(raw_benchmark_data, k_values=ltr_config.k_values)
         analysis_id = analysis.analysis_identifier
         analyses[analysis_id] = analysis
-        analysis.evaluate(k_values=ltr_config.k_values)
+        
+        analysis_output_dir = output_dir / analysis_id
+        analysis_output_dir.mkdir(parents=True, exist_ok=True)
+        
+        analysis.evaluate(k_values=ltr_config.k_values, output_dir=analysis_output_dir)
 
         if compute_pdp:
             analysis.compute_pdp(
-                output_dir=output_dir / analysis_id,
+                output_dir=analysis_output_dir,
                 n_grid_points=pdp_n_grid_points,
                 show_std=pdp_show_std,
             )
 
         analysis.compute_downsampling(
             sample_sizes=downsampling_sample_sizes,
-            output_dir=output_dir / analysis_id,
+            output_dir=analysis_output_dir,
         )
 
-        analysis.save(output_dir / analysis_id)
-
-    summary_df = pd.DataFrame([a.summary() for a in analyses.values()])
+    summary_df = pd.DataFrame([_create_analysis_summary(a) for a in analyses.values()])
     summary_df.to_csv(output_dir / "summary.csv", index=False)
 
     return analyses

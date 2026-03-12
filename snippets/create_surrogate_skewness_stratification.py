@@ -17,8 +17,8 @@ MAX_PERFECT_ACC_RATIO = 0.05
 MIN_RUNTIME = 8
 
 
-def calculate_conditional_asymmetry(X: np.ndarray, y: np.ndarray) -> float:
-    """Calculate conditional asymmetry using quantile skew ratio."""
+def calculate_local_skewness_ratio(X: np.ndarray, y: np.ndarray) -> float:
+    """Calculate local skewness ratio using quantile-based method."""
     if len(X) == 0 or len(y) == 0:
         return 0.0
 
@@ -89,7 +89,7 @@ def create_skewness_stratification(
     top_percent: float = None,
     max_perfect_acc_ratio: float = 0.01,
 ) -> list:
-    """Create stratification based on highest conditional asymmetry datasets."""
+    """Create stratification based on highest local skewness ratio datasets."""
     scores = {}
     for task_id in task_ids:
         tabularized_configurations, accuracies, runtimes = sample_benchmark_data(
@@ -102,7 +102,7 @@ def create_skewness_stratification(
             max_perfect_acc_ratio=max_perfect_acc_ratio,
             min_avg_runtime=MIN_RUNTIME,
         ):
-            score = calculate_conditional_asymmetry(
+            score = calculate_local_skewness_ratio(
                 X=tabularized_configurations, y=accuracies
             )
             if score > 0:

@@ -1,107 +1,107 @@
 import numpy as np
 
 
-def rastrigin(x, A=20):
+def rastrigin(input_vector, amplitude=20):
     """Rastrigin function - multimodal optimization benchmark.
 
     Args:
-        x: Input vector with shape (n_dimensions,).
-        A: Amplitude parameter (default: 20).
+        input_vector: Input vector with shape (n_dimensions,).
+        amplitude: Amplitude parameter (default: 20).
 
     Returns:
-        Function value at point x.
+        Function value at point input_vector.
     """
-    n = len(x)
-    rastrigin_value = A * n + np.sum(x**2 - A * np.cos(2 * np.pi * x))
+    num_dimensions = len(input_vector)
+    rastrigin_value = amplitude * num_dimensions + np.sum(input_vector**2 - amplitude * np.cos(2 * np.pi * input_vector))
     return rastrigin_value
 
 
-def ackley(x, a=20, b=0.2, c=2 * np.pi):
+def ackley(input_vector, amplitude=20, exponential_decay=0.2, oscillation_frequency=2 * np.pi):
     """Ackley function - multimodal optimization benchmark.
 
     Args:
-        x: Input vector with shape (n_dimensions,).
-        a: Amplitude parameter (default: 20).
-        b: Exponential decay parameter (default: 0.2).
-        c: Oscillation frequency parameter (default: 2π).
+        input_vector: Input vector with shape (n_dimensions,).
+        amplitude: Amplitude parameter (default: 20).
+        exponential_decay: Exponential decay parameter (default: 0.2).
+        oscillation_frequency: Oscillation frequency parameter (default: 2π).
 
     Returns:
-        Function value at point x.
+        Function value at point input_vector.
     """
-    n = len(x)
-    term1 = -a * np.exp(-b * np.sqrt(np.sum(x**2) / n))
-    term2 = -np.exp(np.sum(np.cos(c * x)) / n)
-    ackley_value = term1 + term2 + a + np.exp(1)
+    num_dimensions = len(input_vector)
+    term1 = -amplitude * np.exp(-exponential_decay * np.sqrt(np.sum(input_vector**2) / num_dimensions))
+    term2 = -np.exp(np.sum(np.cos(oscillation_frequency * input_vector)) / num_dimensions)
+    ackley_value = term1 + term2 + amplitude + np.exp(1)
     return ackley_value
 
 
-def griewank(x):
+def griewank(input_vector):
     """Griewank function - multimodal optimization benchmark.
 
     Args:
-        x: Input vector with shape (n_dimensions,).
+        input_vector: Input vector with shape (n_dimensions,).
 
     Returns:
-        Function value at point x.
+        Function value at point input_vector.
     """
-    n = len(x)
-    term1 = np.sum(x**2) / 4000
+    num_dimensions = len(input_vector)
+    term1 = np.sum(input_vector**2) / 4000
     term2 = 1
-    for i in range(n):
-        term2 *= np.cos(x[i] / np.sqrt(i + 1))
+    for dimension_idx in range(num_dimensions):
+        term2 *= np.cos(input_vector[dimension_idx] / np.sqrt(dimension_idx + 1))
     griewank_value = term1 - term2 + 1
     return griewank_value
 
 
-def weierstrass(x, a=0.5, b=3, kmax=20):
+def weierstrass(input_vector, amplitude=0.5, frequency_multiplier=3, max_summation_index=20):
     """Weierstrass function - fractal optimization benchmark.
 
     Args:
-        x: Input vector with shape (n_dimensions,).
-        a: Amplitude parameter (default: 0.5).
-        b: Frequency multiplier parameter (default: 3).
-        kmax: Maximum summation index (default: 20).
+        input_vector: Input vector with shape (n_dimensions,).
+        amplitude: Amplitude parameter (default: 0.5).
+        frequency_multiplier: Frequency multiplier parameter (default: 3).
+        max_summation_index: Maximum summation index (default: 20).
 
     Returns:
-        Function value at point x.
+        Function value at point input_vector.
     """
-    n = len(x)
+    num_dimensions = len(input_vector)
     weierstrass_value = 0
-    for i in range(n):
-        for k in range(kmax + 1):
-            weierstrass_value += (a**k) * np.cos(2 * np.pi * (b**k) * (x[i] + 0.5))
-        for k in range(kmax + 1):
-            weierstrass_value -= (a**k) * np.cos(2 * np.pi * (b**k) * 0.5)
+    for dimension_idx in range(num_dimensions):
+        for summation_idx in range(max_summation_index + 1):
+            weierstrass_value += (amplitude**summation_idx) * np.cos(2 * np.pi * (frequency_multiplier**summation_idx) * (input_vector[dimension_idx] + 0.5))
+        for summation_idx in range(max_summation_index + 1):
+            weierstrass_value -= (amplitude**summation_idx) * np.cos(2 * np.pi * (frequency_multiplier**summation_idx) * 0.5)
     return weierstrass_value
 
 
-def shekel(x, m=10):
+def shekel(input_vector, num_local_minima=10):
     """Shekel function - multimodal optimization benchmark with variable local minima.
 
     Args:
-        x: Input vector with shape (n_dimensions,).
-        m: Number of local minima (default: 10).
+        input_vector: Input vector with shape (n_dimensions,).
+        num_local_minima: Number of local minima (default: 10).
 
     Returns:
-        Function value at point x (negated for minimization).
+        Function value at point input_vector (negated for minimization).
     """
-    n = len(x)
-    A = np.random.rand(m, n) * 10  # random A matrix for each run
-    C = np.random.rand(m) * 10
+    num_dimensions = len(input_vector)
+    matrix_A = np.random.rand(num_local_minima, num_dimensions) * 10  # random matrix for each run
+    vector_C = np.random.rand(num_local_minima) * 10
     shekel_value = 0
-    for i in range(m):
-        shekel_value -= 1 / (C[i] + np.sum((x - A[i]) ** 2))
+    for minima_idx in range(num_local_minima):
+        shekel_value -= 1 / (vector_C[minima_idx] + np.sum((input_vector - matrix_A[minima_idx]) ** 2))
     return -shekel_value
 
 
-def hartmann6(x):
+def hartmann6(input_vector):
     """Hartmann 6-dimensional function - optimization benchmark.
 
     Args:
-        x: Input vector with shape (6,).
+        input_vector: Input vector with shape (6,).
 
     Returns:
-        Function value at point x.
+        Function value at point input_vector.
     """
     alpha = [1.0, 1.2, 3.0, 3.2]
     A = np.array(
