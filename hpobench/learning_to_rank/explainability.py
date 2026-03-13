@@ -18,19 +18,22 @@ def compute_shap_values(
     sample_size: int | None = None,
     random_state: int = 42,
 ) -> SharpResults:
-    """Compute rank-based SHAP values via the ShaRP library.
+    """Compute rank-based SHAP values via ShaRP.
 
     Args:
         model: Trained XGBoost booster.
         data: Data to explain.
         feature_cols: Feature column names.
-        sample_size: Perturbation sample size (``None`` → ShaRP default).
+        sample_size: Perturbation sample size.
         random_state: Random seed.
+    
+    Returns:
+        SharpResults with SHAP values and metadata.
     """
     X = data[feature_cols].values
 
     def predict(x: np.ndarray) -> np.ndarray:
-        return model.predict(xgb.DMatrix(x))
+        return model.predict(xgb.DMatrix(x, feature_names=feature_cols))
 
     explainer = ShaRP(
         qoi='rank',
@@ -49,7 +52,14 @@ def compute_shap_values(
 
 
 def shap_importance_summary(shap_results: SharpResults) -> pd.DataFrame:
-    """Per-feature importance summary from SHAP values, sorted by mean |SHAP|."""
+    """Compute per-feature importance from SHAP values.
+    
+    Args:
+        shap_results: SHAP results from ShaRP.
+    
+    Returns:
+        DataFrame sorted by mean absolute SHAP.
+    """
     return (
         pd.DataFrame({
             'feature': shap_results.feature_names,
@@ -63,6 +73,7 @@ def shap_importance_summary(shap_results: SharpResults) -> pd.DataFrame:
 
 
 def _save_figure(fig: plt.Figure, output_path: Path | None) -> None:
+    """Save figure to disk or display."""
     if output_path is not None:
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(output_path, dpi=300, bbox_inches='tight')
@@ -72,7 +83,13 @@ def _save_figure(fig: plt.Figure, output_path: Path | None) -> None:
 
 
 def plot_shap_importance(shap_results: SharpResults, output_path: Path | None = None, top_k: int = 20) -> None:
-    """Horizontal bar chart of global feature importance (mean |SHAP|)."""
+    """Horizontal bar chart of feature importance by mean |SHAP|.
+    
+    Args:
+        shap_results: SHAP results.
+        output_path: Save path or None to display.
+        top_k: Number of top features to show.
+    """
     importance = np.abs(shap_results.shap_values).mean(axis=0)
     idx = np.argsort(importance)[-top_k:][::-1]
 
@@ -89,7 +106,13 @@ def plot_shap_importance(shap_results: SharpResults, output_path: Path | None = 
 
 
 def plot_shap_beeswarm(shap_results: SharpResults, output_path: Path | None = None, top_k: int = 20) -> None:
-    """Beeswarm plot of SHAP value distributions per feature."""
+    """Beeswarm plot of SHAP distributions per feature.
+    
+    Args:
+        shap_results: SHAP results.
+        output_path: Save path or None to display.
+        top_k: Number of top features to show.
+    """
     importance = np.abs(shap_results.shap_values).mean(axis=0)
     idx = np.argsort(importance)[-top_k:][::-1]
     rng = np.random.RandomState(42)
@@ -100,7 +123,14 @@ def plot_shap_beeswarm(shap_results: SharpResults, output_path: Path | None = No
         feat_vals = shap_results.feature_matrix[:, feat_idx]
         vmin, vmax = feat_vals.min(), feat_vals.max()
         colors = (feat_vals - vmin) / (vmax - vmin) if vmax > vmin else np.zeros_like(feat_vals)
-        ax.scatter(shap_vals, pos + rng.uniform(-0.3, 0.3, len(shap_vals)), c=colors, cmap='coolwarm', s=20, alpha=0.6)
+        ax.scatter(
+            shap_vals,
+            pos + rng.uniform(-0.3, 0.3, len(shap_vals)),
+            c=colors,
+            cmap='coolwarm',
+            s=20,
+            alpha=0.6,
+        )
 
     ax.set_yticks(range(len(idx)))
     ax.set_yticklabels([shap_results.feature_names[i] for i in idx])
@@ -120,29 +150,45 @@ def run_shap_analysis(
     top_k: int = 20,
     sample_size: int | None = None,
 ) -> dict:
-    """Compute SHAP values, build importance summary, and optionally save plots and CSV.
+    """Compute SHAP values and save plots and summary.
+
+    Args:
+        model: Trained XGBoost booster.
+        data: Data to explain.
+        feature_cols: Feature column names.
+        output_dir: Directory to save outputs.
+        top_k: Top features to include.
+        sample_size: ShaRP sample size.
 
     Returns:
-        ``{'shap_results': SharpResults, 'summary': pd.DataFrame}``
+        Dict with 'shap_results' and 'summary'.
     """
-    shap_results = compute_shap_values(model, data, feature_cols, sample_size)
-    summary = shap_importance_summary(shap_results)
+    shap_results = compute_shap_values(model=model, data=data, feature_cols=feature_cols, sample_size=sample_size)
+    summary = shap_importance_summary(shap_results=shap_results)
 
     if output_dir is not None:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         summary.to_csv(output_dir / 'feature_importance.csv', index=False)
-        plot_shap_importance(shap_results, output_dir / 'importance_bar.png', top_k)
-        plot_shap_beeswarm(shap_results, output_dir / 'importance_beeswarm.png', top_k)
+        plot_shap_importance(shap_results=shap_results, output_path=output_dir / 'importance_bar.png', top_k=top_k)
+        plot_shap_beeswarm(shap_results=shap_results, output_path=output_dir / 'importance_beeswarm.png', top_k=top_k)
 
     return {'shap_results': shap_results, 'summary': summary}
 
 
 def _feature_grid(values: pd.Series, n_points: int, quantile_range: tuple[float, float]) -> np.ndarray:
-    """Build an evaluation grid for one feature column.
-
-    Categorical or low-cardinality features use all unique values.
-    Continuous features use a quantile-bounded linspace to avoid sparse extrapolation.
+    """Build evaluation grid for one feature.
+    
+    Categorical or low-cardinality: use unique values.
+    Continuous: use quantile-bounded linspace to avoid extrapolation.
+    
+    Args:
+        values: Feature values.
+        n_points: Grid resolution.
+        quantile_range: Quantile bounds.
+    
+    Returns:
+        Grid points for the feature.
     """
     unique = values.dropna().unique()
     if len(unique) <= 10 or values.dtype == 'object':
@@ -154,14 +200,15 @@ def _feature_grid(values: pd.Series, n_points: int, quantile_range: tuple[float,
 
 
 def _bootstrap_ci(values: list[float], n_resamples: int, ci: float) -> tuple[float, float, float]:
-    """Bootstrap a CI on the mean rank over ranking groups.
-
-    Resamples with replacement and returns (mean, ci_low, ci_high).
+    """Bootstrap confidence interval on mean rank.
 
     Args:
-        values: One rank observation per ranking group.
-        n_resamples: Number of bootstrap resamples.
-        ci: Desired confidence interval coverage, e.g. 0.95.
+        values: One rank per ranking group.
+        n_resamples: Bootstrap resamples.
+        ci: CI coverage, e.g. 0.95.
+    
+    Returns:
+        Tuple of (mean, ci_low, ci_high).
     """
     arr = np.array(values)
     rng = np.random.RandomState(42)
@@ -183,47 +230,40 @@ def compute_partial_dependence(
     bootstrap_ci: float = 0.95,
 ) -> PartialDependenceResults:
     """Compute rank-based partial dependence for all features and tuners.
-
-    Each feature is swept across a grid while all other features stay at their observed
-    values. Because features are dataset-level meta-features, every tuner competing on a
-    given dataset shares identical feature values. The sweep therefore moves all tuners
-    simultaneously within each group — the only valid intervention — simulating how ranks
-    would shift on a hypothetical dataset where meta-feature x_j equals v.
-
-    Uncertainty bands come from bootstrapping over ranking groups (datasets) with
-    replacement, giving a non-parametric CI on the mean rank at each grid point.
+    
+    Sweeps each feature across a grid while holding others at observed values.
+    Bootstrapping over ranking groups provides non-parametric confidence bands.
 
     Args:
         model: Trained XGBoost booster.
         data: Test-set data with feature, group, and tuner columns.
         feature_cols: Meta-feature column names to sweep.
-        group_col: Column identifying ranking groups (one row per tuner per group).
+        group_col: Column identifying ranking groups.
         tuner_col: Column identifying tuners.
         partition_name: Label for downstream identification.
         n_grid_points: Grid resolution for continuous features.
-        quantile_range: Quantile bounds clipping the evaluation grid.
+        quantile_range: Quantile bounds for evaluation grid.
         n_bootstrap: Bootstrap resamples per grid point.
-        bootstrap_ci: CI coverage, e.g. 0.95 for 95%.
+        bootstrap_ci: CI coverage, e.g. 0.95.
 
     Returns:
-        ``PartialDependenceResults`` with one ``PartialDependenceResult`` per (feature, tuner).
+        PartialDependenceResults with one result per (feature, tuner) pair.
     """
     tuners = sorted(data[tuner_col].unique())
     n_groups = data[group_col].nunique()
     results: list[PartialDependenceResult] = []
 
-    logger.info(f"Computing PDP for '{partition_name}' ({len(feature_cols)} features, {len(tuners)} tuners)")
+    logger.info(f'Computing PDP for {partition_name!r} ({len(feature_cols)} features, {len(tuners)} tuners)')
 
     for feature in feature_cols:
-        logger.debug(f"  feature: {feature}")
-        grid = _feature_grid(data[feature], n_grid_points, quantile_range)
+        grid = _feature_grid(values=data[feature], n_points=n_grid_points, quantile_range=quantile_range)
 
         tuner_curves: dict[str, list[tuple[float, float, float]]] = {t: [] for t in tuners}
 
         for val in grid:
             modified = data.copy()
             modified[feature] = val
-            modified['_score'] = model.predict(xgb.DMatrix(modified[feature_cols]))
+            modified['_score'] = model.predict(xgb.DMatrix(modified[feature_cols], feature_names=feature_cols))
 
             grid_point_ranks: dict[str, list[float]] = {t: [] for t in tuners}
             for _, group in modified.groupby(group_col):
@@ -234,7 +274,9 @@ def compute_partial_dependence(
 
             for tuner in tuners:
                 ranks = grid_point_ranks[tuner]
-                tuner_curves[tuner].append(_bootstrap_ci(ranks, n_bootstrap, bootstrap_ci) if ranks else (np.nan, np.nan, np.nan))
+                tuner_curves[tuner].append(
+                    _bootstrap_ci(values=ranks, n_resamples=n_bootstrap, ci=bootstrap_ci) if ranks else (np.nan, np.nan, np.nan)
+                )
 
         for tuner in tuners:
             means, ci_lows, ci_highs = zip(*tuner_curves[tuner])
@@ -258,17 +300,17 @@ def plot_partial_dependence(
     show_ci: bool = True,
     n_cols: int = 3,
 ) -> None:
-    """Save per-tuner PDP grid plots to ``output_dir``.
-
-    Each subplot shows mean rank across the feature sweep grid with an optional
-    bootstrapped CI band. Y-axis is inverted so rank 1 (best) appears at the top.
+    """Save per-tuner PDP grid plots.
+    
+    Each subplot shows mean rank with optional bootstrapped CI band.
+    Y-axis inverted so rank 1 (best) appears at top.
 
     Args:
         pdp_results: Computed partial dependence results.
-        output_dir: Directory where PNG files are written.
-        tuner_name: Plot only this tuner; if ``None``, plots all tuners.
-        show_ci: Whether to draw the bootstrapped CI band.
-        n_cols: Subplot columns in the grid layout.
+        output_dir: Directory to save PNG files.
+        tuner_name: Plot only this tuner; None plots all.
+        show_ci: Whether to draw bootstrapped CI band.
+        n_cols: Subplot columns.
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -276,7 +318,7 @@ def plot_partial_dependence(
 
     for tuner in tuners:
         if tuner not in pdp_results.tuner_names:
-            raise ValueError(f"Tuner '{tuner}' not found in results")
+            raise ValueError(f'Tuner {tuner!r} not found in results')
 
         n_features = len(pdp_results.feature_names)
         n_rows = int(np.ceil(n_features / n_cols))
@@ -284,7 +326,7 @@ def plot_partial_dependence(
         axes = np.atleast_2d(axes).flatten()
 
         for i, feature in enumerate(pdp_results.feature_names):
-            r = pdp_results.get(feature, tuner)
+            r = pdp_results.get(feature=feature, tuner=tuner)
             ax = axes[i]
             ax.plot(r.x_values, r.rank_means, 'o-', linewidth=2, markersize=4)
             if show_ci:
@@ -299,9 +341,12 @@ def plot_partial_dependence(
         for i in range(n_features, len(axes)):
             axes[i].set_visible(False)
 
-        fig.suptitle(f'Rank-Based Partial Dependence: {tuner}\nPartition: {pdp_results.partition_name}', fontsize=12, fontweight='bold')
+        fig.suptitle(
+            f'Rank-Based Partial Dependence: {tuner}\nPartition: {pdp_results.partition_name}',
+            fontsize=12,
+            fontweight='bold',
+        )
         fig.tight_layout()
         path = output_dir / f'pdp_{tuner}.png'
         fig.savefig(path, dpi=300, bbox_inches='tight')
         plt.close(fig)
-        logger.debug(f"Saved PDP plot: {path}")

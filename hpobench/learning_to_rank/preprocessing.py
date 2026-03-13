@@ -12,20 +12,7 @@ def _compute_ranks(
     performance_col: str,
     label_col: str,
 ) -> pd.DataFrame:
-    """Compute ranking labels within groups based on performance.
-    
-    Ranks tuners within each unique combination of grouping columns based on their
-    performance values. Lower performance values receive better (lower) ranks.
-    
-    Args:
-        data: Benchmark trial results.
-        rank_group_cols: Columns defining unique ranking contexts.
-        performance_col: Column containing performance metric values.
-        label_col: Name for output ranking label column.
-    
-    Returns:
-        Copy of data with added label_col containing within-group ranks.
-    """
+    """Compute within-group ranking labels based on performance."""
     result = data.copy()
     result[label_col] = (
         result.groupby(rank_group_cols, group_keys=False)[performance_col]
@@ -41,22 +28,7 @@ def _add_engineered_columns(
     ranking_group_id_col: str,
     split_group_id_col: str,
 ) -> list[str]:
-    """Create concatenated identifier columns for ranking and data splitting.
-    
-    Creates two engineered columns by concatenating source columns:
-    - ranking_group_id_col: All rank_group_cols concatenated
-    - split_group_id_col: All split_group_cols concatenated
-    
-    Args:
-        data: Benchmark data (modified in place).
-        rank_group_cols: Columns for ranking groups.
-        split_group_cols: Columns for split groups.
-        ranking_group_id_col: Name for ranking group identifier column.
-        split_group_id_col: Name for split group identifier column.
-    
-    Returns:
-        List of newly created column names.
-    """
+    """Create concatenated identifier columns for ranking and splitting."""
     data[ranking_group_id_col] = data[rank_group_cols].astype(str).agg('_'.join, axis=1)
     data[split_group_id_col] = data[split_group_cols].astype(str).agg('_'.join, axis=1)
     return [ranking_group_id_col, split_group_id_col]
@@ -67,19 +39,7 @@ def _encode_tuner(
     tuner_col: str,
     method: TunerEncoding,
 ) -> list[str]:
-    """Encode tuner identities as numeric or one-hot features.
-    
-    Args:
-        data: Benchmark data (modified in place).
-        tuner_col: Column containing tuner identifiers.
-        method: Encoding method ('ordinal' or 'one_hot').
-    
-    Returns:
-        List of newly created encoded column names.
-    
-    Raises:
-        ValueError: If method is not 'ordinal' or 'one_hot'.
-    """
+    """Encode tuners as numeric or one-hot features."""
     if method == 'ordinal':
         data['tuner_encoded'] = LabelEncoder().fit_transform(data[tuner_col])
         return ['tuner_encoded']
@@ -88,55 +48,32 @@ def _encode_tuner(
         for col in dummies.columns:
             data[col] = dummies[col]
         return list(dummies.columns)
-    raise ValueError(f"Unknown tuner_encoding_method '{method}'. Must be 'ordinal' or 'one_hot'.")
+    else:
+        raise ValueError(f'Unknown tuner encoding method {method!r}. Must be ordinal or one_hot.')
 
 
 def prepare_data(
     raw_data: pd.DataFrame,
-    partition: Partition,
     schema: BenchmarkDataSchema,
     metafeatures_schema: SurrogateMetafeaturesSchema,
-    synthetic_benchmark_id: str,
     tuner_encoding_method: TunerEncoding = 'ordinal',
 ) -> tuple[pd.DataFrame, list[str]]:
-    """Prepare raw benchmark data for learning-to-rank model training.
+    """Prepare benchmark data for learning-to-rank training.
     
-    Applies preprocessing pipeline: partition filtering → rank computation → 
-    engineered columns → tuner encoding → column subsetting.
-    
-    Args:
-        raw_data: Unfiltered benchmark trial results.
-        partition: Data partition ('synthetic', 'real', or 'all').
-        schema: Column name schema for benchmark data.
-        metafeatures_schema: Feature column schema.
-        synthetic_benchmark_id: Identifier for synthetic benchmark rows.
-        tuner_encoding_method: Tuner encoding ('ordinal' or 'one_hot').
-    
-    Returns:
-        Tuple of (prepared_data, feature_column_names).
-    
-    Raises:
-        ValueError: If partition is invalid or yields no data.
+    Applies preprocessing: rank computation → engineered columns → tuner encoding.
     """
-    if partition == 'synthetic':
-        data = raw_data[raw_data[schema.benchmark_identifier_col] == synthetic_benchmark_id].copy()
-    elif partition == 'real':
-        data = raw_data[raw_data[schema.benchmark_identifier_col] != synthetic_benchmark_id].copy()
-    elif partition == 'all':
-        data = raw_data.copy()
-    else:
-        raise ValueError(f"Unknown partition '{partition}'. Must be 'synthetic', 'real', or 'all'.")
+    if raw_data.empty:
+        raise ValueError('No data available for preparation')
 
-    if data.empty:
-        raise ValueError(f"No data available for partition '{partition}'")
-    
+    data = raw_data.copy()
+
     data = _compute_ranks(
         data=data,
         rank_group_cols=schema.rank_group_cols,
         performance_col=schema.performance_col,
         label_col=schema.label_col,
     )
-    
+
     engineered_cols = _add_engineered_columns(
         data=data,
         rank_group_cols=schema.rank_group_cols,
@@ -144,23 +81,24 @@ def prepare_data(
         ranking_group_id_col=schema.ranking_group_id_col,
         split_group_id_col=schema.split_group_id_col,
     )
-    
+
     encoded_cols = _encode_tuner(
         data=data,
         tuner_col=schema.tuner_col,
         method=tuner_encoding_method,
     )
-    
+
     available_features = [c for c in metafeatures_schema.to_list() if c in data.columns]
     feature_cols = available_features + encoded_cols
     retained_cols = feature_cols + engineered_cols + [schema.label_col, schema.benchmark_identifier_col, schema.tuner_col]
     data = data[retained_cols]
-    
+
     return data, feature_cols
 
 
 def split_data(
     data: pd.DataFrame,
+    partition: Partition,
     strategy: SplitStrategy,
     train_size: float,
     val_size: float,
@@ -168,49 +106,99 @@ def split_data(
     synthetic_benchmark_id: str,
     schema: BenchmarkDataSchema,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Split prepared data into train/validation/test sets with group integrity.
-    
-    Maintains group integrity during splitting to prevent data leakage. Groups are
-    defined by split_group_id_col (dataset × warm_start_strategy × n_warm_starts).
-    
-    Args:
-        data: Output from prepare_data().
-        strategy: Split strategy ('random' or 'synthetic_train_real_test').
-        train_size: Training set proportion (0-1).
-        val_size: Validation set proportion (0-1).
-        random_state: Random seed for reproducibility.
-        synthetic_benchmark_id: Identifier for synthetic benchmark rows.
-        schema: Column name schema for benchmark data.
-    
-    Returns:
-        Tuple of (train_data, val_data, test_data).
-    
-    Raises:
-        ValueError: If strategy is invalid or synthetic data missing when required.
+    """Split data into train/validation/test sets.
+
+    Handles different partitioning strategies while ensuring a consistent test set for real-world data evaluation.
+
+    Strategies for 'all' partition:
+    - 'random': 
+        Train = Synthetic Train + Real Train
+        Val = Synthetic Val + Real Val
+        Test = Synthetic Test + Real Test
+    - 'synthetic_train_real_test': 
+        Train = All Synthetic (Train+Val+Test) + Real Train
+        Val = Real Val
+        Test = Real Test
+
+    For 'synthetic' or 'real' partitions, performs a standard Train/Val/Test split.
+    The Real data split is consistent across all strategies to ensure comparable evaluation metrics.
     """
-    val_prop = val_size / (train_size + val_size)
+    is_synthetic = data[schema.benchmark_identifier_col] == synthetic_benchmark_id
+    synthetic = data[is_synthetic]
+    real = data[~is_synthetic]
 
-    if strategy == 'synthetic_train_real_test':
-        is_synthetic = data[schema.benchmark_identifier_col] == synthetic_benchmark_id
-        synthetic, real = data[is_synthetic], data[~is_synthetic]
+    real_train = pd.DataFrame()
+    real_val = pd.DataFrame()
+    real_test = pd.DataFrame()
+
+    if not real.empty:
+        test_prop = 1.0 - (train_size + val_size)
+        if test_prop <= 0:
+            raise ValueError(f"train_size ({train_size}) + val_size ({val_size}) must be < 1.0")
+
+        # Split Real -> Dev (Train+Val) + Test
+        test_splitter = GroupShuffleSplit(n_splits=1, test_size=test_prop, random_state=random_state)
+        dev_idx, test_idx = next(test_splitter.split(real, groups=real[schema.split_group_id_col]))
+        real_dev = real.iloc[dev_idx]
+        real_test = real.iloc[test_idx]
+
+        # Split Dev -> Train + Val
+        val_prop_dev = val_size / (train_size + val_size)
+        dev_splitter = GroupShuffleSplit(n_splits=1, test_size=val_prop_dev, random_state=random_state)
+        train_idx, val_idx = next(dev_splitter.split(real_dev, groups=real_dev[schema.split_group_id_col]))
+        real_train = real_dev.iloc[train_idx]
+        real_val = real_dev.iloc[val_idx]
+
+    syn_train = pd.DataFrame()
+    syn_val = pd.DataFrame()
+    syn_test = pd.DataFrame()
+
+    if not synthetic.empty:
+        # Split synthetic data only if needed for 'synthetic' partition or 'random' strategy
+        if partition == 'synthetic' or (partition == 'all' and strategy == 'random'):
+            test_prop = 1.0 - (train_size + val_size)
+            if test_prop <= 0:
+                raise ValueError(f"train_size ({train_size}) + val_size ({val_size}) must be < 1.0")
+
+            splitter = GroupShuffleSplit(n_splits=1, test_size=test_prop, random_state=random_state)
+            dev_idx, test_idx = next(splitter.split(synthetic, groups=synthetic[schema.split_group_id_col]))
+            syn_dev = synthetic.iloc[dev_idx]
+            syn_test = synthetic.iloc[test_idx]
+
+            val_prop_dev = val_size / (train_size + val_size)
+            dev_splitter = GroupShuffleSplit(n_splits=1, test_size=val_prop_dev, random_state=random_state)
+            train_idx, val_idx = next(dev_splitter.split(syn_dev, groups=syn_dev[schema.split_group_id_col]))
+            syn_train = syn_dev.iloc[train_idx]
+            syn_val = syn_dev.iloc[val_idx]
+
+    if partition == 'synthetic':
         if synthetic.empty:
-            raise ValueError("No synthetic data available for training")
-        splitter = GroupShuffleSplit(n_splits=1, test_size=val_prop, random_state=random_state)
-        train_idx, val_idx = next(splitter.split(synthetic, groups=synthetic[schema.split_group_id_col]))
-        return synthetic.iloc[train_idx], synthetic.iloc[val_idx], real
+            raise ValueError("Partition is 'synthetic' but no synthetic data found.")
+        return syn_train, syn_val, syn_test
 
-    elif strategy == 'random':
-        outer = GroupShuffleSplit(
-            n_splits=1,
-            train_size=train_size + val_size,
-            random_state=random_state,
-        )
-        train_val_idx, test_idx = next(outer.split(data, groups=data[schema.split_group_id_col]))
-        train_val, test_data = data.iloc[train_val_idx], data.iloc[test_idx]
+    elif partition == 'real':
+        if real.empty:
+            raise ValueError("Partition is 'real' but no real data found.")
+        return real_train, real_val, real_test
 
-        inner = GroupShuffleSplit(n_splits=1, test_size=val_prop, random_state=random_state)
-        train_idx, val_idx = next(inner.split(train_val, groups=train_val[schema.split_group_id_col]))
-        return train_val.iloc[train_idx], train_val.iloc[val_idx], test_data
-    
+    elif partition == 'all':
+        if strategy == 'synthetic_train_real_test':
+            if synthetic.empty or real.empty:
+                 raise ValueError("Strategy 'synthetic_train_real_test' requires both synthetic and real data.")
+            
+            return pd.concat([synthetic, real_train]), real_val, real_test
+        
+        elif strategy == 'random':
+            if synthetic.empty or real.empty:
+                 raise ValueError("Strategy 'random' with partition 'all' requires both synthetic and real data.")
+
+            return (
+                pd.concat([syn_train, real_train]),
+                pd.concat([syn_val, real_val]),
+                pd.concat([syn_test, real_test])
+            )
+        else:
+            raise ValueError(f"Unknown strategy {strategy!r}")
+
     else:
-        raise ValueError(f"Unknown strategy '{strategy}'. Must be 'random' or 'synthetic_train_real_test'.")
+        raise ValueError(f"Unknown partition {partition!r}")

@@ -1,8 +1,10 @@
 import numpy as np
 import pytest
 import pandas as pd
+import matplotlib
+matplotlib.use('Agg')
 from hpobench.generation.generate import BlackBoxGenerator
-from hpobench.config.types import FloatRange, IntRange, CategoricalRange, ExperimentConfig, TunerConfig, CustomGPModel
+from hpobench.config.types import FloatRange, IntRange, CategoricalRange, ExperimentConfig, TunerConfig, CustomGPModel, LTRConfig, LTRTuningConfig
 from hpobench.config.schema import SurrogateMetafeaturesSchema, Aliases, BenchmarkDataSchema
 from hpobench.utils import generate_hyperparameter_combinations
 
@@ -242,3 +244,31 @@ def preprocessing_raw_data():
                         })
     
     return pd.DataFrame(data_list)
+
+@pytest.fixture
+def ltr_config():
+    return LTRConfig(
+        train_size=0.6,
+        val_size=0.2,
+        random_state=42,
+        k_values=(1, 3),
+        tuning=LTRTuningConfig(n_tuning_trials=1)
+    )
+
+@pytest.fixture
+def ltr_analysis(benchmark_data_schema, surrogate_metafeatures_schema, ltr_config):
+    from hpobench.learning_to_rank.analysis import LTRAnalysis
+    return LTRAnalysis(
+        schema=benchmark_data_schema,
+        metafeatures_schema=surrogate_metafeatures_schema,
+        synthetic_benchmark_id="synthetic_tabular",
+        ltr_config=ltr_config,
+        partition="all",
+        strategy="random",
+        tuner_encoding_method="ordinal"
+    )
+
+@pytest.fixture
+def fitted_ltr_analysis(ltr_analysis, preprocessing_raw_data):
+    ltr_analysis.fit(preprocessing_raw_data, k_values=(1, 3))
+    return ltr_analysis

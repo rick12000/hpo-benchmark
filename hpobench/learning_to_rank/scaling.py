@@ -23,27 +23,22 @@ def compute_downsampling_curve(
     schema: BenchmarkDataSchema,
     analysis_identifier: str,
 ) -> DownsamplingResults:
-    """Train LTR models at progressively smaller training set sizes and evaluate on a fixed test set.
+    """Train models at progressively smaller sizes and evaluate on fixed test set.
 
-    At each sample size checkpoint, a fresh LTR model is trained on a random subset of
-    ranking groups drawn from ``train_val_data``. The validation split within each
-    checkpoint preserves the same val proportion as the original experiment. All models
-    are evaluated on the fixed held-out ``test_data``, so metric changes reflect only
-    the effect of training set size and not test distribution shift.
+    At each checkpoint, a fresh model trains on a random subset of ranking groups.
+    Validation split preserves original proportions. Models evaluated on fixed test set.
 
     Args:
-        train_val_data: Combined train and validation data from the original split.
-        test_data: Fixed held-out test set used for evaluation at every checkpoint.
-        feature_cols: Feature column names the LTR model was trained on.
-        requested_sample_sizes: Candidate group counts to evaluate. Any value exceeding
-            the total available groups is silently dropped; the full dataset size is
-            always appended as the final checkpoint.
-        ltr_config: LTR configuration providing val proportion, k values, and tuning settings.
-        schema: Data schema providing column name constants.
-        analysis_identifier: Label used in per-checkpoint model identifiers and logging.
+        train_val_data: Combined train/validation data.
+        test_data: Fixed held-out test set.
+        feature_cols: Feature column names.
+        requested_sample_sizes: Group counts to evaluate.
+        ltr_config: LTR configuration.
+        schema: Data schema.
+        analysis_identifier: Logging label.
 
     Returns:
-        ``DownsamplingResults`` containing metric trajectories for each checkpoint.
+        DownsamplingResults with metric trajectories.
     """
     total_available_groups = train_val_data[schema.ranking_group_id_col].nunique()
     val_proportion = ltr_config.val_size / (ltr_config.train_size + ltr_config.val_size)
@@ -52,8 +47,8 @@ def compute_downsampling_curve(
     )
 
     logger.info(
-        f"[{analysis_identifier}] downsampling: {len(valid_sample_sizes)} checkpoints, "
-        f"max {total_available_groups} groups"
+        f'[{analysis_identifier}] downsampling: {len(valid_sample_sizes)} checkpoints, '
+        f'max {total_available_groups} groups'
     )
 
     all_group_ids = train_val_data[schema.ranking_group_id_col].unique()
@@ -89,17 +84,17 @@ def compute_downsampling_curve(
             feature_cols=feature_cols,
             tuning_config=ltr_config.tuning,
             k_values=ltr_config.k_values,
-            analysis_identifier=f"{analysis_identifier}_downsampling_{n_groups_at_checkpoint}",
+            analysis_identifier=f'{analysis_identifier}_downsampling_{n_groups_at_checkpoint}',
             n_tuning_trials=1,
         )
 
         checkpoint_metrics = _evaluate_rankings(
-            test_data,
-            checkpoint_model.predict(test_data),
-            ltr_config.k_values,
-            schema.ranking_group_id_col,
-            schema.label_col,
-            schema.tuner_col,
+            test_data=test_data,
+            predicted_scores=checkpoint_model.predict(test_data),
+            k_values=ltr_config.k_values,
+            ranking_group_id_col=schema.ranking_group_id_col,
+            label_col=schema.label_col,
+            tuner_col=schema.tuner_col,
             ascending_scores=False,
         )
         checkpoint_rows.append({
@@ -133,9 +128,9 @@ def plot_downsampling_curve(
     """4-panel plot of precision@k and NDCG@k vs. training sample size.
 
     Args:
-        downsampling_results: Computed downsampling results.
-        output_path: Full path (including filename) where the PNG is saved.
-        partition_name: Optional label shown in the plot title.
+        downsampling_results: Downsampling results.
+        output_path: Full path where PNG is saved.
+        partition_name: Optional label for plot title.
     """
     sample_sizes = downsampling_results.sample_sizes
     relevant_metric_keys = [
@@ -156,21 +151,24 @@ def plot_downsampling_curve(
         if max(sample_sizes) / min(sample_sizes) > 10:
             ax.set_xscale('log')
         full_data_value = metric_values[-1]
-        ax.axhline(full_data_value, color='red', linestyle='--', alpha=0.5, linewidth=1.5,
-                   label=f'Full data: {full_data_value:.3f}')
+        ax.axhline(
+            full_data_value,
+            color='red',
+            linestyle='--',
+            alpha=0.5,
+            linewidth=1.5,
+            label=f'Full data: {full_data_value:.3f}',
+        )
         ax.legend(fontsize=9)
 
     for unused_ax in axes[len(relevant_metric_keys):]:
         unused_ax.set_visible(False)
 
-    if partition_name:
-        title = f'LTR Scaling Analysis\nPartition: {partition_name}'
-    else:
-        title = 'LTR Scaling Analysis'
+    title = f'LTR Scaling Analysis\nPartition: {partition_name}' if partition_name else 'LTR Scaling Analysis'
     fig.suptitle(title, fontsize=14, fontweight='bold')
     fig.tight_layout()
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=300, bbox_inches='tight')
     plt.close(fig)
-    logger.info(f"Saved downsampling plot: {output_path}")
+    logger.info(f'Saved downsampling plot: {output_path}')
