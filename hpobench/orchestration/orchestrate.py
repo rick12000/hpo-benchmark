@@ -1,6 +1,8 @@
 import gc
 import logging
+import multiprocessing
 import os
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 from typing import Literal, Optional
@@ -320,20 +322,127 @@ def generate_warm_starts_with_strategy(
         raise ValueError(f"Unknown warm start strategy: {strategy}")
 
 
+def _run_single_experiment_config(
+    experiment_config: ExperimentConfig,
+    n_repetitions: int,
+    base_random_state: int,
+    n_warm_starts: list[int],
+    warm_start_strategies: list[str],
+) -> pd.DataFrame:
+    """Execute the full benchmark loop for a single experiment configuration.
+
+    This function is designed to be safe for use in a ``ProcessPoolExecutor`` worker.
+    It is a pure function of its inputs and has no side-effects on shared state.
+
+    Args:
+        experiment_config: Experiment instance binding a dataset to its search space,
+            objective function, and set of tuners.
+        n_repetitions: Independent repetitions per tuner.
+        base_random_state: Base seed; each repetition uses ``base_random_state + rep``.
+        n_warm_starts: List of warm-start sizes to evaluate.
+        warm_start_strategies: List of warm-start strategies to evaluate.
+
+    Returns:
+        DataFrame of all trial results for this experiment configuration.
+    """
+    from hpobench.orchestration.meta_features import calculate_surrogate_metafeatures
+
+    worker_aliases = Aliases()
+    dataset_name = experiment_config.dataset_identifier
+
+    experiment_config.objective_function.initialize()
+
+    config_results = pd.DataFrame()
+
+    for ws_idx, n_warm_start_configs in enumerate(n_warm_starts, 1):
+        for strategy in warm_start_strategies:
+            warm_start_configs_per_repetition = []
+            for repetition in range(n_repetitions):
+                warm_start_configs = generate_warm_starts_with_strategy(
+                    search_space=experiment_config.search_space,
+                    n_configs=n_warm_start_configs,
+                    random_state=base_random_state + repetition,
+                    objective_function=experiment_config.objective_function,
+                    strategy=strategy,
+                )
+                warm_start_configs_per_repetition.append(warm_start_configs)
+
+            # Compute metafeatures once per (repetition, strategy, ws_size) — identical
+            # inputs across all tuners, so computing inside the tuner loop is wasteful.
+            metafeatures_per_repetition = []
+            schema = SurrogateMetafeaturesSchema()
+            for repetition in range(n_repetitions):
+                configs = [config for config, _ in warm_start_configs_per_repetition[repetition]]
+                performances = [perf for _, perf in warm_start_configs_per_repetition[repetition]]
+                surrogate_metafeatures = calculate_surrogate_metafeatures(
+                    configs=configs,
+                    performances=performances,
+                    schema=schema,
+                    search_space=experiment_config.search_space,
+                    optimization_direction="minimize",
+                )
+                metafeatures_per_repetition.append(surrogate_metafeatures)
+
+            for tuner in experiment_config.tuner_configurations:
+                for repetition in range(n_repetitions):
+                    tune_start = datetime.now()
+
+                    historical_performance = tune(
+                        performance_generator=experiment_config.objective_function,
+                        tuner_config=tuner,
+                        n_trials=n_warm_start_configs + 1,
+                        timeout=None,
+                        params=experiment_config.search_space,
+                        warm_start_configs=warm_start_configs_per_repetition[repetition],
+                        random_state=base_random_state + repetition,
+                    )
+
+                    if len(historical_performance) != n_warm_start_configs + 1:
+                        raise ValueError(
+                            f"Expected {n_warm_start_configs + 1} total trials but got {len(historical_performance)}"
+                        )
+
+                    historical_performance = add_runtime(
+                        experiment_log=historical_performance,
+                        tune_start=tune_start,
+                        performance_generator=experiment_config.objective_function,
+                    )
+
+                    historical_performance = historical_performance.tail(1).copy()
+                    historical_performance = _annotate_trial_result(
+                        trial_row=historical_performance,
+                        experiment_config=experiment_config,
+                        tuner=tuner,
+                        repetition=repetition,
+                        n_warm_start_configs=n_warm_start_configs,
+                        strategy=strategy,
+                        surrogate_metafeatures=metafeatures_per_repetition[repetition],
+                        aliases=worker_aliases,
+                    )
+
+                    config_results = pd.concat([config_results, historical_performance], axis=0)
+
+    experiment_config.objective_function = None
+    gc.collect()
+
+    return config_results
+
+
 def run_main_benchmark(
     experiment_configs: list[ExperimentConfig],
     n_repetitions: int,
     cache_path: str,
     run_start_str: str,
     base_random_state: Optional[int] = None,
+    parallel: bool = False,
 ) -> pd.DataFrame:
     """Execute the core HPO benchmark loop across all experiment configurations.
 
     For each dataset the loop: initialises the surrogate objective, generates warm
     start configs once per (strategy, repetition) pair so all tuners share identical
     starting conditions, runs exactly ``n_ws + 1`` total trials (warm-starts plus one
-    optimisation step), and retains only the final trial row. Results are incrementally
-    persisted to disk after each trial to guard against mid-run failures.
+    optimisation step), and retains only the final trial row. Results are persisted
+    to disk after all configs complete (or incrementally in sequential mode).
 
     Args:
         experiment_configs: Pre-configured experiment instances, each binding a dataset
@@ -342,128 +451,68 @@ def run_main_benchmark(
         cache_path: Root directory for saving results and intermediate data.
         run_start_str: Unique run identifier used to namespace output paths.
         base_random_state: Base seed; each repetition uses ``base_random_state + rep``.
+        parallel: If ``True``, dispatch each experiment config to a separate process
+            using ``ProcessPoolExecutor``. The number of workers is capped at the
+            number of physical CPUs. If ``False``, configs are processed sequentially.
 
     Returns:
         DataFrame of all trial results with performance metrics and full metadata.
     """
-    from hpobench.orchestration.meta_features import calculate_surrogate_metafeatures
-
     experiment_params = ExperimentParameters()
     n_warm_starts = experiment_params.n_warm_starts
     warm_start_strategies = experiment_params.warm_start_strategies
 
-    logger.info("Running HPO benchmark...")
+    os.makedirs(os.path.join(cache_path, f"data/{run_start_str}"), exist_ok=True)
 
-    incremental_data_path = os.path.join(cache_path, f"data/{run_start_str}")
-    os.makedirs(incremental_data_path, exist_ok=True)
+    logger.info(
+        f"Running HPO benchmark — {len(experiment_configs)} configs, "
+        f"parallel={'yes' if parallel else 'no'}"
+    )
 
-    raw_benchmark_data = pd.DataFrame()
-    logger.info(f"Starting benchmark run with {len(experiment_configs)} experiment configurations")
+    worker_kwargs = dict(
+        n_repetitions=n_repetitions,
+        base_random_state=base_random_state,
+        n_warm_starts=n_warm_starts,
+        warm_start_strategies=warm_start_strategies,
+    )
 
-    for config_idx, experiment_config in enumerate(experiment_configs, 1):
-        dataset_name = experiment_config.dataset_identifier
-        logger.info(f"[Config {config_idx}/{len(experiment_configs)}] Dataset: {dataset_name}")
+    all_results: list[pd.DataFrame] = []
 
-        experiment_config.objective_function.initialize()
+    if parallel:
+        n_workers = min(len(experiment_configs), multiprocessing.cpu_count())
+        logger.info(f"Spawning {n_workers} worker processes")
+        with ProcessPoolExecutor(max_workers=n_workers, mp_context=multiprocessing.get_context("spawn")) as executor:
+            future_to_idx = {
+                executor.submit(_run_single_experiment_config, cfg, **worker_kwargs): idx
+                for idx, cfg in enumerate(experiment_configs)
+            }
+            for future in as_completed(future_to_idx):
+                idx = future_to_idx[future]
+                dataset_name = experiment_configs[idx].dataset_identifier
+                try:
+                    result_df = future.result()
+                    all_results.append(result_df)
+                    logger.info(f"[Config {idx + 1}/{len(experiment_configs)}] Dataset '{dataset_name}' finished — {len(result_df)} rows")
+                except Exception as exc:
+                    logger.error(f"[Config {idx + 1}] Dataset '{dataset_name}' raised an exception: {exc}", exc_info=True)
+                    raise
+    else:
+        for config_idx, experiment_config in enumerate(experiment_configs, 1):
+            dataset_name = experiment_config.dataset_identifier
+            logger.info(f"[Config {config_idx}/{len(experiment_configs)}] Dataset: {dataset_name}")
+            result_df = _run_single_experiment_config(experiment_config, **worker_kwargs)
+            all_results.append(result_df)
 
-        for ws_idx, n_warm_start_configs in enumerate(n_warm_starts, 1):
-            logger.info(
-                f"Warm start loop [{ws_idx}/{len(n_warm_starts)}] - "
-                f"Generating {n_warm_start_configs} warm start configurations for dataset: {dataset_name}"
+            # Incremental save after each config in sequential mode
+            interim = pd.concat(all_results, axis=0, ignore_index=True)
+            interim.to_csv(
+                os.path.join(cache_path, f"data/{run_start_str}", "incremental_raw_benchmark_data.csv"),
+                index=False,
             )
 
-            for strategy in warm_start_strategies:
-                logger.info(f"Using warm-start strategy: {strategy}")
+    raw_benchmark_data = pd.concat(all_results, axis=0, ignore_index=True) if all_results else pd.DataFrame()
 
-                warm_start_configs_per_repetition = []
-                for repetition in range(n_repetitions):
-                    warm_start_configs = generate_warm_starts_with_strategy(
-                        search_space=experiment_config.search_space,
-                        n_configs=n_warm_start_configs,
-                        random_state=base_random_state + repetition,
-                        objective_function=experiment_config.objective_function,
-                        strategy=strategy,
-                    )
-                    warm_start_configs_per_repetition.append(warm_start_configs)
-
-                logger.info(
-                    f"Generated {len(warm_start_configs_per_repetition[0])} warm start configurations "
-                    f"using {strategy} strategy."
-                )
-
-                for tuner in experiment_config.tuner_configurations:
-                    logger.info(f"Loop Level | Tuner: {tuner}")
-                    for repetition in range(n_repetitions):
-                        logger.info(f"Loop Level | Repetition: {repetition}")
-                        tune_start = datetime.now()
-
-                        configs = [config for config, _ in warm_start_configs_per_repetition[repetition]]
-                        performances = [perf for _, perf in warm_start_configs_per_repetition[repetition]]
-
-                        schema = SurrogateMetafeaturesSchema()
-                        surrogate_metafeatures = calculate_surrogate_metafeatures(
-                            configs=configs,
-                            performances=performances,
-                            schema=schema,
-                            search_space=experiment_config.search_space,
-                            optimization_direction="minimize",
-                        )
-                        logger.info(
-                            f"Calculated surrogate metafeatures for repetition {repetition} "
-                            f"from {len(configs)} warm-start configs ({strategy}): {surrogate_metafeatures}"
-                        )
-
-                        historical_performance = tune(
-                            performance_generator=experiment_config.objective_function,
-                            tuner_config=tuner,
-                            n_trials=n_warm_start_configs + 1,
-                            timeout=None,
-                            params=experiment_config.search_space,
-                            warm_start_configs=warm_start_configs_per_repetition[repetition],
-                            random_state=base_random_state + repetition,
-                        )
-
-                        if len(historical_performance) != n_warm_start_configs + 1:
-                            raise ValueError(
-                                f"Expected {n_warm_start_configs + 1} total trials but got {len(historical_performance)}"
-                            )
-
-                        historical_performance = add_runtime(
-                            experiment_log=historical_performance,
-                            tune_start=tune_start,
-                            performance_generator=experiment_config.objective_function,
-                        )
-
-                        # Retain only the final optimisation trial; warm-start rows are auxiliary.
-                        historical_performance = historical_performance.tail(1).copy()
-                        historical_performance = _annotate_trial_result(
-                            trial_row=historical_performance,
-                            experiment_config=experiment_config,
-                            tuner=tuner,
-                            repetition=repetition,
-                            n_warm_start_configs=n_warm_start_configs,
-                            strategy=strategy,
-                            surrogate_metafeatures=surrogate_metafeatures,
-                            aliases=aliases,
-                        )
-
-                        raw_benchmark_data = pd.concat(
-                            [raw_benchmark_data, historical_performance], axis=0
-                        )
-
-                        data_path = os.path.join(cache_path, f"data/{run_start_str}")
-                        os.makedirs(data_path, exist_ok=True)
-                        raw_benchmark_data.to_csv(
-                            os.path.join(data_path, "incremental_raw_benchmark_data.csv"),
-                            index=False,
-                        )
-
-        experiment_config.objective_function = None
-        gc.collect()
-
-    final_data_path = os.path.join(cache_path, f"data/{run_start_str}")
-    os.makedirs(final_data_path, exist_ok=True)
-    final_filename = os.path.join(final_data_path, "raw_benchmark_data.csv")
+    final_filename = os.path.join(cache_path, f"data/{run_start_str}", "raw_benchmark_data.csv")
     raw_benchmark_data.to_csv(final_filename, index=False)
     logger.info(f"Final raw benchmark data saved to {final_filename} ({len(raw_benchmark_data)} rows).")
     return raw_benchmark_data
@@ -607,6 +656,7 @@ def run_and_analyze_main_benchmark(
     max_n_instances_per_benchmark: int = 10,
     n_repetitions: int = 10,
     datasets_per_benchmark: Optional[list[list[str]]] = None,
+    parallel: bool = False,
 ) -> None:
     """Run the full benchmark pipeline: data generation, HPO trials, and LTR analysis.
 
@@ -627,6 +677,8 @@ def run_and_analyze_main_benchmark(
         max_n_instances_per_benchmark: Maximum dataset instances per benchmark.
         n_repetitions: Independent repetitions per tuner-dataset combination.
         datasets_per_benchmark: Optional per-benchmark dataset identifier lists.
+        parallel: If ``True``, process experiment configs in parallel using
+            ``ProcessPoolExecutor``. Defaults to ``False``.
     """
     experiment_configs = load_experiment_configs(
         benchmarks=benchmarks,
@@ -641,6 +693,7 @@ def run_and_analyze_main_benchmark(
         base_random_state=base_random_state,
         cache_path=cache_path,
         run_start_str=run_start_str,
+        parallel=parallel,
     )
 
     n_groups = raw_benchmark_data.groupby(schema.rank_group_cols).ngroups
