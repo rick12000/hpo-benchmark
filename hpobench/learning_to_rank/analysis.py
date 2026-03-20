@@ -167,7 +167,7 @@ class LTRAnalysis:
                 f'LTRAnalysis {self.analysis_identifier!r}: call fit() before evaluate().'
             )
 
-        def _rank_metrics(model, ascending: bool) -> dict[str, float]:
+        def _rank_metrics(model) -> dict[str, float]:
             return _evaluate_rankings(
                 test_data=self.test_data,
                 predicted_scores=model.predict(self.test_data),
@@ -175,11 +175,10 @@ class LTRAnalysis:
                 ranking_group_id_col=self.schema.ranking_group_id_col,
                 label_col=self.schema.label_col,
                 tuner_col=self.schema.tuner_col,
-                ascending_scores=ascending,
             )
 
-        self.ltr_metrics = _rank_metrics(self.ltr_model, ascending=False)
-        self.naive_metrics = _rank_metrics(self.baseline_ranker, ascending=True)
+        self.ltr_metrics = _rank_metrics(self.ltr_model)
+        self.naive_metrics = _rank_metrics(self.baseline_ranker)
 
         if output_dir is not None:
             output_dir = Path(output_dir)
@@ -245,14 +244,19 @@ class LTRAnalysis:
         self,
         output_dir: Path | None = None,
         top_k: int = 20,
-        sample_size: int | None = None,
+        sample_size: int = 20,
+        n_groups: int | None = None,
+        verbose: int = 1,
     ) -> dict:
-        """Compute SHAP values and save plots and summary.
+        """Compute rank-dependent SHAP values via ShaRP and save plots and summary.
 
         Args:
             output_dir: Directory to save plots and CSV.
             top_k: Top features to include in plots.
-            sample_size: ShaRP perturbation sample size.
+            sample_size: Coalitions sampled per data point by ShaRP.
+            n_groups: If set, subsample this many complete ranking groups before
+                computing SHAP. Group-level subsampling preserves rank coupling.
+            verbose: Verbosity passed to ShaRP (0 = silent, 1 = progress bar).
 
         Returns:
             Dict with 'shap_results' and 'summary'.
@@ -266,9 +270,12 @@ class LTRAnalysis:
             model=self.ltr_model.booster,
             data=self.test_data,
             feature_cols=self.feature_cols,
+            group_col=self.schema.ranking_group_id_col,
             output_dir=output_dir,
             top_k=top_k,
             sample_size=sample_size,
+            n_groups=n_groups,
+            verbose=verbose,
         )
 
     def compute_downsampling(

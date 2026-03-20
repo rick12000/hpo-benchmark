@@ -22,7 +22,7 @@ class ExperimentParameters(BaseModel):
         "gp_expected_improvement",
     ]
     max_n_instances: int = 15
-    n_repetitions: int = 20
+    n_repetitions: int = 10
     tuner_encoding_method: TunerEncoding = "ordinal"
     pdp_n_grid_points: int = 20
     pdp_show_std: bool = True

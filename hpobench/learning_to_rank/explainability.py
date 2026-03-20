@@ -4,50 +4,70 @@ import pandas as pd
 import xgboost as xgb
 import matplotlib.pyplot as plt
 from pathlib import Path
-
-from hpobench.config.types import SharpResults, PartialDependenceResult, PartialDependenceResults
 from sharp import ShaRP
 
+from hpobench.config.types import SharpResults, PartialDependenceResult, PartialDependenceResults
+
 logger = logging.getLogger(__name__)
+
+
+def _subsample_groups(
+    data: pd.DataFrame,
+    group_col: str,
+    n_groups: int,
+    random_state: int,
+) -> pd.DataFrame:
+    """Return a subset of ``data`` containing exactly ``n_groups`` complete ranking groups."""
+    groups = data[group_col].unique()
+    rng = np.random.RandomState(random_state)
+    chosen = rng.choice(groups, size=min(n_groups, len(groups)), replace=False)
+    return data[data[group_col].isin(chosen)].reset_index(drop=True)
 
 
 def compute_shap_values(
     model: xgb.Booster,
     data: pd.DataFrame,
     feature_cols: list[str],
-    sample_size: int | None = None,
+    group_col: str,
+    sample_size: int = 20,
     random_state: int = 42,
+    verbose: int = 1,
 ) -> SharpResults:
-    """Compute rank-based SHAP values via ShaRP.
+    """Compute rank-dependent SHAP values via ShaRP.
+
+    Uses the rank QoI so that attribution reflects each feature's contribution
+    to an item's ordinal position rather than its raw model score.
+
+    Runtime is O(n_rows × sample_size × n_features). Use ``n_groups`` in
+    ``run_shap_analysis`` to bound ``n_rows`` at the group level.
 
     Args:
         model: Trained XGBoost booster.
-        data: Data to explain.
+        data: Data to explain (must contain ``group_col``).
         feature_cols: Feature column names.
-        sample_size: Perturbation sample size.
-        random_state: Random seed.
-    
+        group_col: Column identifying ranking groups (used to build the scoring pool).
+        sample_size: Coalitions sampled per data point. Lower is faster but noisier.
+        random_state: Random seed passed to ShaRP.
+        verbose: Verbosity level passed to ShaRP (0 = silent, 1 = progress bar).
+
     Returns:
-        SharpResults with SHAP values and metadata.
+        SharpResults with SHAP values (n_samples × n_features) and metadata.
     """
+    def _predict(X: np.ndarray) -> np.ndarray:
+        return model.predict(xgb.DMatrix(X, feature_names=feature_cols))
+
     X = data[feature_cols].values
-
-    def predict(x: np.ndarray) -> np.ndarray:
-        return model.predict(xgb.DMatrix(x, feature_names=feature_cols))
-
     explainer = ShaRP(
         qoi='rank',
-        target_function=predict,
+        target_function=_predict,
         measure='shapley',
         sample_size=sample_size,
         replace=False,
         random_state=random_state,
-        n_jobs=1,
-        verbose=0,
+        verbose=verbose,
     )
     explainer.fit(X, feature_names=feature_cols)
     shap_values = explainer.all(X=X)
-
     return SharpResults(shap_values=shap_values, feature_names=feature_cols, feature_matrix=X)
 
 
@@ -146,24 +166,45 @@ def run_shap_analysis(
     model: xgb.Booster,
     data: pd.DataFrame,
     feature_cols: list[str],
+    group_col: str,
     output_dir: Path | None = None,
     top_k: int = 20,
-    sample_size: int | None = None,
+    sample_size: int = 20,
+    n_groups: int | None = None,
+    random_state: int = 42,
+    verbose: int = 1,
 ) -> dict:
-    """Compute SHAP values and save plots and summary.
+    """Compute rank-dependent SHAP values via ShaRP and save plots and summary.
 
     Args:
         model: Trained XGBoost booster.
-        data: Data to explain.
+        data: Data to explain (must contain ``group_col``).
         feature_cols: Feature column names.
+        group_col: Column identifying ranking groups; subsampling is performed
+            at group level to preserve ranking coupling.
         output_dir: Directory to save outputs.
-        top_k: Top features to include.
-        sample_size: ShaRP sample size.
+        top_k: Top features to include in plots.
+        sample_size: Coalitions sampled per data point by ShaRP.
+        n_groups: If set, subsample this many complete ranking groups before
+            computing SHAP. Group-level subsampling preserves rank coupling.
+        random_state: Random seed for group subsampling and ShaRP.
 
     Returns:
         Dict with 'shap_results' and 'summary'.
     """
-    shap_results = compute_shap_values(model=model, data=data, feature_cols=feature_cols, sample_size=sample_size)
+    if n_groups is not None and data[group_col].nunique() > n_groups:
+        data = _subsample_groups(data=data, group_col=group_col, n_groups=n_groups, random_state=random_state)
+        logger.info(f'SHAP: subsampled to {data[group_col].nunique()} groups ({len(data)} rows)')
+
+    shap_results = compute_shap_values(
+        model=model,
+        data=data,
+        feature_cols=feature_cols,
+        group_col=group_col,
+        sample_size=sample_size,
+        random_state=random_state,
+        verbose=verbose,
+    )
     summary = shap_importance_summary(shap_results=shap_results)
 
     if output_dir is not None:

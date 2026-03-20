@@ -66,12 +66,15 @@ BENCHMARKS: List[TabularDatasetOrchestrator] = [
         storage_dir=STORAGE_DIR,
         n_samples_range=(1000, 10000),
         n_features_range=(3, 8),
-        importance_concentration=0.4,   # sparse: 1–2 dominant axes
-        roughness=0.8,                  # smooth surfaces
-        interaction_density=0.1,        # few interactions
-        noise_std=0.02,
-        boundary_noise_weight=0.3,
-        inject_optimum_prob=0.9,
+        mean_total_variance=1.0,
+        mean_main_share=0.85,           # main effects dominate
+        main_variance_concentration=0.3,  # sparse: 1–2 dominant axes
+        pair_graph_density=0.1,           # few interactions
+        heteroscedastic_total_variance=0.2,
+        noise_mean_coupling_strength=0.3,
+        noise_min=0.005,
+        noise_max=0.5,
+        frontier_probability=0.1,
         base_seed=42,
     ),
     # Mid-complexity: moderate dimensionality, mixed modalities, pairwise
@@ -81,12 +84,15 @@ BENCHMARKS: List[TabularDatasetOrchestrator] = [
         storage_dir=STORAGE_DIR,
         n_samples_range=(1000, 10000),
         n_features_range=(5, 12),
-        importance_concentration=0.8,   # moderate: 3–5 relevant axes
-        roughness=1.5,                  # moderate complexity
-        interaction_density=0.33,       # pairwise interactions present
-        noise_std=0.05,
-        boundary_noise_weight=0.5,
-        inject_optimum_prob=0.8,
+        mean_total_variance=1.0,
+        mean_main_share=0.70,
+        main_variance_concentration=0.6,  # moderate: 3–5 relevant axes
+        pair_graph_density=0.25,
+        heteroscedastic_total_variance=0.4,
+        noise_mean_coupling_strength=0.4,
+        noise_min=0.01,
+        noise_max=1.0,
+        frontier_probability=0.3,
         base_seed=100,
     ),
     # High-dimensional: rough, noisy, many interactions, mixed modalities.
@@ -96,12 +102,15 @@ BENCHMARKS: List[TabularDatasetOrchestrator] = [
         storage_dir=STORAGE_DIR,
         n_samples_range=(2000, 20000),
         n_features_range=(8, 18),
-        importance_concentration=1.2,   # near-uniform: many relevant axes
-        roughness=2.5,                  # rough surfaces with local optima
-        interaction_density=0.5,        # many pairwise and three-way terms
-        noise_std=0.1,
-        boundary_noise_weight=0.8,
-        inject_optimum_prob=0.7,
+        mean_total_variance=1.5,
+        mean_main_share=0.55,
+        main_variance_concentration=1.0,  # near-uniform: many relevant axes
+        pair_graph_density=0.45,
+        heteroscedastic_total_variance=0.8,
+        noise_mean_coupling_strength=0.6,
+        noise_min=0.02,
+        noise_max=2.0,
+        frontier_probability=0.5,
         base_seed=200,
     ),
 ]

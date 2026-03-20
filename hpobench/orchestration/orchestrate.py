@@ -617,7 +617,7 @@ def run_learning_to_rank_analysis(
             analysis.compute_pdp(
                 output_dir=analysis_output_dir,
                 n_grid_points=pdp_n_grid_points,
-                show_std=pdp_show_std,
+                show_ci=pdp_show_std,
             )
 
         analysis.compute_downsampling(

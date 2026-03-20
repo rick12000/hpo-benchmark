@@ -18,42 +18,43 @@ def test_shap_computation(fitted_ltr_analysis, tmp_path):
     model = fitted_ltr_analysis.ltr_model.booster
     data = fitted_ltr_analysis.test_data
     feature_cols = fitted_ltr_analysis.feature_cols
-    sample_size_val = 10
-    
-    # Compute SHAP
-    shap_results = compute_shap_values(model=model, data=data, feature_cols=feature_cols, sample_size=sample_size_val)
+    group_col = fitted_ltr_analysis.schema.ranking_group_id_col
+
+    shap_results = compute_shap_values(
+        model=model, data=data, feature_cols=feature_cols,
+        group_col=group_col, sample_size=10,
+    )
     
     assert isinstance(shap_results, SharpResults)
     assert shap_results.shap_values.shape == (len(data), len(feature_cols))
     assert shap_results.feature_names == feature_cols
     
-    # Summary
     summary = shap_importance_summary(shap_results=shap_results)
     assert isinstance(summary, pd.DataFrame)
     assert 'feature' in summary.columns
     assert 'mean_abs_shap' in summary.columns
     assert len(summary) == len(feature_cols)
-    # Check sorting
     assert summary['mean_abs_shap'].is_monotonic_decreasing
     
-    # Plotting
     plot_shap_importance(shap_results=shap_results, output_path=tmp_path / 'importance.png')
     assert (tmp_path / 'importance.png').exists()
     
     plot_shap_beeswarm(shap_results=shap_results, output_path=tmp_path / 'beeswarm.png')
     assert (tmp_path / 'beeswarm.png').exists()
 
+
 def test_run_shap_analysis(fitted_ltr_analysis, tmp_path):
     """Test the high-level run_shap_analysis function."""
     model = fitted_ltr_analysis.ltr_model.booster
     data = fitted_ltr_analysis.test_data
     feature_cols = fitted_ltr_analysis.feature_cols
-    sample_size_val = 10
-    
+    group_col = fitted_ltr_analysis.schema.ranking_group_id_col
+
     results = run_shap_analysis(
-        model=model, data=data, feature_cols=feature_cols, 
-        output_dir=tmp_path, 
-        sample_size=sample_size_val
+        model=model, data=data, feature_cols=feature_cols,
+        group_col=group_col,
+        output_dir=tmp_path,
+        sample_size=10,
     )
     
     assert 'shap_results' in results

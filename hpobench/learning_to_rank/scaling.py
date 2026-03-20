@@ -95,7 +95,6 @@ def compute_downsampling_curve(
             ranking_group_id_col=schema.ranking_group_id_col,
             label_col=schema.label_col,
             tuner_col=schema.tuner_col,
-            ascending_scores=False,
         )
         checkpoint_rows.append({
             'sample_sizes': n_groups_at_checkpoint,

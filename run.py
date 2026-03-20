@@ -133,7 +133,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--parallel",
         action="store_true",
-        default=False,
+        default=True,
         help="Parallelize across experiment configs using ProcessPoolExecutor",
     )
     parser.add_argument(

@@ -132,7 +132,6 @@ def test_evaluate_rankings_computes_precision_and_ndcg(ltr_test_data):
         ranking_group_id_col='ranking_group',
         label_col='tuner',
         tuner_col='tuner',
-        ascending_scores=False,
     )
     
     assert 'precision@1' in metrics and 'precision@3' in metrics

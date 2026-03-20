@@ -304,14 +304,15 @@ class YahpoGenerator(ObjectiveMetricGenerator):
 
 
 class SyntheticGenerator(ObjectiveMetricGenerator):
-    """Generator for synthetic ANOVA-based performance landscape data.
-    
+    """Generator for synthetic HPO performance landscape data.
+
     Provides access to precomputed synthetic surrogate performance landscapes
-    (hyperparameter configurations and their performances), similar to YAHPO/lcbench.
-    The features represent hyperparameter configurations, and the targets represent 
-    performance values. No model is needed since the data is already precomputed.
+    (hyperparameter configurations and their mean-loss values), similar to
+    YAHPO/lcbench.  The features represent hyperparameter configurations; the
+    targets are the ``mean_loss`` column produced by the variance-budget
+    generator.  No model fitting is needed — lookup is by nearest neighbor.
     """
-    
+
     def __init__(
         self,
         generator: str,
@@ -322,78 +323,87 @@ class SyntheticGenerator(ObjectiveMetricGenerator):
         self.dataset = dataset
         self.storage_dir = Path(SyntheticGenerationParameters().storage_dir)
         self.random_state = random_state
-        
-        # Precomputed synthetic data: hyperparameter configs and their performance values
-        self.config_features = None  # Hyperparameter configurations
-        self.performance_targets = None  # Performance values
+
+        self.config_features = None
+        self.mean_loss = None        # 1-D array of mean_loss values
         self.dataset_metadata = None
         self._initialized = False
-    
+        self._cat_col_categories: dict = {}  # col_name -> list[str]
+
     def initialize(self) -> None:
-        """Load ANOVA-based synthetic surrogate data.
-        
-        Loads the precomputed synthetic dataset where:
-        - config_features = hyperparameter configurations
-        - performance_targets = performance values
-        """
+        """Load precomputed synthetic surrogate data."""
         if not self._initialized:
             storage = DatasetStorage(str(self.storage_dir))
             dataset_id = int(self.dataset)
-            
-            self.config_features, self.performance_targets, self.dataset_metadata = (
-                storage.load_dataset(dataset_id)
-            )
-            
+
+            features_df, targets_df, metadata = storage.load_dataset(dataset_id)
+
+            self.config_features = features_df
+            self.dataset_metadata = metadata
+
+            # Use mean_loss as the scalar performance target
+            if "mean_loss" in targets_df.columns:
+                self.mean_loss = targets_df["mean_loss"].to_numpy(dtype=np.float32)
+            else:
+                # Fallback: first target column (backwards compat with old schema)
+                self.mean_loss = targets_df.iloc[:, 0].to_numpy(dtype=np.float32)
+
+            # Record which columns are categorical (contain strings)
+            for col in features_df.columns:
+                if features_df[col].dtype == object:
+                    self._cat_col_categories[col] = features_df[col].unique().tolist()
+
             self._initialized = True
-        
+
     def predict(self, configuration: dict[str, Union[str, int, float, bool]]) -> float:
-        """Predict performance by nearest-neighbor lookup in synthetic data.
-        
-        Finds the closest hyperparameter configuration in the precomputed 
-        synthetic dataset and returns its performance value.
-        """
+        """Predict performance by nearest-neighbor lookup in synthetic data."""
         self.initialize()
-        
-        # Convert configuration to feature vector
+
         config_vec = self._config_to_vector(configuration)
-        
-        # Find nearest neighbor in synthetic data
-        config_matrix = self.config_features.values
-        perf_vector = self.performance_targets.values.ravel()
-        
-        # Calculate distances to all configurations
+        config_matrix = self._feature_matrix()
+
         distances = np.linalg.norm(config_matrix - config_vec, axis=1)
         nearest_idx = np.argmin(distances)
-        
-        return float(perf_vector[nearest_idx])
-    
+
+        return float(self.mean_loss[nearest_idx])
+
+    def _feature_matrix(self) -> np.ndarray:
+        """Return numeric matrix of all stored configurations."""
+        cols = []
+        for col in self.config_features.columns:
+            series = self.config_features[col]
+            if series.dtype == object:
+                cats = self._cat_col_categories.get(col, series.unique().tolist())
+                cat_map = {c: float(i) for i, c in enumerate(cats)}
+                cols.append(series.map(cat_map).fillna(0.0).to_numpy(dtype=np.float32))
+            else:
+                cols.append(series.to_numpy(dtype=np.float32))
+        return np.stack(cols, axis=1)
+
     def _config_to_vector(self, configuration: dict) -> np.ndarray:
-        """Convert configuration dict to feature vector for synthetic data lookup.
-        
-        Converts a hyperparameter configuration dictionary into a feature vector
-        aligned with the synthetic dataset's feature columns.
-        """
-        # Get feature names from synthetic dataset
+        """Convert configuration dict to numeric feature vector."""
         feature_names = self.config_features.columns.tolist()
-        
-        # Create vector in same order as features
+
         feature_vector = []
         for feature_name in feature_names:
             if feature_name in configuration:
                 val = configuration[feature_name]
-                if isinstance(val, (int, float)):
+                if isinstance(val, (int, float, bool)):
                     feature_vector.append(float(val))
                 else:
-                    # For categorical values, use hash for numeric representation
-                    try:
-                        feature_vector.append(float(val))
-                    except (ValueError, TypeError):
-                        feature_vector.append(float(hash(str(val)) % 1000))
+                    # Categorical: map to same integer code as in the stored data
+                    cats = self._cat_col_categories.get(feature_name, [])
+                    if val in cats:
+                        feature_vector.append(float(cats.index(val)))
+                    else:
+                        try:
+                            feature_vector.append(float(val))
+                        except (ValueError, TypeError):
+                            feature_vector.append(0.0)
             else:
-                # Feature not in config, use 0 as default
                 feature_vector.append(0.0)
-        
-        return np.array(feature_vector).reshape(1, -1)
+
+        return np.array(feature_vector, dtype=np.float32).reshape(1, -1)
     
     def predict_batch(self, configurations: list[dict]) -> list[float]:
         """Batch prediction using surrogate data lookup."""

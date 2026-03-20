@@ -12,11 +12,16 @@ def _compute_ranks(
     performance_col: str,
     label_col: str,
 ) -> pd.DataFrame:
-    """Compute within-group ranking labels based on performance."""
+    """Compute within-group ranking labels.
+
+    Rank 1 is assigned to the highest ``performance_col`` value (best performer).
+    Rank N is assigned to the lowest (worst). For benchmarks that store performance
+    as negated loss the most-negative value is therefore rank N.
+    """
     result = data.copy()
     result[label_col] = (
         result.groupby(rank_group_cols, group_keys=False)[performance_col]
-        .rank(method='average', ascending=True)
+        .rank(method='average', ascending=False)
     )
     return result
 

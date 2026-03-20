@@ -1,48 +1,30 @@
-"""Random ANOVA synthetic data generator for HPO benchmarking.
+"""Synthetic HPO surface generator following the variance-budget / ANOVA spec.
 
-Each generated dataset simulates a hyperparameter performance landscape:
-columns are hyperparameter axes, the target is a scalar performance metric.
+The generator produces surfaces of the form:
 
-Generative model
-----------------
-A performance function f(x) is constructed as a weighted sum of structured
-random components following the functional ANOVA decomposition:
+    μ(x) = μ₀ + Σⱼ fⱼ(xⱼ) + Σ_{(i,j)∈E} f_{ij}(xᵢ, xⱼ)
 
-    f(x) = μ + Σᵢ wᵢ·fᵢ(xᵢ)                    (main effects)
-             + Σᵢ<ⱼ wᵢⱼ·fᵢⱼ(xᵢ,xⱼ)              (pairwise interactions)
-             + Σᵢ<ⱼ<ₖ wᵢⱼₖ·fᵢⱼₖ(xᵢ,xⱼ,xₖ)       (three-way interactions)
-             + noise(x)
+    log σ²(x) = η₀ + Σⱼ hⱼ(xⱼ) + Σ_{(i,j)∈Ẽ} h_{ij}(xᵢ, xⱼ)
+                + deterministic coupling to mean-surface geometry
 
-Axis importances λᵢ ~ Dirichlet(α·1_d) with α ~ Uniform(0.3, 1.5) bias
-higher-order terms toward important axes, producing the low effective
-dimensionality observed in real HPO benchmarks.
+All effects are:
+  - centered under their marginal reference measure (spec §5)
+  - scaled to satisfy explicit variance budgets (spec §6)
 
-Component weights respect σ₁ > σ₂ > σ₃ so main effects dominate, consistent
-with functional ANOVA variance decompositions of real HPO landscapes.
+Construction order follows spec §16 exactly.
 
-An explicit optimum basin is injected into the surface with probability 0.8,
-ensuring the landscape has a well-defined exploitable minimum — a structural
-property present in all real HPO problems.
+The final dataset output preserves original search-space types:
+  - continuous columns remain floats in [lower, upper]
+  - integer columns remain integers
+  - categorical columns contain original string labels
 
-Heteroskedastic noise with variance scaling toward the boundary of the search
-space models the instability of extreme hyperparameter values.
-
-Design principles
------------------
-- Axes are constructed first; the search space is a first-class object
-  known at generation time, not inferred post-hoc.
-- Categorical axes use lookup tables — the only correct representation for
-  unordered discrete choices.
-- Continuous axes optionally operate on log-scale, modelling sensitivity
-  patterns of parameters like learning rate and weight decay.
-- Input samples are drawn from a Latin hypercube, mimicking designed HPO
-  experiments.
+Output columns: one per hyperparameter + ``mean_loss`` + ``noise_var``.
 """
 
 import random
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 import numpy as np
 from scipy.stats import qmc
@@ -54,6 +36,8 @@ from hpobench.generation.tabular.axis import (
 
 logger = logging.getLogger(__name__)
 
+_EPS = 1e-8
+
 
 # ---------------------------------------------------------------------------
 # Dataset container
@@ -61,225 +45,414 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class SyntheticDataset:
-    """A single synthetic regression dataset.
+    """A single synthetic HPO surrogate dataset.
 
-    X and y are the full (train + test) arrays.  The first ``train_size``
-    rows belong to the training split.  ``search_space`` maps each feature
-    column name to its range descriptor (FloatRange, IntRange, or
-    CategoricalRange) — constructed exactly from the axis definitions, not
-    inferred from the data.
+    ``X`` holds the full (train + test) feature matrix in original search-space
+    units (float32; categorical columns store integer codes that the orchestrator
+    maps back to string labels before writing to disk).
+
+    ``y`` is the mean_loss surface μ(x).  ``noise_var`` is σ²(x), the
+    input-dependent heteroscedastic noise variance.
+
+    The first ``train_size`` rows form the training split.
+    ``search_space`` maps each feature column name to its range descriptor.
     """
-    X: np.ndarray           # (n_samples, n_features)  float32
-    y: np.ndarray           # (n_samples,)              float32
+    X: np.ndarray               # (n_samples, n_features)  float32
+    y: np.ndarray               # (n_samples,)  mean_loss  float32
+    noise_var: np.ndarray       # (n_samples,)  noise variance  float32
     train_size: int
     search_space: Dict[str, Any] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
-# Basis functions
+# Reference-measure helpers  (spec §5)
 # ---------------------------------------------------------------------------
 
-def _random_fourier_features_1d(x: np.ndarray, n_freqs: int, freq_scale: float) -> np.ndarray:
-    """Random Fourier features for a 1-D input.
+def _reference_points_1d(ax: Axis, n_quad: int = 200) -> np.ndarray:
+    """Return reference points in model space used for centering integrals.
 
-    Returns a (len(x), 2*n_freqs) feature matrix whose row-mean is
-    approximately zero (centred by construction when frequencies are
-    symmetric around zero).
+    - Continuous: uniform grid over [-1, 1].
+    - Integer: exact lattice (all integer values in [lower, upper]).
+    - Categorical: one point per category (integer codes).
     """
-    frequencies = np.random.randn(n_freqs) * freq_scale
-    phases = np.random.uniform(0, 2 * np.pi, n_freqs)
-    x_col = x[:, None]  # (n, 1)
-    feats = np.concatenate([
-        np.cos(x_col * frequencies + phases),
-        np.sin(x_col * frequencies + phases),
-    ], axis=1)
-    return feats  # (n, 2*n_freqs)
+    if isinstance(ax, CategoricalAxis):
+        return np.arange(ax.num_categories, dtype=np.float64)
+    elif isinstance(ax, IntegerAxis):
+        return ax.lattice_z()
+    else:
+        return np.linspace(-1.0, 1.0, n_quad)
 
 
-def _main_effect_continuous(x: np.ndarray, roughness: float) -> np.ndarray:
-    """Random 1-D function via Random Fourier Features.
+# ---------------------------------------------------------------------------
+# Main-effect families (spec §8)
+# ---------------------------------------------------------------------------
 
-    ``roughness`` controls the frequency scale: higher values produce
-    faster-varying functions, lower values produce smoother ones.
+def _build_numeric_main_effect(
+    z_ref: np.ndarray,
+    z_eval: np.ndarray,
+    family: str,
+    target_var: float,
+) -> np.ndarray:
+    """Build a numeric main effect, center it on z_ref, scale to target_var.
+
+    The same random parameters are applied to both z_ref (for centering/scaling
+    calibration) and z_eval (the actual data points).  Returns the centered,
+    scaled effect evaluated at z_eval.
     """
-    n_freqs = random.randint(3, 8)
-    feats = _random_fourier_features_1d(x, n_freqs, freq_scale=roughness)
-    weights = np.random.randn(feats.shape[1])
-    out = feats @ weights
-    return (out - out.mean()).astype(np.float64)
+    z_all = np.concatenate([z_ref, z_eval])
+    n_ref = len(z_ref)
+
+    if family == "smooth_closed_form":
+        # Rich library of basis terms on z ∈ [-1, 1]  (spec §8.2)
+        terms = []
+        if random.random() < 0.8:
+            terms.append(np.random.randn() * z_all)
+        if random.random() < 0.5:
+            terms.append(np.random.randn() * z_all ** 2)
+        if random.random() < 0.3:
+            terms.append(np.random.randn() * z_all ** 3)
+        for _ in range(random.randint(0, 2)):
+            s = np.random.uniform(0.5, 4.0)
+            t = np.random.uniform(-1.5, 1.5)
+            terms.append(np.random.randn() * np.tanh(s * z_all + t))
+        for _ in range(random.randint(0, 2)):
+            c = np.random.uniform(-1.0, 1.0)
+            lam = np.random.uniform(1.0, 8.0)
+            terms.append(np.random.randn() * np.exp(-lam * (z_all - c) ** 2))
+        if random.random() < 0.3:
+            s = np.random.uniform(1.0, 5.0)
+            c = np.random.uniform(-0.8, 0.8)
+            terms.append(np.random.randn() * np.log1p(np.exp(s * (z_all - c))))
+        g_all = sum(terms) if terms else np.zeros_like(z_all)
+
+    elif family == "shallow_neural":
+        # Single-input shallow neural network  (spec §8.3)
+        H = random.randint(3, 10)
+        w = np.random.randn(H) * np.random.uniform(0.5, 3.0)
+        b = np.random.uniform(-1.5, 1.5, H)
+        a = np.random.randn(H)
+        hidden = np.tanh(z_all[:, None] * w[None, :] + b[None, :])
+        g_all = hidden @ a
+
+    else:  # piecewise_tree  (spec §8.4)
+        n_splits = random.randint(1, 4)
+        splits = np.sort(np.random.uniform(-0.9, 0.9, n_splits))
+        use_linear = random.random() < 0.5
+        g_all = np.zeros_like(z_all)
+        boundaries = np.concatenate([[-1.0], splits, [1.0]])
+        for k in range(len(boundaries) - 1):
+            lo, hi = boundaries[k], boundaries[k + 1]
+            mask = (z_all >= lo) & (z_all < hi)
+            if not mask.any():
+                continue
+            if use_linear:
+                slope = np.random.randn()
+                intercept = np.random.randn()
+                g_all[mask] = slope * z_all[mask] + intercept
+            else:
+                g_all[mask] = np.random.randn()
+        if random.random() < 0.3:
+            width = np.random.uniform(0.05, 0.2)
+            smooth = np.zeros_like(z_all)
+            for sp in splits:
+                gate = 1.0 / (1.0 + np.exp(-(z_all - sp) / width))
+                smooth += np.random.randn() * gate
+            g_all = 0.6 * g_all + 0.4 * smooth
+
+    g_ref = g_all[:n_ref]
+    g_eval = g_all[n_ref:]
+
+    # Center: subtract mean over reference measure  (spec §5.1)
+    mean_ref = float(g_ref.mean())
+    g_eval_ctr = g_eval - mean_ref
+
+    # Scale to target variance  (spec §8.2 final formula)
+    var_ref = float(np.var(g_ref - mean_ref)) + _EPS
+    scale = np.sqrt(target_var / var_ref)
+    return (g_eval_ctr * scale).astype(np.float64)
 
 
-def _main_effect_integer(x: np.ndarray) -> np.ndarray:
-    """Piecewise-linear spline over normalised integer values in [0, 1]."""
-    n_knots = min(random.randint(3, 8), len(np.unique(x)))
-    knot_vals = np.random.randn(n_knots)
-    knots = np.linspace(0.0, 1.0, n_knots)
-    out = np.interp(x, knots, knot_vals)
-    return (out - out.mean()).astype(np.float64)
-
-
-def _main_effect_categorical(x: np.ndarray, num_categories: int) -> np.ndarray:
-    """Lookup table: each category maps to an independent scalar."""
-    table = np.random.randn(num_categories)
-    out = table[x.astype(int)]
-    return (out - out.mean()).astype(np.float64)
-
-
-def _interaction_continuous_2d(
-    x1: np.ndarray, x2: np.ndarray, roughness: float
+def _build_categorical_main_effect(
+    ax: CategoricalAxis,
+    codes_eval: np.ndarray,
+    target_var: float,
 ) -> np.ndarray:
-    """Centred 2-D interaction via tensor product of Random Fourier Feature maps."""
-    n_freqs = random.randint(2, 5)
-    f1 = _random_fourier_features_1d(x1, n_freqs, roughness)
-    f2 = _random_fourier_features_1d(x2, n_freqs, roughness)
-    # Element-wise product of matching columns then reduce to scalar.
-    prod = (f1 * f2).sum(axis=1)
-    return (prod - prod.mean()).astype(np.float64)
+    """Centered lookup table for categorical main effect  (spec §8.5).
 
-
-def _interaction_cat_continuous(
-    cat: np.ndarray, cont: np.ndarray, num_categories: int, roughness: float
-) -> np.ndarray:
-    """Per-category 1-D function: each category gets its own random curve."""
-    out = np.zeros(len(cat), dtype=np.float64)
-    for c in range(num_categories):
-        mask = cat.astype(int) == c
-        if mask.sum() > 1:
-            fn = _main_effect_continuous(cont[mask], roughness)
-            out[mask] = fn
-    return (out - out.mean()).astype(np.float64)
-
-
-def _interaction_2d(
-    first_axis: Axis, first_axis_values: np.ndarray,
-    second_axis: Axis, second_axis_values: np.ndarray,
-    roughness: float,
-) -> np.ndarray:
-    """Dispatch to the correct 2-D interaction function."""
-    first_axis_is_categorical = isinstance(first_axis, CategoricalAxis)
-    second_axis_is_categorical = isinstance(second_axis, CategoricalAxis)
-
-    if not first_axis_is_categorical and not second_axis_is_categorical:
-        return _interaction_continuous_2d(first_axis_values, second_axis_values, roughness)
-    if first_axis_is_categorical and not second_axis_is_categorical:
-        return _interaction_cat_continuous(first_axis_values, second_axis_values, first_axis.num_categories, roughness)
-    if not first_axis_is_categorical and second_axis_is_categorical:
-        return _interaction_cat_continuous(second_axis_values, first_axis_values, second_axis.num_categories, roughness)
-    # Both categorical: independent lookup table over (first_axis_categories, second_axis_categories) pairs.
-    first_axis_num_categories, second_axis_num_categories = first_axis.num_categories, second_axis.num_categories
-    interaction_table = np.random.randn(first_axis_num_categories, second_axis_num_categories)
-    out = interaction_table[first_axis_values.astype(int), second_axis_values.astype(int)]
-    return (out - out.mean()).astype(np.float64)
-
-
-def _three_way_interaction(
-    ax_triple: List[Axis],
-    x_triple: List[np.ndarray],
-    roughness: float,
-) -> np.ndarray:
-    """Centred three-way interaction as a product of three 1-D RFF maps.
-
-    This is an approximation that captures the correct structure (all three
-    axes involved, zero marginal means) at low computational cost.
+    Raw category scores u(c) are sampled, centered (zero mean under uniform
+    reference), then scaled to variance target_var.
     """
-    maps = []
-    for ax, x in zip(ax_triple, x_triple):
-        if isinstance(ax, CategoricalAxis):
-            table = np.random.randn(ax.num_categories)
-            m = table[x.astype(int)]
+    K = ax.num_categories
+    u = np.random.randn(K)
+    u_ctr = u - u.mean()
+    var_u = float(np.var(u_ctr)) + _EPS
+    table = u_ctr * np.sqrt(target_var / var_u)
+    return table[codes_eval.astype(int)].astype(np.float64)
+
+
+# ---------------------------------------------------------------------------
+# Pairwise-effect class  (spec §9)
+# ---------------------------------------------------------------------------
+
+class _PairEffect:
+    """Encapsulates a raw pairwise function that is double-centered and variance-scaled.
+
+    Construction:
+      1. Sample family-specific parameters (_init_params).
+      2. Calibrate: estimate marginal means on reference grids, compute
+         centered variance, store scale factor (_calibrate).
+
+    Calling an instance applies the centering and scaling to new (zi, zj) points.
+    """
+
+    def __init__(
+        self,
+        ax_i: Axis,
+        ax_j: Axis,
+        zi_ref: np.ndarray,
+        zj_ref: np.ndarray,
+        family: str,
+        target_var: float,
+    ):
+        self.ax_i = ax_i
+        self.ax_j = ax_j
+        self.family = family
+        self.target_var = target_var
+        self._is_cat_i = isinstance(ax_i, CategoricalAxis)
+        self._is_cat_j = isinstance(ax_j, CategoricalAxis)
+        self._init_params()
+        self._calibrate(zi_ref, zj_ref)
+
+    # ------------------------------------------------------------------
+    # Parameter initialisation
+    # ------------------------------------------------------------------
+
+    def _init_params(self) -> None:
+        """Sample all random parameters for the chosen family once."""
+        if not self._is_cat_i and not self._is_cat_j:
+            self._init_numeric_pair()
+        elif self._is_cat_i ^ self._is_cat_j:
+            self._init_cat_numeric_pair()
         else:
-            n_freqs = random.randint(2, 4)
-            feats = _random_fourier_features_1d(x, n_freqs, roughness)
-            w = np.random.randn(feats.shape[1])
-            m = feats @ w
-        m = m - m.mean()
-        maps.append(m)
-    out = maps[0] * maps[1] * maps[2]
-    return (out - out.mean()).astype(np.float64)
+            self._init_cat_cat_pair()
 
+    def _init_numeric_pair(self) -> None:
+        fam = self.family
+        if fam == "structured_closed_form":
+            self._motif = random.choice(["mismatch", "sweet_spot", "tilted_valley", "interaction_ridge"])
+            self._lam1 = np.random.uniform(0.5, 4.0)
+            self._alpha = np.random.uniform(0.5, 2.0)
+            self._beta = np.random.uniform(-0.5, 0.5)
+            self._a = np.random.uniform(-2.0, 2.0)
+            self._b = np.random.uniform(-2.0, 2.0)
+            self._c_p = np.random.uniform(-1.0, 1.0)   # renamed to avoid shadowing built-in
+            self._d_p = np.random.uniform(-0.5, 0.5)
+            self._e_p = np.random.uniform(-0.5, 0.5)
+        elif fam == "shallow_neural_pair":
+            H = random.randint(3, 8)
+            self._w1 = np.random.randn(H) * np.random.uniform(0.5, 2.5)
+            self._w2 = np.random.randn(H) * np.random.uniform(0.5, 2.5)
+            self._b_h = np.random.uniform(-1.5, 1.5, H)
+            self._a_h = np.random.randn(H)
+        else:  # piecewise_tree_pair
+            self._splits_i = np.sort(np.random.uniform(-0.8, 0.8, random.randint(1, 3)))
+            self._splits_j = np.sort(np.random.uniform(-0.8, 0.8, random.randint(1, 3)))
+            n_leaves = (len(self._splits_i) + 1) * (len(self._splits_j) + 1)
+            self._leaf_vals = np.random.randn(n_leaves)
 
-# ---------------------------------------------------------------------------
-# Optimum injection
-# ---------------------------------------------------------------------------
+    def _init_cat_numeric_pair(self) -> None:
+        # Per-category shallow neural function  (spec §9.6)
+        K = self.ax_i.num_categories if self._is_cat_i else self.ax_j.num_categories
+        H = random.randint(3, 8)
+        self._cat_H = H
+        self._cat_w = np.random.randn(K, H) * np.random.uniform(0.5, 2.0, (K, H))
+        self._cat_b = np.random.uniform(-1.5, 1.5, (K, H))
+        self._cat_a = np.random.randn(K, H)
 
-def _inject_optimum(
-    f: np.ndarray,
-    X_model: np.ndarray,
-    importance: np.ndarray,
-    n_optima: int,
-    signal_std: float,
-) -> np.ndarray:
-    """Add Gaussian bump(s) to create well-defined basin(s) of attraction.
+    def _init_cat_cat_pair(self) -> None:
+        # Low-rank table  (spec §9.7)
+        Ki = self.ax_i.num_categories
+        Kj = self.ax_j.num_categories
+        r = min(3, Ki, Kj)
+        self._u_i = np.random.randn(Ki, r)
+        self._M = np.random.randn(r, r) * 0.5
+        self._u_j = np.random.randn(Kj, r)
 
-    The global optimum bump has amplitude drawn from LogUniform(1, 3) ×
-    signal_std, ensuring the peak is meaningfully above the background.
-    Additional (local) optima have amplitude 0.3–0.7 × global amplitude.
+    # ------------------------------------------------------------------
+    # Raw evaluation
+    # ------------------------------------------------------------------
 
-    Basin widths are sampled per-axis, inversely weighted by importance so
-    that important axes have narrower optima — consistent with real HPO
-    surfaces where the dominant hyperparameter has a sharp sensitivity.
-    """
-    n, d = X_model.shape
-
-    for k in range(n_optima):
-        # Centre of this optimum: random sample from observed X.
-        idx = random.randrange(n)
-        centre = X_model[idx]
-
-        if k == 0:
-            amplitude = float(np.exp(np.random.uniform(np.log(1.0), np.log(3.0)))) * signal_std
+    def _eval_raw(self, zi: np.ndarray, zj: np.ndarray) -> np.ndarray:
+        """Evaluate the raw (un-centered) pair function at (zi, zj)."""
+        if not self._is_cat_i and not self._is_cat_j:
+            return self._eval_numeric_pair(zi, zj)
+        elif self._is_cat_i ^ self._is_cat_j:
+            return self._eval_cat_numeric_pair(zi, zj)
         else:
-            amplitude = float(np.random.uniform(0.3, 0.7)) * amplitude  # noqa: F821  (always defined after k==0)
+            return self._eval_cat_cat_pair(zi, zj)
 
-        # Per-axis radii: important axes → narrower basins.
-        safe_importance = np.clip(importance, 1e-3, None)
-        radii = (1.0 / safe_importance) * np.random.uniform(0.05, 0.3, d)
-        radii = np.clip(radii, 0.01, 2.0)
+    def _eval_numeric_pair(self, zi: np.ndarray, zj: np.ndarray) -> np.ndarray:
+        fam = self.family
+        if fam == "structured_closed_form":
+            motif = self._motif
+            if motif == "mismatch":
+                out = np.exp(-self._lam1 * (zi - zj) ** 2)
+            elif motif == "sweet_spot":
+                out = np.exp(-self._lam1 * (zi - self._alpha * zj - self._beta) ** 2)
+            elif motif == "tilted_valley":
+                out = (np.tanh(self._a * zi + self._b * zj + self._c_p)
+                       * np.exp(-self._lam1 * (zi - self._d_p) ** 2
+                                - self._lam1 * 0.5 * (zj - self._e_p) ** 2))
+            else:  # interaction_ridge
+                out = np.exp(-self._lam1 * (self._a * zi + self._b * zj - self._c_p) ** 2)
+            return out.astype(np.float64)
 
-        # Normalise X to zero-mean unit-variance per axis for distance calc.
-        x_std = X_model.std(axis=0) + 1e-8
-        diff = (X_model - centre) / x_std
-        bump = amplitude * np.exp(-0.5 * np.sum((diff / radii) ** 2, axis=1))
-        f = f + bump
+        elif fam == "shallow_neural_pair":
+            act = np.tanh(
+                zi[:, None] * self._w1[None, :]
+                + zj[:, None] * self._w2[None, :]
+                + self._b_h[None, :]
+            )
+            return (act @ self._a_h).astype(np.float64)
 
-    return f
+        else:  # piecewise_tree_pair
+            out = np.zeros(len(zi))
+            bi = np.concatenate([[-1.0], self._splits_i, [1.0]])
+            bj = np.concatenate([[-1.0], self._splits_j, [1.0]])
+            leaf = 0
+            for ki in range(len(bi) - 1):
+                mask_i = (zi >= bi[ki]) & (zi < bi[ki + 1])
+                for kj in range(len(bj) - 1):
+                    mask = mask_i & (zj >= bj[kj]) & (zj < bj[kj + 1])
+                    out[mask] = self._leaf_vals[leaf]
+                    leaf += 1
+            return out.astype(np.float64)
+
+    def _eval_cat_numeric_pair(self, zi: np.ndarray, zj: np.ndarray) -> np.ndarray:
+        if self._is_cat_i:
+            codes, z_num = zi.astype(int), zj
+            K = self.ax_i.num_categories
+        else:
+            codes, z_num = zj.astype(int), zi
+            K = self.ax_j.num_categories
+
+        out = np.zeros(len(codes))
+        for c in range(K):
+            mask = codes == c
+            if not mask.any():
+                continue
+            z_c = z_num[mask]
+            hidden = np.tanh(z_c[:, None] * self._cat_w[c][None, :] + self._cat_b[c][None, :])
+            out[mask] = hidden @ self._cat_a[c]
+        return out.astype(np.float64)
+
+    def _eval_cat_cat_pair(self, zi: np.ndarray, zj: np.ndarray) -> np.ndarray:
+        ui = self._u_i[zi.astype(int)]   # (n, r)
+        uj = self._u_j[zj.astype(int)]   # (n, r)
+        return np.einsum("nr,rs,ns->n", ui, self._M, uj).astype(np.float64)
+
+    # ------------------------------------------------------------------
+    # Calibration: double-centering + scale  (spec §9.1)
+    # ------------------------------------------------------------------
+
+    def _calibrate(self, zi_ref: np.ndarray, zj_ref: np.ndarray) -> None:
+        """Estimate marginal means on reference grids; compute scale factor.
+
+        g_ctr(xi, xj) = g_raw(xi, xj) - mi(xi) - mj(xj) + m0
+
+        where:
+            m0      = E[g_raw(Xi, Xj)]
+            mi(xi)  = E_j[g_raw(xi, Xj)]
+            mj(xj)  = E_i[g_raw(Xi, xj)]
+        """
+        # Sub-sample reference grids for efficiency (max 200 points each)
+        zi_s = zi_ref[:200] if len(zi_ref) > 200 else zi_ref
+        zj_s = zj_ref[:200] if len(zj_ref) > 200 else zj_ref
+
+        # m0
+        g_diag = self._eval_raw(zi_s[:len(zj_s)], zj_s[:len(zi_s)])
+        self._m0 = float(g_diag.mean())
+
+        # mi(zi) = mean_j g_raw(zi, zj) for each zi in zi_s
+        self._mi_zi = zi_s.copy()
+        self._mi_vals = np.array([
+            float(self._eval_raw(np.full(len(zj_s), z), zj_s).mean())
+            for z in zi_s
+        ])
+
+        # mj(zj) = mean_i g_raw(zi, zj) for each zj in zj_s
+        self._mj_zj = zj_s.copy()
+        self._mj_vals = np.array([
+            float(self._eval_raw(zi_s, np.full(len(zi_s), z)).mean())
+            for z in zj_s
+        ])
+
+        # Compute centered variance on the reference diagonal
+        mi_diag = self._interp_marginal(zi_s[:len(zj_s)], self._mi_zi, self._mi_vals, self._is_cat_i)
+        mj_diag = self._interp_marginal(zj_s[:len(zi_s)], self._mj_zj, self._mj_vals, self._is_cat_j)
+        g_ctr_ref = g_diag - mi_diag - mj_diag + self._m0
+        var_ctr = float(np.var(g_ctr_ref)) + _EPS
+        self._scale = np.sqrt(self.target_var / var_ctr)
+
+    @staticmethod
+    def _interp_marginal(
+        z_query: np.ndarray,
+        z_known: np.ndarray,
+        vals_known: np.ndarray,
+        is_categorical: bool,
+    ) -> np.ndarray:
+        """Interpolate (or look up) marginal mean values at z_query."""
+        if is_categorical:
+            # For categoricals, z is an integer code — look up directly
+            result = np.zeros(len(z_query))
+            for idx, code in enumerate(z_query.astype(int)):
+                matches = z_known.astype(int) == code
+                if matches.any():
+                    result[idx] = float(vals_known[matches].mean())
+            return result
+        else:
+            sort_idx = np.argsort(z_known)
+            return np.interp(z_query, z_known[sort_idx], vals_known[sort_idx])
+
+    # ------------------------------------------------------------------
+    # Apply effect  (spec §9.1 final formula)
+    # ------------------------------------------------------------------
+
+    def __call__(self, zi: np.ndarray, zj: np.ndarray) -> np.ndarray:
+        """Return the double-centered, variance-scaled pair effect at (zi, zj)."""
+        g_raw = self._eval_raw(zi, zj)
+        mi = self._interp_marginal(zi, self._mi_zi, self._mi_vals, self._is_cat_i)
+        mj = self._interp_marginal(zj, self._mj_zj, self._mj_vals, self._is_cat_j)
+        g_ctr = g_raw - mi - mj + self._m0
+        return (g_ctr * self._scale).astype(np.float64)
 
 
 # ---------------------------------------------------------------------------
-# Heteroskedastic noise
+# Variance allocation helpers  (spec §6)
 # ---------------------------------------------------------------------------
 
-def _heteroskedastic_noise(
-    n: int,
-    X_raw: np.ndarray,
-    axes: List[Axis],
-    noise_std: float,
-    boundary_weight: float,
-) -> np.ndarray:
-    """Generate noise whose variance increases near the search space boundary.
+def _sparse_weights(d: int, concentration: float) -> np.ndarray:
+    """Sample positive weights summing to 1 via a Gamma-Dirichlet construction.
 
-    ``boundary_weight`` ∈ [0, 1] controls the degree of heteroskedasticity:
-    0 = homoskedastic, 1 = strongly boundary-concentrated noise.
+    concentration ≈ 0.3: one component dominates.
+    concentration ≈ 1.5: near-uniform allocation.
     """
-    # Compute a per-sample "boundary proximity" score ∈ [0, 1].
-    proximity_scores = np.zeros(n)
-    n_continuous = 0
-    for ax, col in zip(axes, X_raw.T):
-        if isinstance(ax, (ContinuousAxis, IntegerAxis)):
-            lo = col.min()
-            hi = col.max()
-            span = hi - lo + 1e-8
-            normalised = (col - lo) / span   # 0 = lo boundary, 1 = hi boundary
-            # Distance to nearest boundary: 0 at centre, 1 at boundary.
-            boundary_dist = 2 * np.abs(normalised - 0.5)
-            proximity_scores += boundary_dist
-            n_continuous += 1
+    alpha = np.full(d, max(concentration, 0.05))
+    u = np.random.gamma(alpha)
+    u = np.clip(u, 1e-10, None)
+    return u / u.sum()
 
-    if n_continuous > 0:
-        proximity_scores /= n_continuous
 
-    sigma = noise_std * (1.0 + boundary_weight * proximity_scores)
-    return (np.random.randn(n) * sigma).astype(np.float32)
+def _allocate_pair_variances(
+    active_edges: List[Tuple[int, int]],
+    pair_total_var: float,
+    concentration: float,
+) -> Dict[Tuple[int, int], float]:
+    """Allocate pair_total_var across active edges using a sparse prior."""
+    if not active_edges:
+        return {}
+    weights = _sparse_weights(len(active_edges), concentration)
+    return {edge: float(pair_total_var * w) for edge, w in zip(active_edges, weights)}
 
 
 # ---------------------------------------------------------------------------
@@ -287,11 +460,29 @@ def _heteroskedastic_noise(
 # ---------------------------------------------------------------------------
 
 class ANOVADataGenerator:
-    """Generate synthetic HPO surrogate datasets via Random ANOVA decomposition.
+    """Generate synthetic HPO surrogate datasets following the variance-budget spec.
 
     One instance defines a generation *regime*.  Each call to :meth:`generate`
-    draws a fresh dataset whose statistical properties are governed by the
-    regime parameters.
+    draws a fresh, fully deterministic surface (all randomness consumed during
+    construction; no stochastic noise at evaluation time).
+
+    Construction follows spec §16 order:
+      1  Sample axes (search space).
+      2  Build internal z representations.
+      3  Sample regime: core vs frontier.
+      4  Sample total mean variance; split into main / pair shares.
+      5  Allocate main-effect variances V_j.
+      6  Construct interaction graph E.
+      7  Allocate pairwise variances V_ij.
+      8  Build each main effect f_j (centered + scaled).
+      9  Build each pairwise effect f_ij (double-centered + scaled).
+     10  Assemble μ(x) = μ₀ + Σ f_j + Σ f_ij.
+     11  Build log-variance main effects h_j and pairwise effects h_ij.
+     12  Add deterministic coupling of variance field to mean geometry.
+     13  Assemble log σ²(x), exponentiate, clamp.
+     14  Sample raw configurations (LHS).
+     15  Evaluate μ and σ² at sampled configurations.
+     16  Write output dataset with original-schema columns.
 
     Parameters
     ----------
@@ -299,228 +490,326 @@ class ANOVADataGenerator:
         (lo, hi) — dataset size drawn uniformly per call.
     n_features_range:
         (lo, hi) — feature count drawn from Beta(2, 5) within this range.
-    importance_concentration:
-        α parameter for the Dirichlet prior on axis importances.
-        Lower values concentrate variance on fewer axes (sparser effective
-        dimensionality).  Range (0.3, 1.5): 0.3 = 1–2 dominant axes,
-        1.5 = near-uniform importance.
-    roughness:
-        Frequency scale for Random Fourier Feature basis functions.  Higher
-        values produce more complex, rapidly varying surfaces; lower values
-        give smoother landscapes.  Typical range: 0.5 (smooth) to 3.0 (rough).
-    interaction_density:
-        Controls the expected number of pairwise interaction terms as a
-        multiple of d.  E.g. 0.33 → Poisson(d/3) pairwise terms.
-        Range (0.1, 0.5).
-    noise_std:
-        Baseline standard deviation of observation noise.  The actual noise
-        is heteroskedastic; this is the value at the centre of the search space.
-    boundary_noise_weight:
-        Degree of heteroskedasticity: fraction of extra noise added at the
-        boundary of the search space relative to the centre.  0 = homoskedastic.
-    inject_optimum_prob:
-        Probability of injecting an explicit optimum basin.  Should be kept
-        high (≥ 0.7) to ensure the meta-learner sees surfaces with
-        exploitable structure.
+    mean_total_variance:
+        Target variance of the mean surface V_μ.
+    mean_main_share:
+        Fraction of V_μ allocated to main effects (π_main).
+    mean_pair_share:
+        Fraction allocated to pairwise interactions (π_pair = 1 − π_main).
+    main_variance_concentration:
+        Dirichlet concentration for per-axis variance allocation.
+        0.3 = very sparse (1–2 dominant axes); 1.5 = near-uniform.
+    pair_graph_density:
+        Expected fraction of candidate pairs included in the interaction graph.
+    pair_variance_concentration:
+        Concentration for pairwise variance allocation across active edges.
+    heteroscedastic_total_variance:
+        Variance budget V_σ for the log-variance field.
+    noise_mean_coupling_strength:
+        λ_slope: weight of the instability coupling term (spec §11.4).
+    noise_min:
+        Minimum per-sample noise standard deviation (clamp lower bound).
+    noise_max:
+        Maximum per-sample noise standard deviation (clamp upper bound).
+    frontier_probability:
+        Probability of sampling a frontier (harder, more complex) regime task.
     train_ratio:
-        Fraction of rows in the training split.
+        Fraction of samples assigned to the training split.
     """
 
     def __init__(
         self,
         n_samples_range: Tuple[int, int] = (500, 5000),
         n_features_range: Tuple[int, int] = (3, 15),
-        importance_concentration: float = 0.8,
-        roughness: float = 1.5,
-        interaction_density: float = 0.33,
-        noise_std: float = 0.05,
-        boundary_noise_weight: float = 0.5,
-        inject_optimum_prob: float = 0.8,
+        mean_total_variance: float = 1.0,
+        mean_main_share: float = 0.7,
+        mean_pair_share: float = 0.3,
+        main_variance_concentration: float = 0.6,
+        pair_graph_density: float = 0.25,
+        pair_variance_concentration: float = 0.8,
+        heteroscedastic_total_variance: float = 0.5,
+        noise_mean_coupling_strength: float = 0.4,
+        noise_min: float = 0.01,
+        noise_max: float = 1.5,
+        frontier_probability: float = 0.3,
         train_ratio: float = 0.8,
     ):
         self.n_samples_range = n_samples_range
         self.n_features_range = n_features_range
-        self.importance_concentration = importance_concentration
-        self.roughness = roughness
-        self.interaction_density = interaction_density
-        self.noise_std = noise_std
-        self.boundary_noise_weight = boundary_noise_weight
-        self.inject_optimum_prob = inject_optimum_prob
+        self.mean_total_variance = mean_total_variance
+        self.mean_main_share = mean_main_share
+        self.mean_pair_share = mean_pair_share
+        self.main_variance_concentration = main_variance_concentration
+        self.pair_graph_density = pair_graph_density
+        self.pair_variance_concentration = pair_variance_concentration
+        self.heteroscedastic_total_variance = heteroscedastic_total_variance
+        self.noise_mean_coupling_strength = noise_mean_coupling_strength
+        self.noise_min = noise_min
+        self.noise_max = noise_max
+        self.frontier_probability = frontier_probability
         self.train_ratio = train_ratio
+
+    # ------------------------------------------------------------------
+    # Public entry point
+    # ------------------------------------------------------------------
 
     def generate(self) -> SyntheticDataset:
         """Generate and return one synthetic HPO surrogate dataset."""
-        n = random.randint(*self.n_samples_range)
+
+        # Step 1: sample axes (search space)
         axes = sample_axes(self.n_features_range)
         d = len(axes)
+        n = random.randint(*self.n_samples_range)
 
-        # --- 1. Sample axis importances ---
-        # α ~ Uniform(0.3, 1.5) per dataset, then Dirichlet(α).
-        # Perturb the regime concentration slightly so each dataset has its
-        # own importance profile.
-        alpha_perturb = float(np.random.uniform(
-            max(0.3, self.importance_concentration * 0.6),
-            min(1.5, self.importance_concentration * 1.4),
+        # Step 3: sample regime
+        is_frontier = random.random() < self.frontier_probability
+        regime = self._regime_scale(is_frontier)
+
+        # Step 4: sample total mean variance and split
+        V_mu = self.mean_total_variance * regime["var_scale"]
+        main_share = float(np.clip(self.mean_main_share + np.random.normal(0, 0.05), 0.4, 0.95))
+        V_main = V_mu * main_share
+        V_pair = V_mu * (1.0 - main_share)
+
+        # Step 5: allocate main-effect variances V_j
+        conc = self.main_variance_concentration * regime["conc_scale"]
+        V_j = _sparse_weights(d, conc) * V_main
+
+        # Step 6: construct interaction graph
+        pair_density = float(np.clip(
+            self.pair_graph_density * regime["density_scale"] + np.random.normal(0, 0.05),
+            0.0, 1.0,
         ))
-        importance = np.random.dirichlet(np.full(d, alpha_perturb))  # (d,)
+        active_edges = self._sample_interaction_graph(d, pair_density)
 
-        # --- 2. Sample n points (Latin hypercube in model space) ---
-        X_raw = self._sample_inputs(axes, n)  # (n, d) float32, raw axis values
+        # Step 7: allocate pairwise variances V_ij
+        V_ij = _allocate_pair_variances(active_edges, V_pair, self.pair_variance_concentration)
 
-        # Map each axis to the space seen by basis functions.
-        X_model = np.stack(
+        # Step 14: sample raw configurations (LHS in original units)
+        X_raw = self._sample_inputs(axes, n)  # (n, d) float32
+
+        # Step 2: build internal z representations
+        Z = np.stack(
             [ax.to_model_space(X_raw[:, i]) for i, ax in enumerate(axes)],
             axis=1,
         )  # (n, d) float64
 
-        # --- 3. Build ANOVA surface ---
-        f = np.zeros(n, dtype=np.float64)
+        # Reference grids for centering / calibration
+        ref_grids = [_reference_points_1d(ax) for ax in axes]
 
-        # Regime roughness with per-dataset jitter.
-        roughness = float(np.exp(np.random.normal(np.log(self.roughness), 0.4)))
-        roughness = float(np.clip(roughness, 0.3, 6.0))
-
-        # Main effects (σ₁ = 1.0 baseline).
-        sigma1 = 1.0
-        for i, ax in enumerate(axes):
-            x = X_model[:, i]
+        # Step 8: build main effects
+        f_main = np.zeros(n, dtype=np.float64)
+        for j, ax in enumerate(axes):
+            v_j = float(V_j[j])
+            if v_j < _EPS:
+                continue
+            family = self._sample_main_family(ax, is_frontier)
             if isinstance(ax, CategoricalAxis):
-                component = _main_effect_categorical(x, ax.num_categories)
-            elif isinstance(ax, IntegerAxis):
-                component = _main_effect_integer(x)
+                f_j = _build_categorical_main_effect(ax, Z[:, j], v_j)
             else:
-                component = _main_effect_continuous(x, roughness)
+                f_j = _build_numeric_main_effect(ref_grids[j], Z[:, j], family, v_j)
+            f_main += f_j
 
-            w = float(np.random.normal(0.0, sigma1 * importance[i]))
-            f += w * component
-
-        # Pairwise interactions (σ₂ < σ₁).
-        sigma2 = 0.5
-        n_pairs = int(np.random.poisson(self.interaction_density * d))
-        n_pairs = min(n_pairs, d * (d - 1) // 2)
-        sampled_pairs = self._sample_pairs(d, importance, n_pairs)
-
-        for i, j in sampled_pairs:
-            component = _interaction_2d(
-                axes[i], X_model[:, i],
-                axes[j], X_model[:, j],
-                roughness,
+        # Step 9: build pairwise effects
+        f_pair = np.zeros(n, dtype=np.float64)
+        for (i, j), v_ij in V_ij.items():
+            if v_ij < _EPS:
+                continue
+            family = self._sample_pair_family(axes[i], axes[j], is_frontier)
+            pe = _PairEffect(
+                ax_i=axes[i],
+                ax_j=axes[j],
+                zi_ref=ref_grids[i],
+                zj_ref=ref_grids[j],
+                family=family,
+                target_var=v_ij,
             )
-            w = float(np.random.normal(0.0, sigma2 * np.sqrt(importance[i] * importance[j])))
-            f += w * component
+            f_pair += pe(Z[:, i], Z[:, j])
 
-        # Three-way interactions (σ₃ ≪ σ₂, very sparse).
-        if d >= 3:
-            sigma3 = 0.2
-            n_triples = int(np.random.poisson(d / 8.0))
-            n_triples = min(n_triples, d * (d - 1) * (d - 2) // 6)
-            sampled_triples = self._sample_triples(d, importance, n_triples)
+        # Step 10: assemble μ(x)
+        mu0 = np.random.normal(0.0, 0.1)
+        mu = mu0 + f_main + f_pair
 
-            for i, j, k in sampled_triples:
-                component = _three_way_interaction(
-                    [axes[i], axes[j], axes[k]],
-                    [X_model[:, i], X_model[:, j], X_model[:, k]],
-                    roughness,
-                )
-                w = float(np.random.normal(
-                    0.0, sigma3 * (importance[i] * importance[j] * importance[k]) ** (1.0 / 3.0)
-                ))
-                f += w * component
+        # Steps 11–13: heteroscedastic variance field
+        log_var = self._build_variance_field(axes, Z, ref_grids, active_edges, mu, regime, is_frontier)
+        sigma2 = np.clip(np.exp(log_var), self.noise_min ** 2, self.noise_max ** 2)
 
-        # --- 4. Inject optimum basin ---
-        if random.random() < self.inject_optimum_prob:
-            signal_std = float(np.std(f)) + 1e-8
-            n_optima = 1 if random.random() < 0.6 else random.randint(2, 3)
-            f = _inject_optimum(f, X_model, importance, n_optima, signal_std)
-
-        # --- 5. Heteroskedastic noise ---
-        noise = _heteroskedastic_noise(
-            n, X_raw, axes,
-            noise_std=self.noise_std,
-            boundary_weight=self.boundary_noise_weight,
-        )
-        f = f + noise.astype(np.float64)
-
-        # --- 6. Normalise target to zero mean, unit std ---
-        f_std = float(np.std(f))
-        if f_std > 1e-8:
-            f = (f - f.mean()) / f_std
-
-        y = np.nan_to_num(f, nan=0.0, posinf=3.0, neginf=-3.0).astype(np.float32)
+        # Step 16: assemble output in original-schema format
         X_out = np.nan_to_num(X_raw, nan=0.0).astype(np.float32)
+        mean_loss = np.nan_to_num(mu, nan=0.0, posinf=5.0, neginf=-5.0).astype(np.float32)
+        noise_var_out = np.nan_to_num(sigma2, nan=self.noise_min ** 2).astype(np.float32)
 
         train_size = max(1, min(int(n * self.train_ratio), n - 1))
         search_space = build_search_space(axes)
 
         return SyntheticDataset(
             X=X_out,
-            y=y,
+            y=mean_loss,
+            noise_var=noise_var_out,
             train_size=train_size,
             search_space=search_space,
         )
 
     # ------------------------------------------------------------------
-    # Input sampling
+    # Variance field  (spec §11)
+    # ------------------------------------------------------------------
+
+    def _build_variance_field(
+        self,
+        axes: List[Axis],
+        Z: np.ndarray,
+        ref_grids: List[np.ndarray],
+        active_edges: List[Tuple[int, int]],
+        mu: np.ndarray,
+        regime: dict,
+        is_frontier: bool,
+    ) -> np.ndarray:
+        """Build log σ²(x) = η₀ + Σ h_j + Σ h_ij + coupling  (spec §11)."""
+        d = len(axes)
+        n = len(mu)
+
+        # Variance budgets for the log-variance field
+        V_sigma = self.heteroscedastic_total_variance * regime["var_scale"] * 0.5
+        sigma_main_share = float(np.clip(0.7 + np.random.normal(0, 0.05), 0.5, 0.95))
+        V_sigma_main = V_sigma * sigma_main_share
+        V_sigma_pair = V_sigma * (1.0 - sigma_main_share)
+
+        V_hj = _sparse_weights(d, self.main_variance_concentration) * V_sigma_main
+
+        # Global offset η₀
+        log_var = np.full(n, np.random.normal(-1.0, 0.5), dtype=np.float64)
+
+        # Main log-variance effects h_j  (spec §11.2)
+        for j, ax in enumerate(axes):
+            v_hj = float(V_hj[j])
+            if v_hj < _EPS:
+                continue
+            family = self._sample_main_family(ax, is_frontier=False)
+            if isinstance(ax, CategoricalAxis):
+                h_j = _build_categorical_main_effect(ax, Z[:, j], v_hj)
+            else:
+                h_j = _build_numeric_main_effect(ref_grids[j], Z[:, j], family, v_hj)
+            log_var += h_j
+
+        # Pairwise log-variance effects h_ij on a random subset of active edges  (spec §11.3)
+        if active_edges and V_sigma_pair > _EPS:
+            n_var_pairs = max(1, int(len(active_edges) * 0.5))
+            var_edges = random.sample(active_edges, min(n_var_pairs, len(active_edges)))
+            V_hij = _allocate_pair_variances(var_edges, V_sigma_pair, self.pair_variance_concentration)
+            for (i, j), v_hij in V_hij.items():
+                if v_hij < _EPS:
+                    continue
+                family = self._sample_pair_family(axes[i], axes[j], is_frontier=False)
+                pe = _PairEffect(
+                    ax_i=axes[i],
+                    ax_j=axes[j],
+                    zi_ref=ref_grids[i],
+                    zj_ref=ref_grids[j],
+                    family=family,
+                    target_var=v_hij,
+                )
+                log_var += pe(Z[:, i], Z[:, j])
+
+        # Deterministic coupling to mean geometry  (spec §11.4)
+        coupling = self.noise_mean_coupling_strength * regime["var_scale"]
+        if coupling > _EPS and n > 1:
+            mu_std = float(np.std(mu)) + _EPS
+            instability = np.abs(mu - mu.mean()) / mu_std
+            instability = (instability - instability.mean()) / (float(instability.std()) + _EPS)
+            log_var += coupling * instability
+
+        return log_var
+
+    # ------------------------------------------------------------------
+    # Input sampling  (spec §13)
     # ------------------------------------------------------------------
 
     def _sample_inputs(self, axes: List[Axis], n: int) -> np.ndarray:
-        """Latin hypercube sample for continuous/integer axes; uniform for categorical."""
+        """Latin hypercube sample; returns float32 array in original search-space units."""
         d = len(axes)
-        # Generate LHS for all axes, then remap per type.
-        sampler = qmc.LatinHypercube(d=d)
-        unit_cube = sampler.random(n=n)  # (n, d) in [0, 1]
+        unit_cube = qmc.LatinHypercube(d=d).random(n=n)  # (n, d) ∈ [0, 1]
 
         cols = []
         for i, ax in enumerate(axes):
             u = unit_cube[:, i]
             if isinstance(ax, ContinuousAxis):
-                if ax.log_scale:
+                if ax.scale == "log":
                     lo, hi = np.log(ax.lower), np.log(ax.upper)
                     col = np.exp(lo + u * (hi - lo))
                 else:
                     col = ax.lower + u * (ax.upper - ax.lower)
             elif isinstance(ax, IntegerAxis):
                 col = np.floor(ax.lower + u * (ax.upper - ax.lower + 1)).clip(ax.lower, ax.upper)
-            else:
+            else:  # CategoricalAxis: integer codes
                 col = np.floor(u * ax.num_categories).clip(0, ax.num_categories - 1)
             cols.append(col.astype(np.float32))
 
         return np.stack(cols, axis=1)
 
     # ------------------------------------------------------------------
-    # Term selection helpers
+    # Interaction graph  (spec §7)
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _sample_pairs(
-        d: int, importance: np.ndarray, n_pairs: int
-    ) -> List[Tuple[int, int]]:
-        """Sample axis pairs biased toward high-importance axes."""
-        if d < 2 or n_pairs == 0:
-            return []
-        probs = importance ** 2
-        probs = probs / probs.sum()
-        pairs = set()
-        attempts = 0
-        while len(pairs) < n_pairs and attempts < n_pairs * 10:
-            i, j = np.random.choice(d, size=2, replace=False, p=probs)
-            pairs.add((min(i, j), max(i, j)))
-            attempts += 1
-        return list(pairs)
+    def _sample_interaction_graph(d: int, density: float) -> List[Tuple[int, int]]:
+        """Sample active pairs via independent Bernoulli(density) per candidate pair."""
+        return [
+            (i, j)
+            for i in range(d)
+            for j in range(i + 1, d)
+            if random.random() < density
+        ]
+
+    # ------------------------------------------------------------------
+    # Family selection  (spec §8.1, §9.2)
+    # ------------------------------------------------------------------
 
     @staticmethod
-    def _sample_triples(
-        d: int, importance: np.ndarray, n_triples: int
-    ) -> List[Tuple[int, int, int]]:
-        """Sample axis triples biased toward high-importance axes."""
-        if d < 3 or n_triples == 0:
-            return []
-        probs = importance ** 2
-        probs = probs / probs.sum()
-        triples = set()
-        attempts = 0
-        while len(triples) < n_triples and attempts < n_triples * 10:
-            idx = np.random.choice(d, size=3, replace=False, p=probs)
-            triples.add(tuple(sorted(idx.tolist())))
-            attempts += 1
-        return list(triples)
+    def _sample_main_family(ax: Axis, is_frontier: bool) -> str:
+        if isinstance(ax, CategoricalAxis):
+            return "centered_lookup"
+        if is_frontier:
+            return random.choices(
+                ["smooth_closed_form", "shallow_neural", "piecewise_tree"],
+                weights=[0.3, 0.4, 0.3],
+            )[0]
+        return random.choices(
+            ["smooth_closed_form", "shallow_neural", "piecewise_tree"],
+            weights=[0.5, 0.3, 0.2],
+        )[0]
+
+    @staticmethod
+    def _sample_pair_family(ax_i: Axis, ax_j: Axis, is_frontier: bool) -> str:
+        if isinstance(ax_i, CategoricalAxis) and isinstance(ax_j, CategoricalAxis):
+            return "low_rank_cat_table"
+        if isinstance(ax_i, CategoricalAxis) or isinstance(ax_j, CategoricalAxis):
+            return "cat_conditioned_numeric"
+        # Both numeric
+        if is_frontier:
+            return random.choices(
+                ["structured_closed_form", "shallow_neural_pair", "piecewise_tree_pair"],
+                weights=[0.3, 0.5, 0.2],
+            )[0]
+        return random.choices(
+            ["structured_closed_form", "shallow_neural_pair", "piecewise_tree_pair"],
+            weights=[0.5, 0.3, 0.2],
+        )[0]
+
+    # ------------------------------------------------------------------
+    # Regime scale factors  (spec §14)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _regime_scale(is_frontier: bool) -> dict:
+        """Return multiplicative scale factors for the frontier / core regime."""
+        if is_frontier:
+            return {
+                "var_scale": float(np.random.uniform(1.5, 3.0)),
+                "conc_scale": float(np.random.uniform(1.2, 2.0)),
+                "density_scale": float(np.random.uniform(1.5, 2.5)),
+            }
+        return {
+            "var_scale": float(np.random.uniform(0.7, 1.3)),
+            "conc_scale": float(np.random.uniform(0.5, 1.0)),
+            "density_scale": float(np.random.uniform(0.5, 1.0)),
+        }

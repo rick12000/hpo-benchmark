@@ -22,9 +22,14 @@ def _evaluate_rankings(
     ranking_group_id_col: str,
     label_col: str,
     tuner_col: str,
-    ascending_scores: bool = False,
 ) -> dict[str, float]:
-    """Compute precision@k and NDCG@k across all ranking groups."""
+    """Compute precision@k and NDCG@k across all ranking groups.
+
+    Convention: rank labels are 1-based positions where 1 = best performer.
+    Predicted scores follow the opposite direction: higher score = better tuner,
+    so predictions are sorted descending while ground-truth labels are sorted
+    ascending to recover the same best-first ordering.
+    """
     test_data = test_data.copy()
     test_data['predicted_score'] = predicted_scores
 
@@ -32,12 +37,13 @@ def _evaluate_rankings(
     ndcg_lists = {k: [] for k in k_values}
 
     for _, ranking_group in test_data.groupby(ranking_group_id_col):
-        true_sorted = ranking_group.sort_values(label_col, ascending=False)
-        pred_sorted = ranking_group.sort_values('predicted_score', ascending=ascending_scores)
+        true_sorted = ranking_group.sort_values(label_col, ascending=True)
+        pred_sorted = ranking_group.sort_values('predicted_score', ascending=False)
 
         true_ranking = true_sorted[tuner_col].tolist()
         pred_ranking = pred_sorted[tuner_col].tolist()
 
+        # Relevance is highest for rank-1 (best), used by NDCG.
         true_relevance = np.arange(len(true_sorted), 0, -1)
         relevance_map = dict(zip(true_sorted[tuner_col], true_relevance))
         pred_relevance = np.array([relevance_map[tuner_name] for tuner_name in pred_ranking])
@@ -46,12 +52,13 @@ def _evaluate_rankings(
             precision_lists[k].append(_precision_at_k(pred_ranking, true_ranking, k))
             ndcg_lists[k].append(ndcg_score([true_relevance], [pred_relevance], k=k))
 
-    ranking_metrics = {}
-    for k in k_values:
-        ranking_metrics[f'precision@{k}'] = float(np.mean(precision_lists[k]))
-        ranking_metrics[f'ndcg@{k}'] = float(np.mean(ndcg_lists[k]))
-    
-    return ranking_metrics
+    return {
+        f'precision@{k}': float(np.mean(precision_lists[k]))
+        for k in k_values
+    } | {
+        f'ndcg@{k}': float(np.mean(ndcg_lists[k]))
+        for k in k_values
+    }
 
 
 class Ranker(ABC):
@@ -101,15 +108,18 @@ class AverageRankRanker(Ranker):
         self.average_algorithm_ranks = train_data.groupby(tuner_col)[label_col].mean().to_dict()
 
     def predict(self, data: pd.DataFrame) -> np.ndarray:
-        """Return average rank scores for each tuner.
+        """Return scores for each tuner (higher = better, consistent with LTR convention).
+
+        Negates stored mean rank labels so the globally best tuner (mean rank ~1)
+        yields the highest score, matching the descending-sort evaluation convention.
         
         Args:
             data: Input data.
             
         Returns:
-            Array of predicted scores (average ranks) for each tuner.
+            Array of predicted scores for each tuner.
         """
-        return np.array([self.average_algorithm_ranks.get(t, float('inf')) for t in data[self._tuner_col]])
+        return -np.array([self.average_algorithm_ranks.get(t, float('inf')) for t in data[self._tuner_col]])
 
 
 class LTRModel(Ranker):
@@ -156,10 +166,16 @@ class LTRModel(Ranker):
             'seed': self.seed,
         }
 
+        group_sizes = train_sorted.groupby(group_col).size().values
+        # rank:ndcg treats higher label = more relevant; our labels are rank positions
+        # where 1 = best. Invert so the best tuner has the highest relevance score.
+        n_per_group = np.repeat(group_sizes, group_sizes)
+        xgb_relevance = n_per_group - train_sorted[label_col].values + 1
+
         dtrain = xgb.DMatrix(
             train_sorted[feature_cols],
-            label=train_sorted[label_col],
-            group=train_sorted.groupby(group_col).size().values,
+            label=xgb_relevance,
+            group=group_sizes,
         )
 
         self.booster = xgb.train(
@@ -235,7 +251,6 @@ class LTRModel(Ranker):
                 group_col,
                 label_col,
                 tuner_col,
-                ascending_scores=False,
             )
             score = metrics[tuning_config.tuning_metric]
 
